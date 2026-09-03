@@ -36,6 +36,9 @@ yarn-error.log*
 .vercel
 .porter
 
+# generated-tool artifacts (file-backed store — see src/lib/generation/store.ts)
+/.data/
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

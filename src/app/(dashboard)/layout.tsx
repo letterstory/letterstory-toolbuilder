@@ -1,5 +1,11 @@
 import type { ReactNode } from "react";
+import Link from "next/link";
 import { Separator } from "@/components/ui/separator";
+
+const NAV_LINKS = [
+	{ href: "/brand", label: "Brand ingestion" },
+	{ href: "/build", label: "Build a tool" },
+];
 
 export default function DashboardLayout({ children }: { children: ReactNode }) {
 	return (
@@ -12,12 +18,20 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
 						</div>
 						<div>
 							<p className="text-sm font-semibold tracking-tight text-brand-text">Toolbuilder</p>
-							<p className="text-xs text-muted-foreground">Brand ingestion workspace</p>
+							<p className="text-xs text-muted-foreground">Brand-aware micro-tool generation</p>
 						</div>
 					</div>
-					<p className="hidden text-sm text-muted-foreground md:block">
-						Firecrawl + Letterstory design system
-					</p>
+					<nav className="flex items-center gap-4">
+						{NAV_LINKS.map((link) => (
+							<Link
+								key={link.href}
+								href={link.href}
+								className="text-sm font-medium text-muted-foreground transition-colors hover:text-brand-text"
+							>
+								{link.label}
+							</Link>
+						))}
+					</nav>
 				</div>
 				<Separator />
 			</header>
