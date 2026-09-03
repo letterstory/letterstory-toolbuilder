@@ -1,9 +1,19 @@
 "use client";
 
 import type { FormEvent } from "react";
-import { useState } from "react";
-import { AlertCircle, Check, Copy, ExternalLink, LoaderCircle, Sparkles } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import {
+	AlertCircle,
+	Check,
+	Copy,
+	ExternalLink,
+	History,
+	LoaderCircle,
+	RefreshCw,
+	Sparkles,
+} from "lucide-react";
 import type { ToolGenerationResult } from "@/lib/generation";
+import type { GeneratedToolRecord } from "@/lib/generation/store";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -21,6 +31,10 @@ interface StatusMessage {
 	description: string;
 	tone: StatusTone;
 }
+
+// The recent-tools list only ever needs metadata to render cards and link to
+// /t/[id] — the API route omits the (potentially large) html body.
+type ToolSummary = Omit<GeneratedToolRecord, "html">;
 
 const INITIAL_STATUS: StatusMessage = {
 	title: "Ready to generate",
@@ -45,14 +59,36 @@ export function ToolBuilderWorkspace() {
 	const [siteUrl, setSiteUrl] = useState("");
 	const [prompt, setPrompt] = useState(EXAMPLE_PROMPTS[0]);
 	const [requestState, setRequestState] = useState<RequestState>("idle");
-	const [result, setResult] = useState<ToolGenerationResult | null>(null);
 	const [statusMessage, setStatusMessage] = useState<StatusMessage>(INITIAL_STATUS);
 	const [copied, setCopied] = useState(false);
 
-	const tool = result?.status === "success" ? result.tool : null;
-	const previewUrl = tool ? `/t/${tool.id}` : null;
-	const embedSnippet = tool
-		? `<iframe src="${typeof window !== "undefined" ? window.location.origin : ""}/t/${tool.id}" sandbox="${IFRAME_SANDBOX}" style="width:100%;min-height:520px;border:0" title="${tool.projectName}"></iframe>`
+	// The tool currently shown in the preview/embed panel — either a fresh
+	// generation or a previously generated one reopened from the recent list.
+	const [activeTool, setActiveTool] = useState<ToolSummary | null>(null);
+	const [recentTools, setRecentTools] = useState<ToolSummary[]>([]);
+	const [recentLoading, setRecentLoading] = useState(false);
+
+	const loadRecentTools = useCallback(async () => {
+		setRecentLoading(true);
+		try {
+			const response = await fetch("/api/tools");
+			const data = (await response.json()) as { status: string; tools?: ToolSummary[] };
+			setRecentTools(data.tools ?? []);
+		} catch {
+			// Non-critical — the list is a convenience, generation still works
+			// even if this fails, so we fail silently rather than block the form.
+		} finally {
+			setRecentLoading(false);
+		}
+	}, []);
+
+	useEffect(() => {
+		void loadRecentTools();
+	}, [loadRecentTools]);
+
+	const previewUrl = activeTool ? `/t/${activeTool.id}` : null;
+	const embedSnippet = activeTool
+		? `<iframe src="${typeof window !== "undefined" ? window.location.origin : ""}/t/${activeTool.id}" sandbox="${IFRAME_SANDBOX}" style="width:100%;min-height:520px;border:0" title="${activeTool.projectName}"></iframe>`
 		: "";
 
 	async function handleGenerate(event: FormEvent<HTMLFormElement>) {
@@ -74,15 +110,27 @@ export function ToolBuilderWorkspace() {
 				body: JSON.stringify({ projectName, siteUrl, prompt }),
 			});
 			const data = (await response.json()) as ToolGenerationResult;
-			setResult(data);
 			setStatusMessage(toStatusMessage(data));
+			if (data.status === "success") {
+				setActiveTool(data.tool);
+				void loadRecentTools();
+			}
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
-			setResult({ status: "error", message });
 			setStatusMessage({ title: "Generation failed", description: message, tone: "destructive" });
 		} finally {
 			setRequestState("idle");
 		}
+	}
+
+	function handleReopenRecent(item: ToolSummary) {
+		setActiveTool(item);
+		setCopied(false);
+		setStatusMessage({
+			title: "Reopened tool",
+			description: `Showing "${item.projectName}" from ${formatTimestamp(item.createdAt)}.`,
+			tone: "info",
+		});
 	}
 
 	async function handleCopyEmbed() {
@@ -169,7 +217,7 @@ export function ToolBuilderWorkspace() {
 				</form>
 			</Card>
 
-			{tool ? (
+			{activeTool ? (
 				<>
 					<Card>
 						<CardHeader>
@@ -179,10 +227,10 @@ export function ToolBuilderWorkspace() {
 						<CardContent>
 							<div className="overflow-hidden rounded-xl border bg-white">
 								<iframe
-									key={tool.id}
+									key={activeTool.id}
 									src={previewUrl ?? undefined}
 									sandbox={IFRAME_SANDBOX}
-									title={tool.projectName}
+									title={activeTool.projectName}
 									className="h-[520px] w-full"
 								/>
 							</div>
@@ -207,17 +255,19 @@ export function ToolBuilderWorkspace() {
 								{embedSnippet}
 							</pre>
 							<div className="flex items-center gap-2">
-								<Badge variant="secondary">{tool.model}</Badge>
-								{tool.siteUrl ? <Badge variant="secondary">{tool.siteUrl}</Badge> : null}
-								{tool.brandSnapshot?.brandName ? <Badge variant="secondary">{tool.brandSnapshot.brandName}</Badge> : null}
+								<Badge variant="secondary">{activeTool.model}</Badge>
+								{activeTool.siteUrl ? <Badge variant="secondary">{activeTool.siteUrl}</Badge> : null}
+								{activeTool.brandSnapshot?.brandName ? (
+									<Badge variant="secondary">{activeTool.brandSnapshot.brandName}</Badge>
+								) : null}
 							</div>
-							{tool.warnings.length ? (
+							{activeTool.warnings.length ? (
 								<Alert>
 									<AlertCircle className="size-4" />
 									<AlertTitle>Generation notes</AlertTitle>
 									<AlertDescription>
 										<ul className="list-disc space-y-1 pl-5">
-											{tool.warnings.map((warning) => (
+											{activeTool.warnings.map((warning) => (
 												<li key={warning}>{warning}</li>
 											))}
 										</ul>
@@ -235,6 +285,53 @@ export function ToolBuilderWorkspace() {
 					<Separator className="lg:col-span-2" />
 				</>
 			) : null}
+
+			<Card className="lg:col-span-2">
+				<CardHeader className="flex-row items-center justify-between space-y-0">
+					<div>
+						<CardTitle className="flex items-center gap-2">
+							<History className="size-4" />
+							Recent tools
+						</CardTitle>
+						<CardDescription>Reopen a previously generated tool to preview or re-embed it.</CardDescription>
+					</div>
+					<Button type="button" variant="ghost" size="sm" onClick={() => void loadRecentTools()} disabled={recentLoading}>
+						<RefreshCw className={recentLoading ? "size-4 animate-spin" : "size-4"} />
+						Refresh
+					</Button>
+				</CardHeader>
+				<CardContent>
+					{recentTools.length === 0 ? (
+						<p className="text-sm text-muted-foreground">
+							{recentLoading ? "Loading…" : "No tools generated yet — build your first one above."}
+						</p>
+					) : (
+						<ul className="divide-y rounded-lg border">
+							{recentTools.map((item) => (
+								<li key={item.id} className="flex items-center justify-between gap-4 px-4 py-3">
+									<div className="min-w-0">
+										<p className="truncate text-sm font-medium">{item.projectName}</p>
+										<p className="truncate text-xs text-muted-foreground">
+											{formatTimestamp(item.createdAt)}
+											{item.siteUrl ? ` · ${item.siteUrl}` : ""}
+										</p>
+									</div>
+									<div className="flex shrink-0 items-center gap-2">
+										<Button type="button" variant="outline" size="sm" onClick={() => handleReopenRecent(item)}>
+											Preview
+										</Button>
+										<Button asChild variant="ghost" size="sm">
+											<a href={`/t/${item.id}`} target="_blank" rel="noreferrer">
+												<ExternalLink className="size-4" />
+											</a>
+										</Button>
+									</div>
+								</li>
+							))}
+						</ul>
+					)}
+				</CardContent>
+			</Card>
 		</div>
 	);
 }
@@ -270,4 +367,17 @@ function toStatusMessage(result: ToolGenerationResult): StatusMessage {
 		return { title: "Generation not configured", description: result.message, tone: "warning" };
 	}
 	return { title: "Generation failed", description: result.message, tone: "destructive" };
+}
+
+function formatTimestamp(iso: string): string {
+	try {
+		return new Date(iso).toLocaleString(undefined, {
+			month: "short",
+			day: "numeric",
+			hour: "numeric",
+			minute: "2-digit",
+		});
+	} catch {
+		return iso;
+	}
 }

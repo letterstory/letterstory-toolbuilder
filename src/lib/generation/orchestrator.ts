@@ -17,7 +17,7 @@
 
 import { envServer } from "@/lib/config/env.server";
 import { isBrandIngestionConfigured, pullBrandProfile, type BrandProfile } from "@/lib/brand";
-import { looksLikeHtmlDocument, sanitizeGeneratedHtml } from "@/lib/generation/sanitize";
+import { looksLikeHtmlDocument, sanitizeGeneratedHtml, type SanitizedHtml } from "@/lib/generation/sanitize";
 import {
 	saveGeneratedTool,
 	type GeneratedToolBrandSnapshot,
@@ -46,6 +46,7 @@ export type ToolGenerationResult = ToolGenerationSuccessResult | ToolGenerationF
 const ANTHROPIC_TIMEOUT_MS = 120_000;
 const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-6";
 const MAX_TOKENS = 8_000;
+const MAX_GENERATION_ATTEMPTS = 2;
 
 interface AnthropicMessagesResponse {
 	content?: Array<{ type: string; text?: string }>;
@@ -71,25 +72,38 @@ export async function generateTool(request: ToolGenerationRequest): Promise<Tool
 	const { brandProfile, brandWarning } = await resolveBrandContext(normalizedSiteUrl);
 	const brandSnapshot = toBrandSnapshot(brandProfile);
 
-	let rawHtml: string;
-	try {
-		rawHtml = await requestToolHtml({
-			projectName: request.projectName,
-			prompt: request.prompt,
-			brandSnapshot,
-		});
-	} catch (error) {
-		return {
-			status: "error",
-			message: error instanceof Error ? error.message : String(error),
-		};
+	// A single bad or slow generation (truncated by max_tokens, the model
+	// wrapping the doc in prose, or a transient Anthropic timeout/5xx)
+	// shouldn't cost the customer a full manual retry — we get one automatic
+	// retry with a stronger instruction before surfacing an error.
+	let sanitized: SanitizedHtml | null = null;
+	let lastErrorMessage: string | null = null;
+	for (let attempt = 1; attempt <= MAX_GENERATION_ATTEMPTS; attempt += 1) {
+		let rawHtml: string;
+		try {
+			rawHtml = await requestToolHtml({
+				projectName: request.projectName,
+				prompt: request.prompt,
+				brandSnapshot,
+				isRetry: attempt > 1,
+			});
+		} catch (error) {
+			lastErrorMessage = error instanceof Error ? error.message : String(error);
+			continue;
+		}
+
+		const candidate = sanitizeGeneratedHtml(rawHtml);
+		if (looksLikeHtmlDocument(candidate.html)) {
+			sanitized = candidate;
+			break;
+		}
+		lastErrorMessage = "Generation returned an incomplete or invalid HTML document.";
 	}
 
-	const sanitized = sanitizeGeneratedHtml(rawHtml);
-	if (!looksLikeHtmlDocument(sanitized.html)) {
+	if (!sanitized) {
 		return {
 			status: "error",
-			message: "Generation did not return a usable HTML document. Try again or refine the prompt.",
+			message: lastErrorMessage ?? "Generation did not return a usable HTML document. Try again or refine the prompt.",
 		};
 	}
 
@@ -151,6 +165,7 @@ async function requestToolHtml(opts: {
 	projectName: string;
 	prompt: string;
 	brandSnapshot: GeneratedToolBrandSnapshot | null;
+	isRetry?: boolean;
 }): Promise<string> {
 	const apiKey = envServer.ANTHROPIC_API_KEY;
 	if (!apiKey) {
@@ -189,6 +204,12 @@ async function requestToolHtml(opts: {
 		brandContext,
 		...(opts.brandSnapshot?.logoDataUri
 			? [`Logo data URI: ${opts.brandSnapshot.logoDataUri}`]
+			: []),
+		...(opts.isRetry
+			? [
+					"",
+					"IMPORTANT: Your previous response was incomplete or was not a valid, complete HTML document. Return the ENTIRE self-contained document in one response, starting with <!doctype html> and ending with the literal closing tag </html>, with no truncation and no surrounding commentary.",
+				]
 			: []),
 	].join("\n");
 

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 const generateToolMock = vi.hoisted(() => vi.fn());
 const getGeneratedToolMock = vi.hoisted(() => vi.fn());
+const listGeneratedToolsMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/generation", () => ({
 	generateTool: generateToolMock,
@@ -9,9 +10,11 @@ vi.mock("@/lib/generation", () => ({
 
 vi.mock("@/lib/generation/store", () => ({
 	getGeneratedTool: getGeneratedToolMock,
+	listGeneratedTools: listGeneratedToolsMock,
 }));
 
 import { POST as generatePost } from "../../src/app/api/tools/generate/route";
+import { GET as toolsListGet } from "../../src/app/api/tools/route";
 import { GET as toolGet } from "../../src/app/t/[id]/route";
 
 describe("POST /api/tools/generate", () => {
@@ -105,5 +108,32 @@ describe("GET /t/[id]", () => {
 
 		expect(response.status).toBe(404);
 		await expect(response.text()).resolves.toContain("Tool not found");
+	});
+});
+
+describe("GET /api/tools", () => {
+	it("returns tool summaries without the html body", async () => {
+		listGeneratedToolsMock.mockResolvedValueOnce([
+			{
+				id: "abc",
+				projectName: "Calc",
+				prompt: "a calculator",
+				siteUrl: null,
+				brandSnapshot: null,
+				html: "<!doctype html>should not be exposed here</html>",
+				model: "claude-sonnet-4-6",
+				warnings: [],
+				createdAt: "2024-01-01T00:00:00.000Z",
+			},
+		]);
+
+		const response = await toolsListGet();
+		const body = (await response.json()) as { status: string; tools: Array<Record<string, unknown>> };
+
+		expect(response.status).toBe(200);
+		expect(body.status).toBe("success");
+		expect(body.tools).toHaveLength(1);
+		expect(body.tools[0]).not.toHaveProperty("html");
+		expect(body.tools[0]).toMatchObject({ id: "abc", projectName: "Calc" });
 	});
 });

@@ -66,13 +66,17 @@ describe("sanitizeGeneratedHtml", () => {
 });
 
 describe("looksLikeHtmlDocument", () => {
-	it("accepts documents starting with a doctype or <html>", () => {
+	it("accepts complete documents starting with a doctype or <html> and ending with </html>", () => {
 		expect(looksLikeHtmlDocument("<!doctype html><html></html>")).toBe(true);
-		expect(looksLikeHtmlDocument("  <HTML><body></body></html>")).toBe(true);
+		expect(looksLikeHtmlDocument("  <HTML><body></body></HTML>")).toBe(true);
 	});
 
 	it("rejects non-HTML output", () => {
 		expect(looksLikeHtmlDocument("Sorry, I can't help with that.")).toBe(false);
 		expect(looksLikeHtmlDocument("")).toBe(false);
+	});
+
+	it("rejects truncated documents missing a closing </html>", () => {
+		expect(looksLikeHtmlDocument("<!doctype html><html><body>cut off mid-sent")).toBe(false);
 	});
 });

@@ -148,9 +148,11 @@ describe("generateTool", () => {
 	});
 
 	it("returns an error result when Anthropic responds with a non-ok status", async () => {
-		global.fetch = vi.fn().mockResolvedValue(
-			new Response(JSON.stringify({ error: { message: "rate limited" } }), { status: 429 })
-		) as unknown as typeof fetch;
+		global.fetch = vi
+			.fn()
+			.mockImplementation(
+				async () => new Response(JSON.stringify({ error: { message: "rate limited" } }), { status: 429 })
+			) as unknown as typeof fetch;
 
 		const result = await generateTool({ projectName: "Calc", siteUrl: "", prompt: "a calculator" });
 
@@ -161,11 +163,77 @@ describe("generateTool", () => {
 		expect(saveGeneratedToolMock).not.toHaveBeenCalled();
 	});
 
+	it("retries once and succeeds when the first Anthropic call times out/errors", async () => {
+		const fetchMock = vi
+			.fn()
+			.mockRejectedValueOnce(new Error("The operation was aborted due to timeout"))
+			.mockResolvedValueOnce(
+				new Response(
+					JSON.stringify({
+						content: [{ type: "text", text: "<!doctype html><html><body>ok</body></html>" }],
+					}),
+					{ status: 200 }
+				)
+			);
+		global.fetch = fetchMock as unknown as typeof fetch;
+
+		const result = await generateTool({ projectName: "Calc", siteUrl: "", prompt: "a calculator" });
+
+		expect(fetchMock).toHaveBeenCalledTimes(2);
+		expect(result.status).toBe("success");
+	});
+
 	it("returns an error result when Anthropic returns no text content at all", async () => {
 		mockAnthropicSuccess("");
 
 		const result = await generateTool({ projectName: "Calc", siteUrl: "", prompt: "a calculator" });
 
+		expect(result.status).toBe("error");
+		expect(saveGeneratedToolMock).not.toHaveBeenCalled();
+	});
+
+	it("retries once and succeeds when the first attempt returns truncated HTML", async () => {
+		const fetchMock = vi
+			.fn()
+			.mockResolvedValueOnce(
+				new Response(
+					JSON.stringify({
+						content: [{ type: "text", text: "<!doctype html><html><body>truncated mid-" }],
+					}),
+					{ status: 200 }
+				)
+			)
+			.mockResolvedValueOnce(
+				new Response(
+					JSON.stringify({
+						content: [{ type: "text", text: "<!doctype html><html><body>complete</body></html>" }],
+					}),
+					{ status: 200 }
+				)
+			);
+		global.fetch = fetchMock as unknown as typeof fetch;
+
+		const result = await generateTool({ projectName: "Calc", siteUrl: "", prompt: "a calculator" });
+
+		expect(fetchMock).toHaveBeenCalledTimes(2);
+		expect(result.status).toBe("success");
+		if (result.status === "success") {
+			expect(result.tool.html).toContain("complete</body></html>");
+		}
+	});
+
+	it("gives up and returns an error after the retry also produces invalid HTML", async () => {
+		const fetchMock = vi.fn().mockImplementation(
+			async () =>
+				new Response(JSON.stringify({ content: [{ type: "text", text: "Sorry, I can't help with that." }] }), {
+					status: 200,
+				})
+		);
+		global.fetch = fetchMock as unknown as typeof fetch;
+
+		const result = await generateTool({ projectName: "Calc", siteUrl: "", prompt: "a calculator" });
+
+		expect(fetchMock).toHaveBeenCalledTimes(2);
 		expect(result.status).toBe("error");
 		expect(saveGeneratedToolMock).not.toHaveBeenCalled();
 	});

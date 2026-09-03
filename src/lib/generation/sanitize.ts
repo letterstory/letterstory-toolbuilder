@@ -51,7 +51,13 @@ export function sanitizeGeneratedHtml(rawHtml: string): SanitizedHtml {
 
 export function looksLikeHtmlDocument(html: string): boolean {
 	const trimmed = html.trim().toLowerCase();
-	return trimmed.startsWith("<!doctype html") || trimmed.startsWith("<html");
+	const hasOpeningHtml = trimmed.startsWith("<!doctype html") || trimmed.startsWith("<html");
+	// Also require a closing </html> so truncated generations (e.g. cut off by
+	// max_tokens mid-document) are caught. sanitizeGeneratedHtml() always
+	// prepends a doctype to whatever it's given, so checking the opening tag
+	// alone would make this check pass unconditionally after sanitization.
+	const hasClosingHtml = trimmed.endsWith("</html>");
+	return hasOpeningHtml && hasClosingHtml;
 }
 
 function stripMarkdownFences(text: string): string {
