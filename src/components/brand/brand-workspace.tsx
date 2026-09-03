@@ -57,6 +57,7 @@ export function BrandWorkspace() {
 	const [requestState, setRequestState] = useState<RequestState>("idle");
 	const [ingestionResult, setIngestionResult] = useState<BrandIngestionResult | null>(null);
 	const [validationResult, setValidationResult] = useState<BrandFidelityValidationResult | null>(null);
+	const [fixesApplied, setFixesApplied] = useState(false);
 	const [statusMessage, setStatusMessage] = useState<StatusMessage>({
 		title: "Ready to ingest",
 		description: "Enter a marketing site URL to extract real brand tokens and inspect the output before generation.",
@@ -70,6 +71,7 @@ export function BrandWorkspace() {
 		event.preventDefault();
 		setRequestState("loading");
 		setValidationResult(null);
+		setFixesApplied(false);
 		setStatusMessage({
 			title: "Running Firecrawl ingestion",
 			description: "Pulling the site, normalizing the profile, and preparing the dashboard.",
@@ -104,6 +106,7 @@ export function BrandWorkspace() {
 	async function handleValidate() {
 		if (!profile) return;
 		setRequestState("submitting-validation");
+		setFixesApplied(false);
 		setStatusMessage({
 			title: "Running brand fidelity validation",
 			description: "Cross-checking the extracted profile against a fresh site screenshot and Claude assessment.",
@@ -134,6 +137,22 @@ export function BrandWorkspace() {
 		} finally {
 			setRequestState("idle");
 		}
+	}
+
+	function handleApplyFixes() {
+		if (!validationResult || validationResult.status !== "success") return;
+		setIngestionResult({
+			status: "success",
+			requestedUrl: siteUrl,
+			profile: validationResult.enrichedProfile,
+		});
+		setFixesApplied(true);
+		setStatusMessage({
+			title: "Applied fidelity fixes to profile",
+			description:
+				"Merged the validation's corrected typography hierarchy, spacing rhythm, imagery style, tone of voice, and descriptors into the brand profile. Overview and Raw profile now reflect the update.",
+			tone: "success",
+		});
 	}
 
 	return (
@@ -213,6 +232,8 @@ export function BrandWorkspace() {
 							onValidate={handleValidate}
 							isValidating={requestState === "submitting-validation"}
 							disabled={requestState !== "idle"}
+							onApplyFixes={handleApplyFixes}
+							fixesApplied={fixesApplied}
 						/>
 					</TabsContent>
 					<TabsContent value="raw">
@@ -334,6 +355,16 @@ function BrandOverview({ profile }: { profile: BrandProfile }) {
 										))}
 									</div>
 								) : null}
+								{profile.personality.notableSignals.length ? (
+									<div className="space-y-2">
+										<p className="text-sm font-medium">Notable signals</p>
+										<ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground">
+											{profile.personality.notableSignals.map((signal) => (
+												<li key={signal}>{signal}</li>
+											))}
+										</ul>
+									</div>
+								) : null}
 							</div>
 						</SectionCard>
 
@@ -446,11 +477,15 @@ function BrandValidationPanel({
 	onValidate,
 	isValidating,
 	disabled,
+	onApplyFixes,
+	fixesApplied,
 }: {
 	validationResult: BrandFidelityValidationResult | null;
 	onValidate: () => void;
 	isValidating: boolean;
 	disabled: boolean;
+	onApplyFixes: () => void;
+	fixesApplied: boolean;
 }) {
 	if (!validationResult) {
 		return (
@@ -511,6 +546,18 @@ function BrandValidationPanel({
 							{isValidating ? <LoaderCircle className="animate-spin" /> : <Sparkles />}
 							Re-run validation
 						</Button>
+						{assessment.gaps.length ? (
+							<Button
+								type="button"
+								size="sm"
+								onClick={onApplyFixes}
+								disabled={disabled || fixesApplied}
+								title="Merge the validation's corrected hierarchy, spacing rhythm, imagery style, tone, and descriptors into the brand profile."
+							>
+								{fixesApplied ? <ShieldCheck /> : <BadgeCheck />}
+								{fixesApplied ? "Fixes applied" : `Apply fixes (${assessment.gaps.length})`}
+							</Button>
+						) : null}
 					</div>
 				</div>
 			</CardHeader>

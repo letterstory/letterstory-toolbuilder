@@ -71,6 +71,7 @@ export interface BrandPersonalityProfile {
 	energy: BrandToneEnergy | null;
 	targetAudience: string | null;
 	descriptors: string[];
+	notableSignals: string[];
 }
 
 export interface BrandDesignSystemProfile {
@@ -580,8 +581,12 @@ function normalizeAssessment(value: unknown): BrandFidelityAssessment {
 }
 
 function mergeFidelitySignals(profile: BrandProfile, assessment: BrandFidelityAssessment): BrandProfile {
-	const personalityDescriptors = dedupeStrings([
-		...profile.personality.descriptors,
+	// Distinctive traits from validation are often full-sentence descriptions
+	// (e.g. "Multicolor purple-pink-orange gradient wave as hero signature").
+	// Keep them out of `descriptors` (rendered as compact badge pills) and
+	// route them to `notableSignals` (rendered as a wrapped list) instead.
+	const notableSignals = dedupeStrings([
+		...profile.personality.notableSignals,
 		...assessment.derivedSignals.distinctiveTraits,
 	]);
 	const designNotes = dedupeStrings([
@@ -617,7 +622,7 @@ function mergeFidelitySignals(profile: BrandProfile, assessment: BrandFidelityAs
 		personality: {
 			...profile.personality,
 			toneOfVoice: assessment.derivedSignals.toneOfVoice ?? profile.personality.toneOfVoice,
-			descriptors: personalityDescriptors,
+			notableSignals,
 		},
 		designSystem: {
 			...profile.designSystem,
@@ -828,6 +833,7 @@ export function parseFirecrawlBranding(
 			energy: normalizeToneEnergy(rawPersonality.energy),
 			targetAudience: readString(rawPersonality.targetAudience),
 			descriptors,
+			notableSignals: [],
 		},
 		designSystem: {
 			framework: designSystemFramework,
