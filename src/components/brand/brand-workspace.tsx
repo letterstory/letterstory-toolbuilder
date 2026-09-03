@@ -262,8 +262,8 @@ function BrandOverview({ profile }: { profile: BrandProfile }) {
 						</div>
 					</div>
 				</CardHeader>
-				<CardContent className="grid gap-6 lg:grid-cols-[1.3fr_0.9fr]">
-					<div className="grid gap-6 md:grid-cols-2">
+				<CardContent className="grid min-w-0 gap-6 lg:grid-cols-[1.3fr_0.9fr]">
+					<div className="grid min-w-0 gap-6 md:grid-cols-2">
 						<SectionCard
 							icon={Palette}
 							title="Palette"
@@ -355,7 +355,7 @@ function BrandOverview({ profile }: { profile: BrandProfile }) {
 						</SectionCard>
 					</div>
 
-					<div className="space-y-6">
+					<div className="min-w-0 space-y-6">
 						<SectionCard
 							icon={ImageIcon}
 							title="Imagery & logo"
@@ -410,10 +410,18 @@ function BrandOverview({ profile }: { profile: BrandProfile }) {
 								<div>
 									<p className="mb-2 text-sm font-medium">Additional logo candidates</p>
 									{profile.logoUrls.length ? (
-										<ul className="space-y-2 break-all text-xs text-muted-foreground">
-											{profile.logoUrls.map((url) => (
-												<li key={url}>{url}</li>
-											))}
+										<ul className="min-w-0 space-y-2 text-xs text-muted-foreground">
+											{profile.logoUrls.map((url) => {
+												const isDataUri = url.startsWith("data:");
+												const display = isDataUri || url.length > MAX_INLINE_VALUE_LENGTH
+													? `${url.slice(0, MAX_INLINE_VALUE_LENGTH)}…`
+													: url;
+												return (
+													<li key={url} className="min-w-0 [overflow-wrap:anywhere]" title={display === url ? undefined : url}>
+														{display}
+													</li>
+												);
+											})}
 										</ul>
 									) : (
 										<EmptyCopy>No alternate logo candidates returned.</EmptyCopy>
@@ -477,7 +485,7 @@ function BrandValidationPanel({ validationResult }: { validationResult: BrandFid
 					</Badge>
 				</div>
 			</CardHeader>
-			<CardContent className="grid gap-6 lg:grid-cols-[0.95fr_1.05fr]">
+			<CardContent className="grid min-w-0 gap-6 lg:grid-cols-[0.95fr_1.05fr]">
 				<div className="space-y-4">
 					<Definition label="Model" value={validationResult.model} />
 					<Definition label="Screenshot URL" value={validationResult.screenshotUrl} />
@@ -539,11 +547,27 @@ function BrandValidationPanel({ validationResult }: { validationResult: BrandFid
 	);
 }
 
+const MAX_INLINE_VALUE_LENGTH = 120;
+
 function Definition({ label, value }: { label: string; value: string }) {
+	const isDataUri = value.startsWith("data:");
+	const displayValue =
+		isDataUri || value.length > MAX_INLINE_VALUE_LENGTH
+			? `${value.slice(0, MAX_INLINE_VALUE_LENGTH)}…`
+			: value;
+
 	return (
-		<div className="space-y-1">
+		<div className="min-w-0 space-y-1">
 			<p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">{label}</p>
-			<p className="break-words text-sm text-foreground">{value}</p>
+			<p
+				className="min-w-0 text-sm text-foreground [overflow-wrap:anywhere]"
+				title={displayValue === value ? undefined : value}
+			>
+				{displayValue}
+				{isDataUri ? (
+					<span className="ml-1 text-xs text-muted-foreground">(inline data URI, truncated)</span>
+				) : null}
+			</p>
 		</div>
 	);
 }
