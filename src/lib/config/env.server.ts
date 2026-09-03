@@ -1,4 +1,10 @@
 export const envServer = {
+	get ANTHROPIC_API_KEY() {
+		return process.env.ANTHROPIC_API_KEY?.trim() ?? "";
+	},
+	get ANTHROPIC_MODEL() {
+		return process.env.ANTHROPIC_MODEL?.trim() || "claude-sonnet-4-6";
+	},
 	get FIRECRAWL_API_KEY() {
 		return process.env.FIRECRAWL_API_KEY?.trim() ?? "";
 	},

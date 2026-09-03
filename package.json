@@ -11,7 +11,8 @@
     "test": "vitest run",
     "brand:probe": "node --env-file=.env.local --import tsx scripts/test-brand-ingestion.ts",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "brand:validate": "node --env-file=.env.local --import tsx scripts/test-brand-validation.ts"
   },
   "dependencies": {
     "next": "^15.5.18",
