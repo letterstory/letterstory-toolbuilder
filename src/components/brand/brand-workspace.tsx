@@ -328,6 +328,7 @@ function BrandOverview({ profile }: { profile: BrandProfile }) {
 	const colorEntries = Object.entries(profile.colors);
 	const hasLogo = Boolean(profile.images.logo.url || profile.primaryLogoUrl);
 	const logoUrl = profile.images.logo.url ?? profile.primaryLogoUrl;
+	const canonicalLogoUri = profile.images.logo.canonicalDataUri;
 
 	return (
 		<>
@@ -461,25 +462,59 @@ function BrandOverview({ profile }: { profile: BrandProfile }) {
 							description="Preview the actual asset Firecrawl selected, plus other linked image metadata."
 						>
 							<div className="space-y-4">
-								<div className="flex min-h-52 items-center justify-center rounded-xl border bg-muted/40 p-6">
-									{hasLogo && logoUrl ? (
-										// eslint-disable-next-line @next/next/no-img-element
-										<img
-											src={logoUrl}
-											alt={profile.images.logo.alt ?? `${profile.brandName ?? profile.url} logo`}
-											className="max-h-28 max-w-full object-contain"
-										/>
-									) : (
-										<EmptyCopy>No logo preview returned.</EmptyCopy>
-									)}
+								<div className="grid gap-3 sm:grid-cols-2">
+									<div className="space-y-2">
+										<p className="text-xs font-medium text-muted-foreground">Raw Firecrawl selection</p>
+										<div className="flex min-h-40 items-center justify-center rounded-xl border bg-muted/40 p-6">
+											{hasLogo && logoUrl ? (
+												// eslint-disable-next-line @next/next/no-img-element
+												<img
+													src={logoUrl}
+													alt={profile.images.logo.alt ?? `${profile.brandName ?? profile.url} logo`}
+													className="max-h-28 max-w-full object-contain"
+												/>
+											) : (
+												<EmptyCopy>No logo preview returned.</EmptyCopy>
+											)}
+										</div>
+									</div>
+									<div className="space-y-2">
+										<p className="text-xs font-medium text-muted-foreground">Canonical (normalized) logo</p>
+										<div className="flex min-h-40 items-center justify-center rounded-xl border bg-muted/40 p-6">
+											{canonicalLogoUri ? (
+												// eslint-disable-next-line @next/next/no-img-element
+												<img
+													src={canonicalLogoUri}
+													alt={`${profile.brandName ?? profile.url} canonical logo`}
+													className="max-h-28 max-w-full object-contain"
+												/>
+											) : (
+												<EmptyCopy>No canonical logo resolved yet.</EmptyCopy>
+											)}
+										</div>
+									</div>
 								</div>
 								<div className="space-y-3 text-sm">
 									<Definition label="Primary logo URL" value={profile.primaryLogoUrl ?? "—"} />
 									<Definition label="Logo kind" value={profile.images.logo.kind ?? "—"} />
+									<Definition label="Canonical logo source" value={profile.images.logo.canonicalSourceUrl ?? "—"} />
 									<Definition label="Imagery style" value={profile.images.imageryStyle ?? "—"} />
 									<Definition label="Favicon" value={profile.images.faviconUrl ?? "—"} />
 									<Definition label="OG image" value={profile.images.ogImageUrl ?? "—"} />
 								</div>
+								{profile.images.logo.canonicalWarnings.length ? (
+									<Alert>
+										<AlertCircle className="size-4" />
+										<AlertTitle>Canonical logo notes</AlertTitle>
+										<AlertDescription>
+											<ul className="list-disc space-y-1 pl-5">
+												{profile.images.logo.canonicalWarnings.map((warning) => (
+													<li key={warning}>{warning}</li>
+												))}
+											</ul>
+										</AlertDescription>
+									</Alert>
+								) : null}
 								{profile.images.notes.length ? (
 									<Alert>
 										<AlertCircle className="size-4" />

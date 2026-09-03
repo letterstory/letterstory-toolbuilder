@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import sharp from "sharp";
 
 const isSafeHttpsUrlMock = vi.hoisted(() => vi.fn());
 
@@ -284,6 +285,53 @@ describe("brand service", () => {
 				statusCode: 200,
 			},
 		});
+	});
+
+	it("resolves a canonical normalized logo alongside the raw Firecrawl pick", async () => {
+		process.env.FIRECRAWL_API_KEY = "configured-key";
+		process.env.FIRECRAWL_BASE_URL = "https://api.firecrawl.dev";
+
+		const logoPng = await sharp({
+			create: { width: 256, height: 256, channels: 4, background: { r: 10, g: 20, b: 200, alpha: 1 } },
+		})
+			.png()
+			.toBuffer();
+
+		global.fetch = vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+			const url = String(input);
+			if (url.includes("cdn.stripe.com/logo.png")) {
+				return {
+					ok: true,
+					headers: { get: (name: string) => (name.toLowerCase() === "content-type" ? "image/png" : null) },
+					arrayBuffer: async () => logoPng.buffer.slice(logoPng.byteOffset, logoPng.byteOffset + logoPng.byteLength),
+				};
+			}
+			return {
+				ok: true,
+				status: 200,
+				json: async () => ({
+					success: true,
+					data: {
+						branding: {
+							brandName: "Stripe",
+							confidence: { overall: 0.93 },
+							logo: "https://cdn.stripe.com/logo.png",
+							colors: { primary: "#635BFF" },
+							fonts: [{ family: "Inter", role: "body" }],
+						},
+						metadata: { title: "Stripe", statusCode: 200 },
+					},
+				}),
+			};
+		}) as typeof fetch;
+
+		const profile = await pullBrandProfile("stripe.com");
+
+		expect(profile.images.logo.canonicalSourceUrl).toBe("https://cdn.stripe.com/logo.png");
+		expect(profile.images.logo.canonicalDataUri).toMatch(/^data:image\/png;base64,/);
+		expect(profile.images.logo.canonicalWarnings).toEqual([]);
+		// Raw Firecrawl selection stays untouched regardless of the canonical pass.
+		expect(profile.images.logo.url).toBe("https://cdn.stripe.com/logo.png");
 	});
 
 	it("validates brand fidelity with Firecrawl screenshots and Anthropic", async () => {

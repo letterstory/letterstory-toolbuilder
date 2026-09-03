@@ -1,5 +1,6 @@
 import { envServer } from "@/lib/config/env.server";
 import { isSafeHttpsUrl } from "@/lib/net/ssrf";
+import { resolveCanonicalLogo, type CanonicalLogoResult } from "@/lib/brand/logo";
 
 export interface BrandIngestionRequest {
 	siteUrl: string;
@@ -54,6 +55,11 @@ export interface BrandLogoAsset {
 	href: string | null;
 	selectionReasoning: string | null;
 	selectionConfidence: number | null;
+	/** Normalized PNG data URI resolved independently of Firecrawl's pick, or null. */
+	canonicalDataUri: string | null;
+	/** Which candidate URL the canonical asset was resolved from, or null. */
+	canonicalSourceUrl: string | null;
+	canonicalWarnings: string[];
 }
 
 export interface BrandImagesProfile {
@@ -775,6 +781,11 @@ export function parseFirecrawlBranding(
 		href: readString(rawImages.logoHref),
 		selectionReasoning: readString(logoReasoning.reasoning),
 		selectionConfidence: readNumber(logoReasoning.confidence),
+		// Populated by a separate async pass in pullBrandProfile() — parsing
+		// stays synchronous/network-free so it remains cheaply unit-testable.
+		canonicalDataUri: null,
+		canonicalSourceUrl: null,
+		canonicalWarnings: [],
 	};
 	const imageGallery = collectImageUrls(rawImages);
 	const tone = readString(rawPersonality.tone);
@@ -1261,11 +1272,45 @@ export async function pullBrandProfile(siteUrlOrDomain: string): Promise<BrandPr
 	if (!safety.ok) throw new Error(`Refusing to pull an unsafe URL: ${safety.reason}`);
 
 	const branding = await fetchFirecrawlBranding(url);
+	const canonicalLogo = await resolveCanonicalLogoForBranding(branding);
+
 	return {
 		url,
 		source: "firecrawl",
 		...branding,
+		images: {
+			...branding.images,
+			logo: {
+				...branding.images.logo,
+				canonicalDataUri: canonicalLogo.dataUri,
+				canonicalSourceUrl: canonicalLogo.sourceUrl,
+				canonicalWarnings: canonicalLogo.warnings,
+			},
+		},
 	};
+}
+
+/**
+ * Resolve a canonical logo asset from every candidate URL we know about,
+ * preferred pick first. Fail-soft: any error here must not fail ingestion —
+ * the raw Firecrawl logo selection remains usable either way.
+ */
+async function resolveCanonicalLogoForBranding(
+	branding: Omit<BrandProfile, "url" | "source">
+): Promise<CanonicalLogoResult> {
+	try {
+		return await resolveCanonicalLogo([
+			branding.primaryLogoUrl,
+			...branding.logoUrls,
+			branding.images.faviconUrl,
+		]);
+	} catch {
+		return {
+			dataUri: null,
+			sourceUrl: null,
+			warnings: ["Canonical logo resolution failed unexpectedly; using the raw Firecrawl selection."],
+		};
+	}
 }
 
 export async function validateBrandFidelity(
