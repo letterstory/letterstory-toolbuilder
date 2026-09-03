@@ -434,6 +434,16 @@ function normalizeToneEnergy(value: unknown): BrandToneEnergy | null {
 	return value === "low" || value === "medium" || value === "high" ? value : null;
 }
 
+const MAX_DESCRIPTOR_LENGTH = 24;
+const MAX_DESCRIPTOR_WORDS = 3;
+
+function looksLikeShortDescriptor(value: string): boolean {
+	if (value.length > MAX_DESCRIPTOR_LENGTH) return false;
+	if (value.trim().split(/\s+/).length > MAX_DESCRIPTOR_WORDS) return false;
+	if (/[.!?]$/.test(value.trim())) return false;
+	return true;
+}
+
 function splitDescriptors(...values: Array<string | null | undefined>): string[] {
 	return dedupeStrings(
 		values.flatMap((value) =>
@@ -442,6 +452,7 @@ function splitDescriptors(...values: Array<string | null | undefined>): string[]
 						.split(/[;,]|\band\b/gi)
 						.map((entry) => readString(entry))
 						.filter((entry): entry is string => Boolean(entry))
+						.filter(looksLikeShortDescriptor)
 				: []
 		)
 	);
@@ -755,8 +766,7 @@ export function parseFirecrawlBranding(
 	const descriptors = splitDescriptors(
 		tone,
 		toneOfVoice,
-		readString(rawPersonality.targetAudience),
-		readString(metadata.description)
+		readString(rawPersonality.targetAudience)
 	);
 	const designSystemFramework = readString(rawDesignSystem.framework);
 	const designSystemLibrary = readString(rawDesignSystem.componentLibrary);
