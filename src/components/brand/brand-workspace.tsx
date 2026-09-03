@@ -208,7 +208,12 @@ export function BrandWorkspace() {
 						<BrandOverview profile={profile} />
 					</TabsContent>
 					<TabsContent value="validation" className="space-y-6">
-						<BrandValidationPanel validationResult={validationResult} />
+						<BrandValidationPanel
+							validationResult={validationResult}
+							onValidate={handleValidate}
+							isValidating={requestState === "submitting-validation"}
+							disabled={requestState !== "idle"}
+						/>
 					</TabsContent>
 					<TabsContent value="raw">
 						<Card>
@@ -436,12 +441,26 @@ function BrandOverview({ profile }: { profile: BrandProfile }) {
 	);
 }
 
-function BrandValidationPanel({ validationResult }: { validationResult: BrandFidelityValidationResult | null }) {
+function BrandValidationPanel({
+	validationResult,
+	onValidate,
+	isValidating,
+	disabled,
+}: {
+	validationResult: BrandFidelityValidationResult | null;
+	onValidate: () => void;
+	isValidating: boolean;
+	disabled: boolean;
+}) {
 	if (!validationResult) {
 		return (
 			<Card className="border-dashed">
-				<CardContent className="py-12 text-center text-sm text-muted-foreground">
-					Run the validation step to cross-check the extracted profile against a fresh screenshot and Claude review.
+				<CardContent className="flex flex-col items-center gap-4 py-12 text-center text-sm text-muted-foreground">
+					<p>Run the validation step to cross-check the extracted profile against a fresh screenshot and Claude review.</p>
+					<Button type="button" onClick={onValidate} disabled={disabled}>
+						{isValidating ? <LoaderCircle className="animate-spin" /> : <Sparkles />}
+						Validate fidelity
+					</Button>
 				</CardContent>
 			</Card>
 		);
@@ -450,12 +469,16 @@ function BrandValidationPanel({ validationResult }: { validationResult: BrandFid
 	if (validationResult.status !== "success") {
 		return (
 			<Card>
-				<CardContent className="pt-6">
+				<CardContent className="flex flex-col gap-4 pt-6">
 					<Alert variant="destructive">
 						<ShieldX className="size-4" />
 						<AlertTitle>{validationResult.status === "not_configured" ? "Validation not configured" : "Validation failed"}</AlertTitle>
 						<AlertDescription>{validationResult.message}</AlertDescription>
 					</Alert>
+					<Button type="button" variant="outline" className="self-start" onClick={onValidate} disabled={disabled}>
+						{isValidating ? <LoaderCircle className="animate-spin" /> : <Sparkles />}
+						Retry validation
+					</Button>
 				</CardContent>
 			</Card>
 		);
@@ -480,9 +503,15 @@ function BrandValidationPanel({ validationResult }: { validationResult: BrandFid
 						</CardTitle>
 						<CardDescription>{assessment.summary}</CardDescription>
 					</div>
-					<Badge variant="outline" className={cn("capitalize", statusStyles[assessment.status])}>
-						{assessment.status} · {assessment.similarityScore}/100 · {assessment.confidence} confidence
-					</Badge>
+					<div className="flex flex-wrap items-center gap-3">
+						<Badge variant="outline" className={cn("capitalize", statusStyles[assessment.status])}>
+							{assessment.status} · {assessment.similarityScore}/100 · {assessment.confidence} confidence
+						</Badge>
+						<Button type="button" variant="outline" size="sm" onClick={onValidate} disabled={disabled}>
+							{isValidating ? <LoaderCircle className="animate-spin" /> : <Sparkles />}
+							Re-run validation
+						</Button>
+					</div>
 				</div>
 			</CardHeader>
 			<CardContent className="grid min-w-0 gap-6 lg:grid-cols-[0.95fr_1.05fr]">
