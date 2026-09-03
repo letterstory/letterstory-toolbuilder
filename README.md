@@ -2,7 +2,7 @@
 
 letterstory-toolbuilder is the Phase 1 codebase for Letterstory's hosted branded generation platform. A customer describes a useful embeddable micro-tool in plain language, Letterstory pulls brand context from the customer's existing site, a coding agent generates the tool's UI and logic, and the finished runtime is hosted by Letterstory for iframe embedding on the customer's site.
 
-This repository intentionally starts with scaffold-only foundations for the shared platform pieces that Phase 1 needs first: gated brand ingestion, tool-generation orchestration, and Porter deployment integration. The actual Firecrawl, coding-agent, and Porter implementations are follow-up work once credentials, account access, and the remaining product contracts are finalized.
+This repository starts with the shared platform pieces that Phase 1 needs first: real Firecrawl-backed brand ingestion, plus scaffolded tool-generation orchestration and Porter deployment integration. The coding-agent and Porter implementations remain follow-up work once their contracts and access are finalized.
 
 ## Stack
 
@@ -22,8 +22,19 @@ This repository intentionally starts with scaffold-only foundations for the shar
 ## Initial scaffold layout
 
 - `src/app/` — minimal app shell and health route
-- `src/lib/brand/` — Firecrawl-facing brand ingestion stubs with config gating
+- `src/lib/brand/` — Firecrawl-backed brand ingestion with config gating and SSRF-safe URL validation
 - `src/lib/generation/` — tool-generation orchestration contract stubs
 - `src/lib/deploy/porter/` — Porter deployment stubs with config gating
 - `src/lib/platform/` — shared scaffold status helpers surfaced in the app
-- `tests/unit/` — focused unit tests for the stubbed platform contracts
+- `scripts/test-brand-ingestion.ts` — live Firecrawl probe for a small set of representative sites
+- `tests/unit/` — focused unit tests for the platform contracts
+
+## Firecrawl brand-ingestion probe
+
+With `.env.local` populated, run:
+
+```bash
+npm run brand:probe
+```
+
+That script calls the live Firecrawl scrape endpoint against a small set of real sites and prints the extracted logo URLs, colors, fonts, and higher-level branding fields for manual quality assessment.

@@ -17,13 +17,13 @@ export function getPlatformScaffoldStatus(): PlatformScaffoldStatus {
 		modules: [
 			{
 				name: "Brand ingestion",
-				state: isBrandIngestionConfigured() ? "stubbed" : "pending-config",
+				state: isBrandIngestionConfigured() ? "configured" : "pending-config",
 				summary:
-					"Firecrawl-facing contracts exist, but real extraction is gated behind env configuration.",
+					"Firecrawl-backed brand extraction is live behind env gating, with URL safety checks and a probe script for real-site validation.",
 				nextSteps: [
-					"Receive FIRECRAWL_API_KEY for this repository.",
-					"Implement site snapshot + brand profile ingestion.",
-					"Add validation stages once the ingestion contract is locked.",
+					"Run the live ingestion probe against representative customer sites.",
+					"Add follow-up validation for tone, imagery, and layout fidelity.",
+					"Layer in LLM/competitor cross-checks once baseline extraction is stable.",
 				],
 			},
 			{
