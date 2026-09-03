@@ -6,6 +6,7 @@ import {
 	AlertCircle,
 	ArrowUpRight,
 	BadgeCheck,
+	Eye,
 	ImageIcon,
 	LoaderCircle,
 	Palette,
@@ -17,6 +18,7 @@ import {
 	WandSparkles,
 } from "lucide-react";
 import type {
+	BrandCompetitorComparisonResult,
 	BrandFidelityValidationResult,
 	BrandIngestionResult,
 	BrandProfile,
@@ -42,7 +44,7 @@ import { cn } from "@/lib/utils";
 
 const INITIAL_URL = "https://stripe.com";
 
-type RequestState = "idle" | "loading" | "submitting-validation";
+type RequestState = "idle" | "loading" | "submitting-validation" | "submitting-compare";
 
 type StatusTone = "info" | "success" | "warning" | "destructive";
 
@@ -58,6 +60,8 @@ export function BrandWorkspace() {
 	const [ingestionResult, setIngestionResult] = useState<BrandIngestionResult | null>(null);
 	const [validationResult, setValidationResult] = useState<BrandFidelityValidationResult | null>(null);
 	const [fixesApplied, setFixesApplied] = useState(false);
+	const [competitorUrlsInput, setCompetitorUrlsInput] = useState("");
+	const [compareResult, setCompareResult] = useState<BrandCompetitorComparisonResult | null>(null);
 	const [statusMessage, setStatusMessage] = useState<StatusMessage>({
 		title: "Ready to ingest",
 		description: "Enter a marketing site URL to extract real brand tokens and inspect the output before generation.",
@@ -155,6 +159,54 @@ export function BrandWorkspace() {
 		});
 	}
 
+	async function handleCompare() {
+		if (!profile) return;
+		const competitorUrls = competitorUrlsInput
+			.split(",")
+			.map((entry) => entry.trim())
+			.filter(Boolean);
+		if (!competitorUrls.length) {
+			setStatusMessage({
+				title: "Add at least one competitor",
+				description: "Enter one or more competitor URLs, separated by commas, before comparing.",
+				tone: "warning",
+			});
+			return;
+		}
+
+		setRequestState("submitting-compare");
+		setStatusMessage({
+			title: "Comparing against competitors",
+			description: "Scoring extracted-token distinctiveness, plus a Claude-vision visual similarity check when configured.",
+			tone: "info",
+		});
+
+		try {
+			const response = await fetch("/api/brand/compare", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ primarySiteUrl: siteUrl, primaryProfile: profile, competitorUrls }),
+			});
+			const result = (await response.json()) as BrandCompetitorComparisonResult;
+			setCompareResult(result);
+			setStatusMessage(toCompareStatusMessage(result));
+		} catch {
+			setCompareResult({
+				status: "error",
+				code: "firecrawl_error",
+				requestedUrl: siteUrl,
+				message: "The comparison request failed before Toolbuilder could read the response.",
+			});
+			setStatusMessage({
+				title: "Comparison request failed",
+				description: "The dashboard could not reach the competitor comparison route. Check the dev server and try again.",
+				tone: "destructive",
+			});
+		} finally {
+			setRequestState("idle");
+		}
+	}
+
 	return (
 		<div className="flex flex-col gap-6">
 			<Card>
@@ -221,6 +273,7 @@ export function BrandWorkspace() {
 					<TabsList>
 						<TabsTrigger value="overview">Overview</TabsTrigger>
 						<TabsTrigger value="validation">Validation</TabsTrigger>
+						<TabsTrigger value="competitors">Competitors</TabsTrigger>
 						<TabsTrigger value="raw">Raw profile</TabsTrigger>
 					</TabsList>
 					<TabsContent value="overview" className="space-y-6">
@@ -234,6 +287,16 @@ export function BrandWorkspace() {
 							disabled={requestState !== "idle"}
 							onApplyFixes={handleApplyFixes}
 							fixesApplied={fixesApplied}
+						/>
+					</TabsContent>
+					<TabsContent value="competitors" className="space-y-6">
+						<BrandCompetitorPanel
+							compareResult={compareResult}
+							competitorUrlsInput={competitorUrlsInput}
+							onCompetitorUrlsInputChange={setCompetitorUrlsInput}
+							onCompare={handleCompare}
+							isComparing={requestState === "submitting-compare"}
+							disabled={requestState !== "idle"}
 						/>
 					</TabsContent>
 					<TabsContent value="raw">
@@ -625,6 +688,151 @@ function BrandValidationPanel({
 
 const MAX_INLINE_VALUE_LENGTH = 120;
 
+function BrandCompetitorPanel({
+	compareResult,
+	competitorUrlsInput,
+	onCompetitorUrlsInputChange,
+	onCompare,
+	isComparing,
+	disabled,
+}: {
+	compareResult: BrandCompetitorComparisonResult | null;
+	competitorUrlsInput: string;
+	onCompetitorUrlsInputChange: (value: string) => void;
+	onCompare: () => void;
+	isComparing: boolean;
+	disabled: boolean;
+}) {
+	const inputRow = (
+		<div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+			<div className="grid gap-2">
+				<Label htmlFor="competitor-urls">Competitor URLs</Label>
+				<Input
+					id="competitor-urls"
+					placeholder="adyen.com, paypal.com"
+					value={competitorUrlsInput}
+					onChange={(event) => onCompetitorUrlsInputChange(event.target.value)}
+				/>
+			</div>
+			<Button type="button" onClick={onCompare} disabled={disabled}>
+				{isComparing ? <LoaderCircle className="animate-spin" /> : <Eye />}
+				Compare
+			</Button>
+		</div>
+	);
+
+	if (!compareResult) {
+		return (
+			<Card className="border-dashed">
+				<CardContent className="flex flex-col gap-4 py-8">
+					<p className="text-center text-sm text-muted-foreground">
+						Compare this brand against named competitors: token-level distinctiveness (palette families, fonts,
+						tone descriptors) plus a Claude-vision visual-similarity score when ANTHROPIC_API_KEY is configured.
+					</p>
+					{inputRow}
+				</CardContent>
+			</Card>
+		);
+	}
+
+	if (compareResult.status !== "success") {
+		return (
+			<Card>
+				<CardContent className="flex flex-col gap-4 pt-6">
+					<Alert variant="destructive">
+						<ShieldX className="size-4" />
+						<AlertTitle>
+							{compareResult.status === "not_configured" ? "Comparison not configured" : "Comparison failed"}
+						</AlertTitle>
+						<AlertDescription>{compareResult.message}</AlertDescription>
+					</Alert>
+					{inputRow}
+				</CardContent>
+			</Card>
+		);
+	}
+
+	const { competitors, overallDistinctiveness, overallVisualDistinctiveness } = compareResult;
+	const statusStyles: Record<string, string> = {
+		distinct: "border-emerald-200 bg-emerald-50 text-emerald-700",
+		adjacent: "border-amber-200 bg-amber-50 text-amber-700",
+		overlapping: "border-rose-200 bg-rose-50 text-rose-700",
+	};
+
+	return (
+		<div className="space-y-4">
+			<Card>
+				<CardHeader>
+					<CardTitle className="flex items-center gap-2">
+						<Eye className="size-5" />
+						Distinctiveness summary
+					</CardTitle>
+					<CardDescription>{overallDistinctiveness.summary}</CardDescription>
+				</CardHeader>
+				<CardContent className="flex flex-col gap-4">
+					<div className="flex flex-wrap items-center gap-2">
+						<Badge variant="outline" className={cn("capitalize", statusStyles[overallDistinctiveness.status])}>
+							Token distinctiveness · {overallDistinctiveness.score}/100 · {overallDistinctiveness.status}
+						</Badge>
+						{overallVisualDistinctiveness ? (
+							<Badge
+								variant="outline"
+								className={cn("capitalize", statusStyles[overallVisualDistinctiveness.status])}
+							>
+								Visual distinctiveness · {overallVisualDistinctiveness.score}/100 ·{" "}
+								{overallVisualDistinctiveness.status}
+							</Badge>
+						) : (
+							<Badge variant="outline">Visual check unavailable — set ANTHROPIC_API_KEY</Badge>
+						)}
+					</div>
+					{inputRow}
+				</CardContent>
+			</Card>
+
+			<div className="grid gap-4 md:grid-cols-2">
+				{competitors.map(({ profile: competitorProfile, comparison }) => (
+					<Card key={comparison.competitorUrl}>
+						<CardHeader>
+							<div className="flex items-center justify-between gap-3">
+								<CardTitle className="text-base">
+									{comparison.competitorBrandName ?? competitorProfile.url}
+								</CardTitle>
+								<Badge variant="outline" className={cn("capitalize", statusStyles[comparison.status])}>
+									{comparison.distinctivenessScore}/100 · {comparison.status}
+								</Badge>
+							</div>
+							<CardDescription>{comparison.rationale}</CardDescription>
+						</CardHeader>
+						<CardContent className="space-y-3 text-sm">
+							{comparison.sharedColorFamilies.length ? (
+								<Definition label="Shared color families" value={comparison.sharedColorFamilies.join(", ")} />
+							) : null}
+							{comparison.sharedFonts.length ? (
+								<Definition label="Shared fonts" value={comparison.sharedFonts.join(", ")} />
+							) : null}
+							<div className="rounded-lg border p-3">
+								<p className="mb-1 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+									<Eye className="size-3.5" />
+									Visual similarity
+								</p>
+								{comparison.visualSimilarity ? (
+									<>
+										<p className="text-sm font-semibold">{comparison.visualSimilarity.score}/100</p>
+										<p className="text-xs text-muted-foreground">{comparison.visualSimilarity.rationale}</p>
+									</>
+								) : (
+									<EmptyCopy>Not available for this competitor (screenshot unavailable or Anthropic not configured).</EmptyCopy>
+								)}
+							</div>
+						</CardContent>
+					</Card>
+				))}
+			</div>
+		</div>
+	);
+}
+
 function Definition({ label, value }: { label: string; value: string }) {
 	const isDataUri = value.startsWith("data:");
 	const displayValue =
@@ -757,6 +965,38 @@ function toValidationStatusMessage(result: BrandFidelityValidationResult): Statu
 
 	return {
 		title: "Validation failed",
+		description: result.message,
+		tone: "destructive",
+	};
+}
+
+function toCompareStatusMessage(result: BrandCompetitorComparisonResult): StatusMessage {
+	if (result.status === "success") {
+		const { overallDistinctiveness, overallVisualDistinctiveness } = result;
+		return {
+			title: `Comparison complete: ${overallDistinctiveness.status}`,
+			description: overallVisualDistinctiveness
+				? `${overallDistinctiveness.score}/100 token distinctiveness, ${overallVisualDistinctiveness.score}/100 visual distinctiveness.`
+				: `${overallDistinctiveness.score}/100 token distinctiveness. Set ANTHROPIC_API_KEY to add a visual-similarity check.`,
+			tone:
+				overallDistinctiveness.status === "distinct"
+					? "success"
+					: overallDistinctiveness.status === "adjacent"
+						? "warning"
+						: "destructive",
+		};
+	}
+
+	if (result.status === "not_configured") {
+		return {
+			title: "Comparison not configured",
+			description: result.message,
+			tone: "warning",
+		};
+	}
+
+	return {
+		title: "Comparison failed",
 		description: result.message,
 		tone: "destructive",
 	};

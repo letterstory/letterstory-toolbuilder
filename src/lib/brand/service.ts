@@ -182,6 +182,11 @@ export interface BrandCompetitorComparisonRequest {
 	primaryProfile?: BrandProfile;
 }
 
+export interface BrandVisualSimilarity {
+	score: number;
+	rationale: string;
+}
+
 export interface BrandCompetitorDelta {
 	competitorUrl: string;
 	competitorBrandName: string | null;
@@ -195,6 +200,7 @@ export interface BrandCompetitorDelta {
 	distinctivenessScore: number;
 	status: BrandDistinctivenessStatus;
 	rationale: string;
+	visualSimilarity: BrandVisualSimilarity | null;
 }
 
 export interface BrandCompetitorComparisonSuccessResult {
@@ -210,6 +216,11 @@ export interface BrandCompetitorComparisonSuccessResult {
 		status: BrandDistinctivenessStatus;
 		summary: string;
 	};
+	overallVisualDistinctiveness: {
+		score: number;
+		status: BrandDistinctivenessStatus;
+		summary: string;
+	} | null;
 }
 
 export interface BrandCompetitorComparisonFailureResult {
@@ -1019,6 +1030,79 @@ async function requestAnthropicAssessment(
 	return normalizeAssessment(parseJsonObject(text));
 }
 
+/**
+ * Claude-vision comparison of two site screenshots for genuine visual
+ * similarity — not just token overlap on extracted colors/fonts/tone. This is
+ * the "does a generated page actually look like a different company"
+ * check Mathew asked for; compareBrandProfiles alone can't answer that
+ * because two sites can share zero color/font tokens yet still "feel" similar
+ * (or vice versa). Returns null on any failure — visual similarity is an
+ * enrichment, not a hard requirement for competitor comparison to succeed.
+ */
+async function requestVisualSimilarityAssessment(
+	primaryUrl: string,
+	primaryScreenshotUrl: string,
+	competitorUrl: string,
+	competitorScreenshotUrl: string
+): Promise<BrandVisualSimilarity | null> {
+	const apiKey = envServer.ANTHROPIC_API_KEY;
+	if (!apiKey) return null;
+
+	const model = envServer.ANTHROPIC_MODEL || DEFAULT_ANTHROPIC_MODEL;
+	const instructions = [
+		"You are comparing two marketing homepage screenshots for overall visual similarity — the kind a human would notice at a glance (layout, color palette, imagery style, typography feel), not pixel-level differences.",
+		"Return JSON only. No markdown fences. Use this schema exactly:",
+		JSON.stringify({ score: 0, rationale: "short string" }, null, 2),
+		"score is 0-100: 0 means the two sites look nothing alike, 100 means a viewer could easily mistake one for the other.",
+		"Keep rationale to one or two sentences citing concrete visual cues (not just brand names).",
+	].join("\n");
+
+	try {
+		const response = await fetch("https://api.anthropic.com/v1/messages", {
+			method: "POST",
+			headers: {
+				"x-api-key": apiKey,
+				"anthropic-version": "2023-06-01",
+				"content-type": "application/json",
+			},
+			body: JSON.stringify({
+				model,
+				max_tokens: 400,
+				system: instructions,
+				messages: [
+					{
+						role: "user",
+						content: [
+							{ type: "text", text: `Site A: ${primaryUrl}` },
+							{ type: "image", source: { type: "url", url: primaryScreenshotUrl } },
+							{ type: "text", text: `Site B: ${competitorUrl}` },
+							{ type: "image", source: { type: "url", url: competitorScreenshotUrl } },
+						],
+					},
+				],
+			}),
+			signal: AbortSignal.timeout(ANTHROPIC_TIMEOUT_MS),
+		});
+		const body = (await response.json().catch(() => ({}))) as AnthropicMessagesResponse;
+		if (!response.ok) return null;
+
+		const text = body.content
+			?.filter((block) => block.type === "text")
+			.map((block) => block.text ?? "")
+			.join("\n")
+			.trim();
+		if (!text) return null;
+
+		const parsed = parseJsonObject(text) as { score?: unknown; rationale?: unknown };
+		const score = typeof parsed.score === "number" ? clampScore(parsed.score) : null;
+		const rationale = readString(parsed.rationale);
+		if (score === null || !rationale) return null;
+		return { score, rationale };
+	} catch {
+		return null;
+	}
+}
+
 function normalizeColorHex(value: string): string | null {
 	const trimmed = value.trim();
 	if (!/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(trimmed)) return null;
@@ -1161,6 +1245,7 @@ function compareBrandProfiles(primary: BrandProfile, competitor: BrandProfile): 
 		distinctivenessScore,
 		status,
 		rationale: rationaleParts.join("; "),
+		visualSimilarity: null,
 	};
 }
 
@@ -1291,11 +1376,64 @@ export async function compareBrandAgainstCompetitors(
 			profile,
 			comparison: compareBrandProfiles(primaryProfile, profile),
 		}));
+
+		// Visual similarity is an enrichment layered on top of the token-based
+		// comparison above, gated on Anthropic being configured. Failures per
+		// competitor are swallowed (visualSimilarity stays null) so one bad
+		// screenshot doesn't fail the whole comparison.
+		if (envServer.ANTHROPIC_API_KEY) {
+			try {
+				const primaryVisual = await fetchSiteVisualReference(primaryProfile.url);
+				if (primaryVisual.screenshotUrl) {
+					await Promise.all(
+						competitors.map(async (competitor) => {
+							try {
+								const competitorVisual = await fetchSiteVisualReference(competitor.profile.url);
+								if (!competitorVisual.screenshotUrl) return;
+								competitor.comparison.visualSimilarity = await requestVisualSimilarityAssessment(
+									primaryProfile.url,
+									primaryVisual.screenshotUrl!,
+									competitor.profile.url,
+									competitorVisual.screenshotUrl
+								);
+							} catch {
+								// leave visualSimilarity null for this competitor
+							}
+						})
+					);
+				}
+			} catch {
+				// leave visualSimilarity null for all competitors
+			}
+		}
+
 		const overallScore = Math.round(
 			competitors.reduce((sum, competitor) => sum + competitor.comparison.distinctivenessScore, 0) /
 				competitors.length
 		);
 		const overallStatus = normalizeDistinctivenessStatus(overallScore);
+		const visualScores = competitors
+			.map((competitor) => competitor.comparison.visualSimilarity?.score)
+			.filter((score): score is number => typeof score === "number");
+		const overallVisualDistinctiveness = visualScores.length
+			? (() => {
+					const avgSimilarity = Math.round(
+						visualScores.reduce((sum, score) => sum + score, 0) / visualScores.length
+					);
+					const visualDistinctivenessScore = clampScore(100 - avgSimilarity);
+					const visualStatus = normalizeDistinctivenessStatus(visualDistinctivenessScore);
+					return {
+						score: visualDistinctivenessScore,
+						status: visualStatus,
+						summary:
+							visualStatus === "distinct"
+								? "Screenshots look visually distinct from the supplied competitors, not just different on extracted tokens."
+								: visualStatus === "adjacent"
+									? "Screenshots share a noticeable visual resemblance with the supplied competitors despite differing tokens."
+									: "Screenshots look visually similar enough to the supplied competitors that a viewer could confuse them.",
+					};
+				})()
+			: null;
 		return {
 			status: "success",
 			requestedUrl: request.primarySiteUrl,
@@ -1311,6 +1449,7 @@ export async function compareBrandAgainstCompetitors(
 							? "Primary brand shares some palette/type/tone cues with the supplied competitors."
 							: "Primary brand overlaps heavily with the supplied competitors on extracted tokens.",
 			},
+			overallVisualDistinctiveness,
 		};
 	} catch (error) {
 		return {

@@ -470,6 +470,88 @@ describe("brand service", () => {
 		expect(result.overallDistinctiveness.score).toBeGreaterThanOrEqual(0);
 		expect(result.overallDistinctiveness.score).toBeLessThanOrEqual(100);
 	});
+
+	it("layers a Claude-vision visual similarity score onto competitor comparison when Anthropic is configured", async () => {
+		process.env.FIRECRAWL_API_KEY = "configured-key";
+		process.env.ANTHROPIC_API_KEY = "configured-key";
+		const primaryProfile = parseFirecrawlBranding(
+			{
+				brandName: "Stripe",
+				colors: { primary: "#635BFF", background: "#FFFFFF" },
+				fonts: ["Sohne"],
+			},
+			{}
+		);
+		const fetchMock = vi
+			.fn()
+			// 1. competitor brand scrape (pullBrandProfile)
+			.mockResolvedValueOnce({
+				ok: true,
+				status: 200,
+				json: async () => ({
+					success: true,
+					data: {
+						branding: {
+							brandName: "Adyen",
+							colors: { primary: "#0ABF53", background: "#FFFFFF" },
+							fonts: ["Inter"],
+						},
+						metadata: {},
+					},
+				}),
+			})
+			// 2. primary screenshot fetch (fetchSiteVisualReference)
+			.mockResolvedValueOnce({
+				ok: true,
+				status: 200,
+				json: async () => ({
+					success: true,
+					data: { screenshot: "https://firecrawl.dev/primary-screenshot.png", markdown: "# Stripe" },
+				}),
+			})
+			// 3. competitor screenshot fetch (fetchSiteVisualReference)
+			.mockResolvedValueOnce({
+				ok: true,
+				status: 200,
+				json: async () => ({
+					success: true,
+					data: { screenshot: "https://firecrawl.dev/adyen-screenshot.png", markdown: "# Adyen" },
+				}),
+			})
+			// 4. Anthropic visual similarity call
+			.mockResolvedValueOnce({
+				ok: true,
+				status: 200,
+				json: async () => ({
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify({
+								score: 22,
+								rationale: "Different hero layout, palette, and imagery style.",
+							}),
+						},
+					],
+				}),
+			});
+		global.fetch = fetchMock as typeof fetch;
+
+		const result = await compareBrandAgainstCompetitors({
+			primarySiteUrl: "stripe.com",
+			primaryProfile: { ...primaryProfile, url: "https://stripe.com", source: "firecrawl" },
+			competitorUrls: ["adyen.com"],
+		});
+
+		expect(result.status).toBe("success");
+		if (result.status !== "success") return;
+		expect(result.competitors[0]?.comparison.visualSimilarity).toMatchObject({
+			score: 22,
+			rationale: "Different hero layout, palette, and imagery style.",
+		});
+		expect(result.overallVisualDistinctiveness).toMatchObject({
+			score: 78,
+		});
+	});
 });
 
 async function pullProfileFixture() {
