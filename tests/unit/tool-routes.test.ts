@@ -202,6 +202,24 @@ describe("POST /api/tools/generate", () => {
 
 		expect(response.status).toBe(400);
 	});
+
+	it("returns a JSON 500 when generateTool throws unexpectedly", async () => {
+		generateToolMock.mockRejectedValueOnce(new Error("database offline"));
+
+		const response = await generatePost(
+			new Request("http://localhost/api/tools/generate", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ prompt: "a calculator" }),
+			})
+		);
+
+		expect(response.status).toBe(500);
+		await expect(response.json()).resolves.toMatchObject({
+			status: "error",
+			message: expect.stringContaining("database offline"),
+		});
+	});
 });
 
 describe("GET /t/[id]", () => {
