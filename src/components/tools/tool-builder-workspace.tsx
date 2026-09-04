@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import type { ToolGenerationResult } from "@/lib/generation";
 import type { GeneratedToolRecord } from "@/lib/generation/store";
+import { IFRAME_SANDBOX, buildEmbedSnippet } from "@/lib/embed/contract";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -23,7 +24,7 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 
-type RequestState = "idle" | "loading";
+type RequestState = "idle" | "generating" | "updating";
 type StatusTone = "info" | "success" | "warning" | "destructive";
 
 interface StatusMessage {
@@ -33,8 +34,13 @@ interface StatusMessage {
 }
 
 // The recent-tools list only ever needs metadata to render cards and link to
-// /t/[id] — the API route omits the (potentially large) html body.
-type ToolSummary = Omit<GeneratedToolRecord, "html">;
+// /t/[id] — the API route omits the (potentially large) html body and full
+// version history (which itself carries full past HTML bodies).
+type ToolSummary = Omit<GeneratedToolRecord, "html" | "history"> & { previousVersionCount: number };
+
+// Metadata-only view of a past version, fetched on demand for the version
+// history panel — never carries the historical HTML body itself.
+type ToolHistoryEntry = Omit<GeneratedToolRecord["history"][number], "html">;
 
 const INITIAL_STATUS: StatusMessage = {
 	title: "Ready to generate",
@@ -48,12 +54,6 @@ const EXAMPLE_PROMPTS = [
 	"A SaaS ROI calculator: enter current manual hours/week and hourly cost, show annual savings from automating with the product.",
 ];
 
-// Sandboxed with scripts/forms/popups but no allow-same-origin: the generated
-// document can run its own interactive JS, but can't read this origin's
-// cookies/storage or reach into the parent page — the isolation boundary
-// discussed for v1 shared-server tool hosting.
-const IFRAME_SANDBOX = "allow-scripts allow-forms allow-popups allow-modals";
-
 export function ToolBuilderWorkspace() {
 	const [projectName, setProjectName] = useState("");
 	const [siteUrl, setSiteUrl] = useState("");
@@ -64,7 +64,11 @@ export function ToolBuilderWorkspace() {
 
 	// The tool currently shown in the preview/embed panel — either a fresh
 	// generation or a previously generated one reopened from the recent list.
+	// While it's set, the form above doubles as an editor for it: "Update this
+	// tool" revises it in place (same id/embed URL); "Start a new tool" clears
+	// it so "Generate tool" builds something unrelated instead.
 	const [activeTool, setActiveTool] = useState<ToolSummary | null>(null);
+	const [toolHistory, setToolHistory] = useState<ToolHistoryEntry[]>([]);
 	const [recentTools, setRecentTools] = useState<ToolSummary[]>([]);
 	const [recentLoading, setRecentLoading] = useState(false);
 
@@ -82,33 +86,78 @@ export function ToolBuilderWorkspace() {
 		}
 	}, []);
 
+	const loadToolHistory = useCallback(async (id: string) => {
+		try {
+			const response = await fetch(`/api/tools/${id}`);
+			const data = (await response.json()) as { status: string; tool?: { history?: ToolHistoryEntry[] } };
+			setToolHistory(data.tool?.history ?? []);
+		} catch {
+			setToolHistory([]);
+		}
+	}, []);
+
 	useEffect(() => {
 		void loadRecentTools();
 	}, [loadRecentTools]);
 
-	const previewUrl = activeTool ? `/t/${activeTool.id}` : null;
-	const iframeTag = activeTool
-		? `<iframe src="${typeof window !== "undefined" ? window.location.origin : ""}/t/${activeTool.id}" sandbox="${IFRAME_SANDBOX}" style="width:100%;min-height:520px;border:0" title="${activeTool.projectName}"></iframe>`
-		: "";
-	const embedSnippet = iframeTag;
+	// /api/tools/generate and the rollback endpoint both return the full
+	// record (html + history included) — trimmed here to the lighter shape
+	// the dashboard actually keeps in state.
+	function toSummary(tool: GeneratedToolRecord): ToolSummary {
+		return {
+			id: tool.id,
+			projectName: tool.projectName,
+			prompt: tool.prompt,
+			siteUrl: tool.siteUrl,
+			brandSnapshot: tool.brandSnapshot,
+			copy: tool.copy,
+			brandFidelity: tool.brandFidelity,
+			model: tool.model,
+			warnings: tool.warnings,
+			createdAt: tool.createdAt,
+			updatedAt: tool.updatedAt,
+			version: tool.version,
+			previousVersionCount: tool.history.length,
+		};
+	}
+
+	function populateFormFrom(item: ToolSummary) {
+		setProjectName(item.projectName);
+		setSiteUrl(item.siteUrl ?? "");
+		setPrompt(item.prompt);
+	}
+
+	// Cache-busts the dashboard's own preview iframe/link so a revision (same
+	// id, same URL) actually shows the new content instead of the browser
+	// reusing what it already rendered for that src. The embed snippet given
+	// to customers deliberately doesn't need this: /t/[id] is served with
+	// cache-control: no-store, so a real page load of their embed always
+	// fetches fresh content anyway.
+	const previewUrl = activeTool ? `/t/${activeTool.id}?v=${activeTool.version}` : null;
+	const origin = typeof window !== "undefined" ? window.location.origin : "";
+	// The iframe alone auto-resizes itself via the resize-reporter every served
+	// tool now emits (see src/lib/embed/contract.ts) paired with the listener
+	// script bundled into embedSnippet below — no fixed height guesswork needed.
+	const embedSnippet = activeTool ? buildEmbedSnippet({ origin, toolId: activeTool.id, projectName: activeTool.projectName }) : "";
 	const fullEmbedSnippet =
 		activeTool && activeTool.copy
 			? [
 					`<h2>${escapeHtml(activeTool.copy.headline)}</h2>`,
 					`<p>${escapeHtml(activeTool.copy.supportingCopy)}</p>`,
-					iframeTag,
+					embedSnippet,
 				].join("\n")
 			: "";
 
-	async function handleGenerate(event: FormEvent<HTMLFormElement>) {
-		event.preventDefault();
-		setRequestState("loading");
+	async function runGeneration(toolId: string | undefined) {
+		setRequestState(toolId ? "updating" : "generating");
 		setCopiedTarget(null);
 		setStatusMessage({
-			title: "Generating tool",
-			description: siteUrl
-				? "Pulling brand context, then asking Claude to build the real tool logic. This can take up to a minute."
-				: "Asking Claude to build the real tool logic. This can take up to a minute.",
+			title: toolId ? "Updating tool" : "Generating tool",
+			description: toolId
+				? "Asking Claude to revise the current tool in place, using your new description as edit instructions. This can take up to a minute."
+				: siteUrl
+					? "Pulling brand context, then asking Claude to build the real tool logic. This can take up to a minute."
+					: "Asking Claude to build the real tool logic. This can take up to a minute.",
 			tone: "info",
 		});
 
@@ -116,30 +165,98 @@ export function ToolBuilderWorkspace() {
 			const response = await fetch("/api/tools/generate", {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ projectName, siteUrl, prompt }),
+				body: JSON.stringify({ projectName, siteUrl, prompt, toolId }),
 			});
 			const data = (await response.json()) as ToolGenerationResult;
-			setStatusMessage(toStatusMessage(data));
+			setStatusMessage(toStatusMessage(data, Boolean(toolId)));
 			if (data.status === "success") {
-				setActiveTool(data.tool);
+				const summary = toSummary(data.tool);
+				setActiveTool(summary);
+				populateFormFrom(summary);
 				void loadRecentTools();
+				void loadToolHistory(summary.id);
 			}
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
-			setStatusMessage({ title: "Generation failed", description: message, tone: "destructive" });
+			setStatusMessage({
+				title: toolId ? "Update failed" : "Generation failed",
+				description: message,
+				tone: "destructive",
+			});
 		} finally {
 			setRequestState("idle");
 		}
 	}
 
+	function handleGenerate(event: FormEvent<HTMLFormElement>) {
+		event.preventDefault();
+		void runGeneration(undefined);
+	}
+
+	function handleUpdateTool() {
+		if (!activeTool) return;
+		void runGeneration(activeTool.id);
+	}
+
+	function handleStartNewTool() {
+		setActiveTool(null);
+		setToolHistory([]);
+		setCopiedTarget(null);
+		setProjectName("");
+		setSiteUrl("");
+		setPrompt(EXAMPLE_PROMPTS[0]);
+		setStatusMessage(INITIAL_STATUS);
+	}
+
 	function handleReopenRecent(item: ToolSummary) {
 		setActiveTool(item);
+		populateFormFrom(item);
 		setCopiedTarget(null);
+		void loadToolHistory(item.id);
 		setStatusMessage({
 			title: "Reopened tool",
-			description: `Showing "${item.projectName}" from ${formatTimestamp(item.createdAt)}.`,
+			description: `Showing "${item.projectName}" (v${item.version}) from ${formatTimestamp(
+				item.updatedAt
+			)}. Edit the fields above and click "Update this tool" to revise it, or "Start a new tool" to build something else.`,
 			tone: "info",
 		});
+	}
+
+	async function handleRollback(version: number) {
+		if (!activeTool) return;
+		setRequestState("updating");
+		setStatusMessage({ title: "Restoring version", description: `Restoring version ${version}…`, tone: "info" });
+		try {
+			const response = await fetch(`/api/tools/${activeTool.id}/rollback`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ version }),
+			});
+			const data = (await response.json()) as { status: string; tool?: GeneratedToolRecord; message?: string };
+			if (data.status === "success" && data.tool) {
+				const summary = toSummary(data.tool);
+				setActiveTool(summary);
+				populateFormFrom(summary);
+				setStatusMessage({
+					title: "Version restored",
+					description: `Restored version ${version} of "${summary.projectName}".`,
+					tone: "success",
+				});
+				void loadRecentTools();
+				void loadToolHistory(summary.id);
+			} else {
+				setStatusMessage({
+					title: "Restore failed",
+					description: data.message ?? "Could not restore that version.",
+					tone: "destructive",
+				});
+			}
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			setStatusMessage({ title: "Restore failed", description: message, tone: "destructive" });
+		} finally {
+			setRequestState("idle");
+		}
 	}
 
 	async function handleCopyEmbed(target: "iframe" | "full", text: string) {
@@ -213,14 +330,48 @@ export function ToolBuilderWorkspace() {
 						</div>
 					</CardContent>
 					<CardFooter className="flex-col items-stretch gap-4">
-						<Button type="submit" disabled={requestState === "loading"}>
-							{requestState === "loading" ? (
-								<LoaderCircle className="size-4 animate-spin" />
-							) : (
-								<Sparkles className="size-4" />
-							)}
-							Generate tool
-						</Button>
+						<div className="flex flex-wrap gap-2">
+							<Button type="submit" disabled={requestState !== "idle"}>
+								{requestState === "generating" ? (
+									<LoaderCircle className="size-4 animate-spin" />
+								) : (
+									<Sparkles className="size-4" />
+								)}
+								Generate tool
+							</Button>
+							{activeTool ? (
+								<>
+									<Button
+										type="button"
+										variant="secondary"
+										disabled={requestState !== "idle"}
+										onClick={handleUpdateTool}
+									>
+										{requestState === "updating" ? (
+											<LoaderCircle className="size-4 animate-spin" />
+										) : (
+											<RefreshCw className="size-4" />
+										)}
+										Update this tool
+									</Button>
+									<Button
+										type="button"
+										variant="ghost"
+										disabled={requestState !== "idle"}
+										onClick={handleStartNewTool}
+									>
+										Start a new tool
+									</Button>
+								</>
+							) : null}
+						</div>
+						{activeTool ? (
+							<p className="text-xs text-muted-foreground">
+								Editing <span className="font-medium">&quot;{activeTool.projectName}&quot;</span> (v{activeTool.version}
+								{activeTool.siteUrl ? ` · ${activeTool.siteUrl}` : ""}). &quot;Generate tool&quot; always builds a brand-new
+								tool from the fields above; &quot;Update this tool&quot; revises this one in place at the same embed URL.
+							</p>
+						) : null}
 						<StatusAlert message={statusMessage} />
 					</CardFooter>
 				</form>
@@ -236,7 +387,7 @@ export function ToolBuilderWorkspace() {
 						<CardContent>
 							<div className="overflow-hidden rounded-xl border bg-white">
 								<iframe
-									key={activeTool.id}
+									key={`${activeTool.id}-${activeTool.version}`}
 									src={previewUrl ?? undefined}
 									sandbox={IFRAME_SANDBOX}
 									title={activeTool.projectName}
@@ -278,6 +429,7 @@ export function ToolBuilderWorkspace() {
 							</pre>
 							<div className="flex flex-wrap items-center gap-2">
 								<Badge variant="secondary">{activeTool.model}</Badge>
+								<Badge variant="secondary">v{activeTool.version}</Badge>
 								{activeTool.siteUrl ? <Badge variant="secondary">{activeTool.siteUrl}</Badge> : null}
 								{activeTool.brandSnapshot?.brandName ? (
 									<Badge variant="secondary">{activeTool.brandSnapshot.brandName}</Badge>
@@ -308,7 +460,7 @@ export function ToolBuilderWorkspace() {
 						<CardFooter className="flex flex-wrap gap-2">
 							<Button type="button" variant="outline" size="sm" onClick={() => void handleCopyEmbed("iframe", embedSnippet)}>
 								{copiedTarget === "iframe" ? <Check className="size-4" /> : <Copy className="size-4" />}
-								{copiedTarget === "iframe" ? "Copied" : "Copy iframe only"}
+								{copiedTarget === "iframe" ? "Copied" : "Copy embed snippet"}
 							</Button>
 							{fullEmbedSnippet ? (
 								<Button
@@ -323,6 +475,46 @@ export function ToolBuilderWorkspace() {
 							) : null}
 						</CardFooter>
 					</Card>
+
+					{toolHistory.length > 0 ? (
+						<Card className="lg:col-span-2">
+							<CardHeader>
+								<CardTitle className="flex items-center gap-2">
+									<History className="size-4" />
+									Version history
+								</CardTitle>
+								<CardDescription>
+									Previous versions of this tool, kept so a revision can be undone. Restoring creates a new version
+									(v{activeTool.version + 1}) with the old content — it doesn&apos;t rewrite history.
+								</CardDescription>
+							</CardHeader>
+							<CardContent>
+								<ul className="divide-y rounded-lg border">
+									{toolHistory.map((entry) => (
+										<li key={entry.version} className="flex items-center justify-between gap-4 px-4 py-3">
+											<div className="min-w-0">
+												<p className="text-sm font-medium">Version {entry.version}</p>
+												<p className="truncate text-xs text-muted-foreground">
+													{formatTimestamp(entry.createdAt)} · {entry.prompt.slice(0, 80)}
+													{entry.prompt.length > 80 ? "…" : ""}
+												</p>
+											</div>
+											<Button
+												type="button"
+												variant="outline"
+												size="sm"
+												className="shrink-0"
+												disabled={requestState !== "idle"}
+												onClick={() => void handleRollback(entry.version)}
+											>
+												Restore
+											</Button>
+										</li>
+									))}
+								</ul>
+							</CardContent>
+						</Card>
+					) : null}
 					<Separator className="lg:col-span-2" />
 				</>
 			) : null}
@@ -353,7 +545,8 @@ export function ToolBuilderWorkspace() {
 									<div className="min-w-0">
 										<p className="truncate text-sm font-medium">{item.projectName}</p>
 										<p className="truncate text-xs text-muted-foreground">
-											{formatTimestamp(item.createdAt)}
+											{formatTimestamp(item.updatedAt)}
+											{item.version > 1 ? ` · v${item.version}` : ""}
 											{item.siteUrl ? ` · ${item.siteUrl}` : ""}
 										</p>
 									</div>
@@ -394,11 +587,11 @@ function StatusAlert({ message }: { message: StatusMessage }) {
 	);
 }
 
-function toStatusMessage(result: ToolGenerationResult): StatusMessage {
+function toStatusMessage(result: ToolGenerationResult, isUpdate: boolean): StatusMessage {
 	if (result.status === "success") {
 		return {
-			title: "Tool generated",
-			description: `"${result.tool.projectName}" is ready to preview and embed.${
+			title: isUpdate ? "Tool updated" : "Tool generated",
+			description: `"${result.tool.projectName}" ${isUpdate ? `is now v${result.tool.version}` : "is ready to preview and embed"}.${
 				result.tool.warnings.length ? " See generation notes below." : ""
 			}`,
 			tone: result.tool.warnings.length ? "warning" : "success",
@@ -407,7 +600,7 @@ function toStatusMessage(result: ToolGenerationResult): StatusMessage {
 	if (result.status === "not_configured") {
 		return { title: "Generation not configured", description: result.message, tone: "warning" };
 	}
-	return { title: "Generation failed", description: result.message, tone: "destructive" };
+	return { title: isUpdate ? "Update failed" : "Generation failed", description: result.message, tone: "destructive" };
 }
 
 function formatTimestamp(iso: string): string {

@@ -1,0 +1,43 @@
+# Porter application manifest — defines the service that runs this app on
+# Porter (porter.run). Values wrapped in ${{...}} are set as env group /
+# secret references in the Porter dashboard, never committed here.
+#
+# Deploy with: porter app apply
+# (requires `porter auth login` + `porter project set` / `porter app link`
+# to target the right project/cluster first — see README for the one-time
+# setup a human needs to do before this file works.)
+
+version: v2
+name: letterstory-toolbuilder-staging
+
+build:
+  method: docker
+  dockerfile: ./Dockerfile
+  context: .
+
+env:
+  # Plain, non-secret defaults only. The real secrets (ANTHROPIC_API_KEY,
+  # FIRECRAWL_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY) come from the
+  # `letterstory-toolbuilder-secrets` env group attached to this app
+  # (see `porter app update --attach-env-groups` / the Porter dashboard) —
+  # never written here in plaintext.
+  ANTHROPIC_MODEL: claude-sonnet-4-6
+  FIRECRAWL_BASE_URL: https://api.firecrawl.dev
+  PORTER_ENVIRONMENT: staging
+
+services:
+  - name: web
+    type: web
+    run: node server.js
+    port: 3000
+    healthCheck:
+      enabled: true
+      httpPath: /api/health
+    autoscaling:
+      enabled: true
+      minInstances: 1
+      maxInstances: 3
+      targetCPUUtilizationPercentage: 70
+    resources:
+      cpuCores: 0.5
+      ramMegabytes: 512

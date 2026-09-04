@@ -1,0 +1,100 @@
+// Shared types + constants for generated-tool storage. Split out from the
+// storage implementation itself so both backends (store.file.ts,
+// store.supabase.ts) and the dispatcher (store.ts) can depend on the same
+// shapes without a circular import.
+
+export interface GeneratedToolBrandSnapshot {
+	brandName: string | null;
+	colors: Record<string, string>;
+	fonts: string[];
+	logoDataUri: string | null;
+}
+
+export interface GeneratedToolCopy {
+	headline: string;
+	supportingCopy: string;
+}
+
+export type BrandFidelityVerdict = "pass" | "warn" | "fail";
+
+export interface GeneratedToolBrandFidelity {
+	verdict: BrandFidelityVerdict;
+	notes: string;
+}
+
+/** The generated artifact + everything Claude was told to produce it — shared between the live record and each stored history snapshot. */
+export type GeneratedToolContent = {
+	projectName: string;
+	prompt: string;
+	siteUrl: string | null;
+	brandSnapshot: GeneratedToolBrandSnapshot | null;
+	html: string;
+	/** Headline + supporting copy meant to sit above the iframe on the customer's own CMS page. */
+	copy: GeneratedToolCopy | null;
+	/** Advisory-only LLM cross-check of whether the generated tool's styling is faithful to the brand. */
+	brandFidelity: GeneratedToolBrandFidelity | null;
+	model: string;
+	warnings: string[];
+};
+
+/** A previous version's full content, kept so a tool can be rolled back after a bad revision. */
+export interface GeneratedToolHistoryEntry extends GeneratedToolContent {
+	version: number;
+	createdAt: string;
+}
+
+export interface GeneratedToolRecord extends GeneratedToolContent {
+	id: string;
+	createdAt: string;
+	/** Bumped on every revision; stays at 1 for a tool that's never been edited. */
+	version: number;
+	updatedAt: string;
+	/** Most-recent-first, capped at MAX_HISTORY_ENTRIES. */
+	history: GeneratedToolHistoryEntry[];
+}
+
+// Iterative editing keeps the same tool id/embed URL forever, so history
+// would otherwise grow unbounded (and each entry carries a full HTML body) —
+// cap it to a handful of recent versions, enough for a practical "undo".
+export const MAX_HISTORY_ENTRIES = 5;
+
+/** Storage backend contract — implemented by both store.file.ts (dev fallback) and store.supabase.ts (durable/multi-instance). */
+export interface ToolStoreBackend {
+	saveGeneratedTool(input: GeneratedToolContent): Promise<GeneratedToolRecord>;
+	getGeneratedTool(id: string): Promise<GeneratedToolRecord | null>;
+	updateGeneratedTool(id: string, updates: GeneratedToolContent): Promise<GeneratedToolRecord | null>;
+	rollbackGeneratedTool(id: string, toVersion: number): Promise<GeneratedToolRecord | null>;
+	listGeneratedTools(): Promise<GeneratedToolRecord[]>;
+}
+
+/** Builds the history snapshot for the content a revision is about to replace — shared by every backend's updateGeneratedTool. */
+export function buildHistoryEntry(existing: GeneratedToolRecord): GeneratedToolHistoryEntry {
+	return {
+		projectName: existing.projectName,
+		prompt: existing.prompt,
+		siteUrl: existing.siteUrl,
+		brandSnapshot: existing.brandSnapshot,
+		html: existing.html,
+		copy: existing.copy,
+		brandFidelity: existing.brandFidelity,
+		model: existing.model,
+		warnings: existing.warnings,
+		version: existing.version,
+		createdAt: existing.updatedAt,
+	};
+}
+
+/** Extracts the revisable content fields from a history entry, for rollback. */
+export function contentFromHistoryEntry(entry: GeneratedToolHistoryEntry): GeneratedToolContent {
+	return {
+		projectName: entry.projectName,
+		prompt: entry.prompt,
+		siteUrl: entry.siteUrl,
+		brandSnapshot: entry.brandSnapshot,
+		html: entry.html,
+		copy: entry.copy,
+		brandFidelity: entry.brandFidelity,
+		model: entry.model,
+		warnings: entry.warnings,
+	};
+}

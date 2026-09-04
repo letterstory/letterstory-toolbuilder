@@ -19,7 +19,9 @@ import { envServer } from "@/lib/config/env.server";
 import { isBrandIngestionConfigured, pullBrandProfile, type BrandProfile } from "@/lib/brand";
 import { looksLikeHtmlDocument, sanitizeGeneratedHtml, type SanitizedHtml } from "@/lib/generation/sanitize";
 import {
+	getGeneratedTool,
 	saveGeneratedTool,
+	updateGeneratedTool,
 	type GeneratedToolBrandFidelity,
 	type GeneratedToolBrandSnapshot,
 	type GeneratedToolCopy,
@@ -31,6 +33,14 @@ export interface ToolGenerationRequest {
 	/** Optional — leave blank to generate without brand context. */
 	siteUrl: string;
 	prompt: string;
+	/**
+	 * When set, revises the existing tool with this id in place (same id/embed
+	 * URL, version bumped, previous content kept in history) instead of
+	 * creating a brand-new tool. The prompt is treated as revision
+	 * instructions and Claude is given the tool's current HTML to edit rather
+	 * than starting from a blank page.
+	 */
+	toolId?: string;
 }
 
 export interface ToolGenerationSuccessResult {
@@ -75,10 +85,109 @@ export async function generateTool(request: ToolGenerationRequest): Promise<Tool
 		return { status: "error", message: "Describe the tool you want generated." };
 	}
 
+	if (request.toolId) {
+		return reviseTool(request.toolId, request);
+	}
+
 	const normalizedSiteUrl = request.siteUrl.trim();
 	const { brandProfile, brandWarning } = await resolveBrandContext(normalizedSiteUrl);
 	const brandSnapshot = toBrandSnapshot(brandProfile);
 
+	const built = await buildToolContent({
+		projectName: request.projectName,
+		prompt: request.prompt,
+		brandSnapshot,
+		brandWarning,
+	});
+	if (built.status === "error") return built;
+
+	const tool = await saveGeneratedTool({
+		...built.content,
+		projectName: request.projectName.trim() || "Untitled tool",
+		siteUrl: normalizedSiteUrl || null,
+	});
+
+	return { status: "success", tool };
+}
+
+/**
+ * Revises an existing tool in place: Claude is given the tool's current full
+ * HTML and treats the prompt as edit instructions rather than a fresh brief,
+ * so the result keeps the same id/embed URL and (per Mathew's "modified
+ * quickly" requirement) doesn't force the customer to start over or re-embed
+ * anything. The previous version is kept in `history` for rollback.
+ */
+async function reviseTool(toolId: string, request: ToolGenerationRequest): Promise<ToolGenerationResult> {
+	const existing = await getGeneratedTool(toolId);
+	if (!existing) {
+		return { status: "error", message: "Could not find the tool to update — it may have been removed." };
+	}
+
+	const normalizedSiteUrl = request.siteUrl.trim();
+	// Re-pulling brand context on every small wording tweak would mean an
+	// extra Firecrawl + Claude round trip per revision for no benefit — only
+	// re-resolve it when the customer actually points at a different site.
+	let brandSnapshot = existing.brandSnapshot;
+	let brandWarning: string | null = null;
+	if (normalizedSiteUrl && normalizedSiteUrl !== (existing.siteUrl ?? "")) {
+		const resolved = await resolveBrandContext(normalizedSiteUrl);
+		brandSnapshot = toBrandSnapshot(resolved.brandProfile);
+		brandWarning = resolved.brandWarning;
+	}
+
+	const built = await buildToolContent({
+		projectName: request.projectName || existing.projectName,
+		prompt: request.prompt,
+		brandSnapshot,
+		brandWarning,
+		existingHtml: existing.html,
+	});
+	if (built.status === "error") return built;
+
+	const tool = await updateGeneratedTool(toolId, {
+		...built.content,
+		projectName: (request.projectName || existing.projectName).trim() || existing.projectName,
+		siteUrl: normalizedSiteUrl || existing.siteUrl,
+		// Keep the previous copy if this revision's copy generation failed,
+		// rather than blanking out perfectly good existing copy.
+		copy: built.content.copy ?? existing.copy,
+	});
+	if (!tool) {
+		return { status: "error", message: "Could not save the revised tool — it may have been removed." };
+	}
+
+	return { status: "success", tool };
+}
+
+interface BuildToolContentResult {
+	status: "success";
+	content: {
+		projectName: string;
+		prompt: string;
+		siteUrl: string | null;
+		brandSnapshot: GeneratedToolBrandSnapshot | null;
+		html: string;
+		copy: GeneratedToolCopy | null;
+		brandFidelity: GeneratedToolBrandFidelity | null;
+		model: string;
+		warnings: string[];
+	};
+}
+
+/**
+ * Shared core between a fresh build and a revision: run the (possibly
+ * retried) HTML generation, then the two advisory enrichments. `existingHtml`
+ * is the only thing that distinguishes "build from scratch" from "revise in
+ * place" at this layer — everything else (brand context, retries, advisory
+ * checks) works the same either way.
+ */
+async function buildToolContent(opts: {
+	projectName: string;
+	prompt: string;
+	brandSnapshot: GeneratedToolBrandSnapshot | null;
+	brandWarning: string | null;
+	existingHtml?: string;
+}): Promise<BuildToolContentResult | { status: "error"; message: string }> {
 	// A single bad or slow generation (truncated by max_tokens, the model
 	// wrapping the doc in prose, or a transient Anthropic timeout/5xx)
 	// shouldn't cost the customer a full manual retry — we get one automatic
@@ -89,10 +198,11 @@ export async function generateTool(request: ToolGenerationRequest): Promise<Tool
 		let rawHtml: string;
 		try {
 			rawHtml = await requestToolHtml({
-				projectName: request.projectName,
-				prompt: request.prompt,
-				brandSnapshot,
+				projectName: opts.projectName,
+				prompt: opts.prompt,
+				brandSnapshot: opts.brandSnapshot,
 				isRetry: attempt > 1,
+				existingHtml: opts.existingHtml,
 			});
 		} catch (error) {
 			lastErrorMessage = error instanceof Error ? error.message : String(error);
@@ -104,17 +214,23 @@ export async function generateTool(request: ToolGenerationRequest): Promise<Tool
 			sanitized = candidate;
 			break;
 		}
-		lastErrorMessage = "Generation returned an incomplete or invalid HTML document.";
+		lastErrorMessage = opts.existingHtml
+			? "Revision returned an incomplete or invalid HTML document."
+			: "Generation returned an incomplete or invalid HTML document.";
 	}
 
 	if (!sanitized) {
 		return {
 			status: "error",
-			message: lastErrorMessage ?? "Generation did not return a usable HTML document. Try again or refine the prompt.",
+			message:
+				lastErrorMessage ??
+				(opts.existingHtml
+					? "Revision did not return a usable HTML document. Try again or refine the instructions."
+					: "Generation did not return a usable HTML document. Try again or refine the prompt."),
 		};
 	}
 
-	const warnings = [...(brandWarning ? [brandWarning] : []), ...sanitized.warnings];
+	const warnings = [...(opts.brandWarning ? [opts.brandWarning] : []), ...sanitized.warnings];
 
 	// Both of these are advisory, fail-soft enrichments — Mathew's brief
 	// explicitly calls for (a) supporting headline/copy around the embedded
@@ -122,17 +238,17 @@ export async function generateTool(request: ToolGenerationRequest): Promise<Tool
 	// drift from the brand. Neither should block shipping the tool itself;
 	// a failure just surfaces as a warning for the customer to review.
 	const copy = await requestSupportingCopy({
-		projectName: request.projectName,
-		prompt: request.prompt,
-		brandSnapshot,
+		projectName: opts.projectName,
+		prompt: opts.prompt,
+		brandSnapshot: opts.brandSnapshot,
 	});
 	if (!copy) {
 		warnings.push("Could not generate supporting headline/copy for this tool — add your own before embedding.");
 	}
 
 	let brandFidelity: GeneratedToolBrandFidelity | null = null;
-	if (brandSnapshot) {
-		brandFidelity = await requestBrandFidelityCheck({ html: sanitized.html, brandSnapshot });
+	if (opts.brandSnapshot) {
+		brandFidelity = await requestBrandFidelityCheck({ html: sanitized.html, brandSnapshot: opts.brandSnapshot });
 		if (!brandFidelity) {
 			warnings.push("Brand fidelity check could not be completed for this tool.");
 		} else if (brandFidelity.verdict !== "pass") {
@@ -144,19 +260,20 @@ export async function generateTool(request: ToolGenerationRequest): Promise<Tool
 		}
 	}
 
-	const tool = await saveGeneratedTool({
-		projectName: request.projectName.trim() || "Untitled tool",
-		prompt: request.prompt,
-		siteUrl: normalizedSiteUrl || null,
-		brandSnapshot,
-		html: sanitized.html,
-		copy,
-		brandFidelity,
-		model: envServer.ANTHROPIC_MODEL || DEFAULT_ANTHROPIC_MODEL,
-		warnings,
-	});
-
-	return { status: "success", tool };
+	return {
+		status: "success",
+		content: {
+			projectName: opts.projectName.trim() || "Untitled tool",
+			prompt: opts.prompt,
+			siteUrl: null,
+			brandSnapshot: opts.brandSnapshot,
+			html: sanitized.html,
+			copy,
+			brandFidelity,
+			model: envServer.ANTHROPIC_MODEL || DEFAULT_ANTHROPIC_MODEL,
+			warnings,
+		},
+	};
 }
 
 /**
@@ -203,15 +320,24 @@ async function requestToolHtml(opts: {
 	prompt: string;
 	brandSnapshot: GeneratedToolBrandSnapshot | null;
 	isRetry?: boolean;
+	/** When set, this is a revision: edit this HTML per the prompt instead of building from scratch. */
+	existingHtml?: string;
 }): Promise<string> {
 	const apiKey = envServer.ANTHROPIC_API_KEY;
 	if (!apiKey) {
 		throw new Error("Tool generation requires Anthropic (ANTHROPIC_API_KEY is unset)");
 	}
 	const model = envServer.ANTHROPIC_MODEL || DEFAULT_ANTHROPIC_MODEL;
+	const isRevision = Boolean(opts.existingHtml);
 
 	const instructions = [
 		"You are a senior product engineer building a small, real, functional web tool for a customer to embed on their own website as an iframe.",
+		...(isRevision
+			? [
+					"You are REVISING an existing tool, not starting from scratch. The user's message includes the tool's CURRENT full HTML source followed by revision instructions describing what should change.",
+					"Keep everything that isn't called out for change — working logic, structure, brand styling, copy — and edit only what the instructions ask for, unless they clearly imply a broader change. Do not regress or remove working functionality as a side effect.",
+				]
+			: []),
 		"Output ONLY a single self-contained HTML5 document. No markdown fences, no commentary, no explanation before or after.",
 		"Hard requirements:",
 		"- Start with <!doctype html> and include <html>, <head>, and <body>.",
@@ -222,6 +348,7 @@ async function requestToolHtml(opts: {
 		"- If brand tokens are provided below, use them for the visual identity: primary/accent colors, font family names (assume standard web-safe fallbacks after the named font), and the logo image if given as a data URI. Do not fabricate a different brand.",
 		"- Keep the whole document self-sufficient and safe: no forms that submit to external endpoints, no fetch()/XMLHttpRequest calls to external hosts.",
 		"- Include a small, unobtrusive 'Powered by Letterstory' text credit near the bottom.",
+		...(isRevision ? ["- Return the ENTIRE updated document (not a diff/patch), following all the requirements above."] : []),
 	].join("\n");
 
 	const brandContext = opts.brandSnapshot
@@ -235,7 +362,9 @@ async function requestToolHtml(opts: {
 
 	const userContent = [
 		`Tool name: ${opts.projectName || "Untitled tool"}`,
-		`Tool request: ${opts.prompt}`,
+		...(isRevision
+			? ["", "Current tool HTML (this is what you are revising):", opts.existingHtml as string, "", `Revision instructions: ${opts.prompt}`]
+			: [`Tool request: ${opts.prompt}`]),
 		"",
 		"Brand context:",
 		brandContext,

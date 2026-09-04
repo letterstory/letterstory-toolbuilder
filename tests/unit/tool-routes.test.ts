@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 const generateToolMock = vi.hoisted(() => vi.fn());
 const getGeneratedToolMock = vi.hoisted(() => vi.fn());
 const listGeneratedToolsMock = vi.hoisted(() => vi.fn());
+const rollbackGeneratedToolMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/generation", () => ({
 	generateTool: generateToolMock,
@@ -11,10 +12,13 @@ vi.mock("@/lib/generation", () => ({
 vi.mock("@/lib/generation/store", () => ({
 	getGeneratedTool: getGeneratedToolMock,
 	listGeneratedTools: listGeneratedToolsMock,
+	rollbackGeneratedTool: rollbackGeneratedToolMock,
 }));
 
 import { POST as generatePost } from "../../src/app/api/tools/generate/route";
 import { GET as toolsListGet } from "../../src/app/api/tools/route";
+import { GET as toolDetailGet } from "../../src/app/api/tools/[id]/route";
+import { POST as toolRollbackPost } from "../../src/app/api/tools/[id]/rollback/route";
 import { GET as toolGet } from "../../src/app/t/[id]/route";
 
 describe("POST /api/tools/generate", () => {
@@ -44,13 +48,42 @@ describe("POST /api/tools/generate", () => {
 		expect(response.status).toBe(400);
 	});
 
-	it("proxies generateTool and returns 200 on success", async () => {
+	it("proxies generateTool including an optional toolId, and returns 200 on success", async () => {
 		generateToolMock.mockResolvedValueOnce({
 			status: "success",
 			tool: { id: "abc", projectName: "Calc" },
 		});
 
 		const response = await generatePost(
+			new Request("http://localhost/api/tools/generate", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					projectName: "Calc",
+					siteUrl: "https://stripe.com",
+					prompt: "a calculator",
+					toolId: "abc",
+				}),
+			})
+		);
+
+		expect(generateToolMock).toHaveBeenCalledWith({
+			projectName: "Calc",
+			siteUrl: "https://stripe.com",
+			prompt: "a calculator",
+			toolId: "abc",
+		});
+		expect(response.status).toBe(200);
+		await expect(response.json()).resolves.toMatchObject({ status: "success" });
+	});
+
+	it("omits toolId when not provided (fresh generation, not a revision)", async () => {
+		generateToolMock.mockResolvedValueOnce({
+			status: "success",
+			tool: { id: "abc", projectName: "Calc" },
+		});
+
+		await generatePost(
 			new Request("http://localhost/api/tools/generate", {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
@@ -62,9 +95,8 @@ describe("POST /api/tools/generate", () => {
 			projectName: "Calc",
 			siteUrl: "https://stripe.com",
 			prompt: "a calculator",
+			toolId: undefined,
 		});
-		expect(response.status).toBe(200);
-		await expect(response.json()).resolves.toMatchObject({ status: "success" });
 	});
 
 	it("returns 400 when generateTool reports an error", async () => {
@@ -126,6 +158,9 @@ describe("GET /api/tools", () => {
 				model: "claude-sonnet-4-6",
 				warnings: [],
 				createdAt: "2024-01-01T00:00:00.000Z",
+				updatedAt: "2024-01-02T00:00:00.000Z",
+				version: 2,
+				history: [{ version: 1, createdAt: "2024-01-01T00:00:00.000Z" }],
 			},
 		]);
 
@@ -136,11 +171,122 @@ describe("GET /api/tools", () => {
 		expect(body.status).toBe("success");
 		expect(body.tools).toHaveLength(1);
 		expect(body.tools[0]).not.toHaveProperty("html");
+		expect(body.tools[0]).not.toHaveProperty("history");
 		expect(body.tools[0]).toMatchObject({
 			id: "abc",
 			projectName: "Calc",
 			copy: { headline: "Test headline", supportingCopy: "Test copy." },
 			brandFidelity: { verdict: "pass", notes: "" },
+			updatedAt: "2024-01-02T00:00:00.000Z",
+			version: 2,
+			previousVersionCount: 1,
 		});
+	});
+});
+
+describe("GET /api/tools/[id]", () => {
+	it("returns 404 when the tool doesn't exist", async () => {
+		getGeneratedToolMock.mockResolvedValueOnce(null);
+
+		const response = await toolDetailGet(new Request("http://localhost/api/tools/missing"), {
+			params: Promise.resolve({ id: "missing" }),
+		});
+
+		expect(response.status).toBe(404);
+	});
+
+	it("returns tool detail with html stripped from the record and every history entry", async () => {
+		getGeneratedToolMock.mockResolvedValueOnce({
+			id: "abc",
+			projectName: "Calc",
+			prompt: "a calculator",
+			siteUrl: null,
+			brandSnapshot: null,
+			html: "<!doctype html>current</html>",
+			copy: null,
+			brandFidelity: null,
+			model: "claude-sonnet-4-6",
+			warnings: [],
+			createdAt: "2024-01-01T00:00:00.000Z",
+			updatedAt: "2024-01-02T00:00:00.000Z",
+			version: 2,
+			history: [
+				{
+					version: 1,
+					createdAt: "2024-01-01T00:00:00.000Z",
+					projectName: "Calc",
+					prompt: "a calculator",
+					siteUrl: null,
+					brandSnapshot: null,
+					html: "<!doctype html>old</html>",
+					copy: null,
+					brandFidelity: null,
+					model: "claude-sonnet-4-6",
+					warnings: [],
+				},
+			],
+		});
+
+		const response = await toolDetailGet(new Request("http://localhost/api/tools/abc"), {
+			params: Promise.resolve({ id: "abc" }),
+		});
+		const body = (await response.json()) as { status: string; tool: Record<string, unknown> };
+
+		expect(response.status).toBe(200);
+		expect(body.tool).not.toHaveProperty("html");
+		expect(body.tool.id).toBe("abc");
+		expect(body.tool.version).toBe(2);
+		const history = body.tool.history as Array<Record<string, unknown>>;
+		expect(history).toHaveLength(1);
+		expect(history[0]).not.toHaveProperty("html");
+		expect(history[0]).toMatchObject({ version: 1 });
+	});
+});
+
+describe("POST /api/tools/[id]/rollback", () => {
+	it("returns 400 when version is missing or not a number", async () => {
+		const response = await toolRollbackPost(
+			new Request("http://localhost/api/tools/abc/rollback", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({}),
+			}),
+			{ params: Promise.resolve({ id: "abc" }) }
+		);
+
+		expect(response.status).toBe(400);
+		expect(rollbackGeneratedToolMock).not.toHaveBeenCalled();
+	});
+
+	it("returns 404 when rollbackGeneratedTool can't find the tool/version", async () => {
+		rollbackGeneratedToolMock.mockResolvedValueOnce(null);
+
+		const response = await toolRollbackPost(
+			new Request("http://localhost/api/tools/abc/rollback", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ version: 1 }),
+			}),
+			{ params: Promise.resolve({ id: "abc" }) }
+		);
+
+		expect(response.status).toBe(404);
+	});
+
+	it("rolls back and returns the restored tool on success", async () => {
+		rollbackGeneratedToolMock.mockResolvedValueOnce({ id: "abc", version: 3 });
+
+		const response = await toolRollbackPost(
+			new Request("http://localhost/api/tools/abc/rollback", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ version: 1 }),
+			}),
+			{ params: Promise.resolve({ id: "abc" }) }
+		);
+
+		expect(rollbackGeneratedToolMock).toHaveBeenCalledWith("abc", 1);
+		expect(response.status).toBe(200);
+		await expect(response.json()).resolves.toMatchObject({ status: "success", tool: { id: "abc", version: 3 } });
 	});
 });

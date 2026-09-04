@@ -1,4 +1,5 @@
 import { getGeneratedTool } from "@/lib/generation/store";
+import { injectResizeReporter } from "@/lib/embed/contract";
 
 /**
  * Serves a generated tool's raw HTML document for iframe embedding on a
@@ -25,7 +26,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 		});
 	}
 
-	return new Response(tool.html, {
+	return new Response(injectResizeReporter(tool.html, tool.id), {
 		status: 200,
 		headers: {
 			"content-type": "text/html; charset=utf-8",

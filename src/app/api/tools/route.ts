@@ -16,6 +16,11 @@ export async function GET() {
 		model: tool.model,
 		warnings: tool.warnings,
 		createdAt: tool.createdAt,
+		updatedAt: tool.updatedAt,
+		version: tool.version,
+		// History carries full past HTML bodies — omitted here for the same
+		// reason `html` is: the list view only needs metadata for cards/links.
+		previousVersionCount: tool.history.length,
 	}));
 	return NextResponse.json({ status: "success", tools: summaries });
 }

@@ -23,4 +23,17 @@ export const envServer = {
 	get PORTER_ENVIRONMENT() {
 		return process.env.PORTER_ENVIRONMENT?.trim() || "development";
 	},
+	// Backs both durable tool storage (src/lib/generation/store.ts) and the
+	// cross-instance rate limiter (src/lib/security/rate-limit.ts). Both
+	// modules fall back to a local-only implementation when these are unset,
+	// so the app keeps working without a Supabase project for local dev.
+	get SUPABASE_URL() {
+		return process.env.SUPABASE_URL?.trim() ?? "";
+	},
+	// Service-role key — server-only, never exposed to the client. Required
+	// because tool storage/rate-limit writes happen from trusted server code
+	// (API routes), not from end-user browsers, and need to bypass RLS.
+	get SUPABASE_SERVICE_ROLE_KEY() {
+		return process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() ?? "";
+	},
 };

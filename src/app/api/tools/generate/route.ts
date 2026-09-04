@@ -1,9 +1,24 @@
 import { NextResponse } from "next/server";
 import { generateTool } from "@/lib/generation";
+import { checkRateLimit, getClientIp } from "@/lib/security/rate-limit";
+
+// Tool generation is the most expensive route in the app (up to three
+// Anthropic calls per request: HTML build + one retry + advisory copy/
+// fidelity checks) and is reachable with no auth, so it gets the tightest
+// limit of the paid-API-backed routes.
+const RATE_LIMIT = { bucket: "tools.generate", max: 10, windowSeconds: 600 };
 
 export async function POST(request: Request) {
+	const rate = await checkRateLimit(getClientIp(request), RATE_LIMIT);
+	if (!rate.allowed) {
+		return NextResponse.json(
+			{ status: "error", message: "Too many tool generation requests — please wait a bit and try again." },
+			{ status: 429, headers: { "Retry-After": String(rate.retryAfterSeconds) } }
+		);
+	}
+
 	const body = (await request.json().catch(() => null)) as
-		| { projectName?: unknown; siteUrl?: unknown; prompt?: unknown }
+		| { projectName?: unknown; siteUrl?: unknown; prompt?: unknown; toolId?: unknown }
 		| null;
 
 	if (!body || typeof body.prompt !== "string" || !body.prompt.trim()) {
@@ -17,6 +32,7 @@ export async function POST(request: Request) {
 		projectName: typeof body.projectName === "string" ? body.projectName : "",
 		siteUrl: typeof body.siteUrl === "string" ? body.siteUrl : "",
 		prompt: body.prompt,
+		toolId: typeof body.toolId === "string" && body.toolId.trim() ? body.toolId.trim() : undefined,
 	});
 
 	return NextResponse.json(result, { status: result.status === "success" ? 200 : 400 });

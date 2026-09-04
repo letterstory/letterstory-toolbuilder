@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const pullBrandProfileMock = vi.hoisted(() => vi.fn());
 const isBrandIngestionConfiguredMock = vi.hoisted(() => vi.fn());
 const saveGeneratedToolMock = vi.hoisted(() => vi.fn());
+const getGeneratedToolMock = vi.hoisted(() => vi.fn());
+const updateGeneratedToolMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/brand", () => ({
 	pullBrandProfile: pullBrandProfileMock,
@@ -11,6 +13,8 @@ vi.mock("@/lib/brand", () => ({
 
 vi.mock("@/lib/generation/store", () => ({
 	saveGeneratedTool: saveGeneratedToolMock,
+	getGeneratedTool: getGeneratedToolMock,
+	updateGeneratedTool: updateGeneratedToolMock,
 }));
 
 import { generateTool, isToolGenerationConfigured } from "../../src/lib/generation/orchestrator";
@@ -52,6 +56,8 @@ describe("generateTool", () => {
 		pullBrandProfileMock.mockReset();
 		isBrandIngestionConfiguredMock.mockReset();
 		saveGeneratedToolMock.mockReset();
+		getGeneratedToolMock.mockReset();
+		updateGeneratedToolMock.mockReset();
 		global.fetch = originalFetch;
 
 		for (const [key, value] of Object.entries(originalEnv)) {
@@ -65,6 +71,17 @@ describe("generateTool", () => {
 			...input,
 			id: "tool-123",
 			createdAt: "2024-01-01T00:00:00.000Z",
+			updatedAt: "2024-01-01T00:00:00.000Z",
+			version: 1,
+			history: [],
+		}));
+		updateGeneratedToolMock.mockImplementation(async (id, updates) => ({
+			...updates,
+			id,
+			createdAt: "2024-01-01T00:00:00.000Z",
+			updatedAt: "2024-01-02T00:00:00.000Z",
+			version: 2,
+			history: [],
 		}));
 	});
 
@@ -334,5 +351,168 @@ describe("generateTool", () => {
 		expect(fetchMock).toHaveBeenCalledTimes(2);
 		expect(result.status).toBe("error");
 		expect(saveGeneratedToolMock).not.toHaveBeenCalled();
+	});
+});
+
+describe("generateTool — revisions (toolId set)", () => {
+	beforeEach(() => {
+		vi.restoreAllMocks();
+		pullBrandProfileMock.mockReset();
+		isBrandIngestionConfiguredMock.mockReset();
+		saveGeneratedToolMock.mockReset();
+		getGeneratedToolMock.mockReset();
+		updateGeneratedToolMock.mockReset();
+		global.fetch = originalFetch;
+		process.env.ANTHROPIC_API_KEY = "test-key";
+		delete process.env.ANTHROPIC_MODEL;
+
+		updateGeneratedToolMock.mockImplementation(async (id, updates) => ({
+			...updates,
+			id,
+			createdAt: "2024-01-01T00:00:00.000Z",
+			updatedAt: "2024-01-02T00:00:00.000Z",
+			version: 2,
+			history: [],
+		}));
+	});
+
+	const existingTool = {
+		id: "tool-123",
+		projectName: "Mileage Calculator",
+		prompt: "original prompt",
+		siteUrl: null,
+		brandSnapshot: null,
+		html: "<!doctype html><html><body>original</body></html>",
+		copy: { headline: "Old headline", supportingCopy: "Old copy." },
+		brandFidelity: null,
+		model: "claude-sonnet-4-6",
+		warnings: [],
+		createdAt: "2024-01-01T00:00:00.000Z",
+		updatedAt: "2024-01-01T00:00:00.000Z",
+		version: 1,
+		history: [],
+	};
+
+	it("errors when the tool to revise can't be found", async () => {
+		getGeneratedToolMock.mockResolvedValue(null);
+
+		const result = await generateTool({
+			projectName: "",
+			siteUrl: "",
+			prompt: "add a dark mode toggle",
+			toolId: "missing-id",
+		});
+
+		expect(result.status).toBe("error");
+		if (result.status === "error") {
+			expect(result.message).toMatch(/could not find the tool/i);
+		}
+		expect(updateGeneratedToolMock).not.toHaveBeenCalled();
+	});
+
+	it("passes the existing HTML back to Claude and revises in place, keeping the same id", async () => {
+		getGeneratedToolMock.mockResolvedValue(existingTool);
+		mockAnthropicSuccess("<!doctype html><html><body>revised</body></html>");
+
+		const result = await generateTool({
+			projectName: "Mileage Calculator",
+			siteUrl: "",
+			prompt: "add a dark mode toggle",
+			toolId: "tool-123",
+		});
+
+		expect(result.status).toBe("success");
+		if (result.status === "success") {
+			expect(result.tool.id).toBe("tool-123");
+			expect(result.tool.version).toBe(2);
+			expect(result.tool.html).toContain("revised");
+		}
+
+		// The main-HTML call should have included the existing document + the
+		// new prompt as revision instructions, not a from-scratch brief.
+		const htmlCall = (global.fetch as ReturnType<typeof vi.fn>).mock.calls.find(([, init]) => {
+			const parsed = JSON.parse(String((init as RequestInit | undefined)?.body ?? "{}")) as { system?: string };
+			return !(parsed.system ?? "").includes("VERDICT:") && !(parsed.system ?? "").includes("HEADLINE:");
+		});
+		const htmlCallBody = JSON.parse(String((htmlCall?.[1] as RequestInit | undefined)?.body ?? "{}")) as {
+			system?: string;
+			messages?: Array<{ content: string }>;
+		};
+		expect(htmlCallBody.system).toMatch(/REVISING an existing tool/i);
+		expect(htmlCallBody.messages?.[0]?.content).toContain("original</body>");
+		expect(htmlCallBody.messages?.[0]?.content).toContain("add a dark mode toggle");
+
+		expect(updateGeneratedToolMock).toHaveBeenCalledWith(
+			"tool-123",
+			expect.objectContaining({ html: expect.stringContaining("revised") })
+		);
+	});
+
+	it("does not re-pull brand context on a revision when the site url is unchanged", async () => {
+		getGeneratedToolMock.mockResolvedValue({
+			...existingTool,
+			siteUrl: "https://stripe.com",
+			brandSnapshot: { brandName: "Stripe", colors: { primary: "#635bff" }, fonts: ["Inter"], logoDataUri: null },
+		});
+		mockAnthropicSuccess("<!doctype html><html><body>revised</body></html>");
+
+		const result = await generateTool({
+			projectName: "Mileage Calculator",
+			siteUrl: "https://stripe.com",
+			prompt: "add a dark mode toggle",
+			toolId: "tool-123",
+		});
+
+		expect(pullBrandProfileMock).not.toHaveBeenCalled();
+		expect(result.status).toBe("success");
+	});
+
+	it("re-pulls brand context on a revision when the site url changes", async () => {
+		getGeneratedToolMock.mockResolvedValue(existingTool);
+		isBrandIngestionConfiguredMock.mockReturnValue(true);
+		pullBrandProfileMock.mockResolvedValue({
+			brandName: "Linear",
+			colors: { primary: "#5e6ad2" },
+			fonts: ["Inter"],
+			images: { logo: { canonicalDataUri: null } },
+		});
+		mockAnthropicSuccess("<!doctype html><html><body>revised</body></html>");
+
+		const result = await generateTool({
+			projectName: "Mileage Calculator",
+			siteUrl: "https://linear.app",
+			prompt: "match Linear's branding",
+			toolId: "tool-123",
+		});
+
+		expect(pullBrandProfileMock).toHaveBeenCalledWith("https://linear.app");
+		expect(result.status).toBe("success");
+	});
+
+	it("keeps the previous copy when the revision's copy generation is unparseable", async () => {
+		getGeneratedToolMock.mockResolvedValue(existingTool);
+		global.fetch = vi.fn().mockImplementation(async (_url, init) => {
+			const parsedBody = JSON.parse(String((init as RequestInit | undefined)?.body ?? "{}")) as { system?: string };
+			if ((parsedBody.system ?? "").includes("HEADLINE:")) {
+				return new Response(JSON.stringify({ content: [{ type: "text", text: "nope" }] }), { status: 200 });
+			}
+			return new Response(
+				JSON.stringify({ content: [{ type: "text", text: "<!doctype html><html><body>revised</body></html>" }] }),
+				{ status: 200 }
+			);
+		}) as unknown as typeof fetch;
+
+		const result = await generateTool({
+			projectName: "Mileage Calculator",
+			siteUrl: "",
+			prompt: "add a dark mode toggle",
+			toolId: "tool-123",
+		});
+
+		expect(result.status).toBe("success");
+		expect(updateGeneratedToolMock).toHaveBeenCalledWith(
+			"tool-123",
+			expect.objectContaining({ copy: existingTool.copy })
+		);
 	});
 });
