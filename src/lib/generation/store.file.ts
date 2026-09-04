@@ -20,9 +20,38 @@ import {
 } from "./store.types";
 
 const STORE_DIR = path.join(process.cwd(), ".data", "tools");
+const memoryRecords = new Map<string, GeneratedToolRecord>();
+let storageMode: "file" | "memory" = "file";
 
-async function ensureStoreDir(): Promise<void> {
-	await mkdir(STORE_DIR, { recursive: true });
+function shouldFallbackToMemory(error: unknown): boolean {
+	return (
+		error instanceof Error &&
+		"code" in error &&
+		(error.code === "EACCES" || error.code === "EPERM" || error.code === "EROFS")
+	);
+}
+
+function activateMemoryFallback(error: unknown): void {
+	if (storageMode === "memory") return;
+	storageMode = "memory";
+	console.warn(
+		"[tool-store] File-backed storage is unavailable; falling back to in-memory generated tool storage.",
+		error instanceof Error ? error.message : String(error)
+	);
+}
+
+async function ensureStoreDir(): Promise<boolean> {
+	if (storageMode === "memory") return false;
+	try {
+		await mkdir(STORE_DIR, { recursive: true });
+		return true;
+	} catch (error) {
+		if (shouldFallbackToMemory(error)) {
+			activateMemoryFallback(error);
+			return false;
+		}
+		throw error;
+	}
 }
 
 function recordPath(id: string): string {
@@ -45,7 +74,6 @@ function normalizeRecord(record: GeneratedToolRecord): GeneratedToolRecord {
 }
 
 async function saveGeneratedTool(input: GeneratedToolContent): Promise<GeneratedToolRecord> {
-	await ensureStoreDir();
 	const now = new Date().toISOString();
 	const record: GeneratedToolRecord = {
 		...input,
@@ -55,15 +83,31 @@ async function saveGeneratedTool(input: GeneratedToolContent): Promise<Generated
 		version: 1,
 		history: [],
 	};
-	await writeFile(recordPath(record.id), JSON.stringify(record, null, 2), "utf8");
+	if (await ensureStoreDir()) {
+		try {
+			await writeFile(recordPath(record.id), JSON.stringify(record, null, 2), "utf8");
+			return record;
+		} catch (error) {
+			if (!shouldFallbackToMemory(error)) throw error;
+			activateMemoryFallback(error);
+		}
+	}
+	memoryRecords.set(record.id, record);
 	return record;
 }
 
 async function getGeneratedTool(id: string): Promise<GeneratedToolRecord | null> {
+	if (storageMode === "memory") {
+		return memoryRecords.get(id) ?? null;
+	}
 	try {
 		const raw = await readFile(recordPath(id), "utf8");
 		return normalizeRecord(JSON.parse(raw) as GeneratedToolRecord);
-	} catch {
+	} catch (error) {
+		if (shouldFallbackToMemory(error)) {
+			activateMemoryFallback(error);
+			return memoryRecords.get(id) ?? null;
+		}
 		return null;
 	}
 }
@@ -84,7 +128,17 @@ async function updateGeneratedTool(
 		version: existing.version + 1,
 		history: [previousSnapshot, ...existing.history].slice(0, MAX_HISTORY_ENTRIES),
 	};
-	await writeFile(recordPath(id), JSON.stringify(record, null, 2), "utf8");
+	if (storageMode === "memory") {
+		memoryRecords.set(id, record);
+		return record;
+	}
+	try {
+		await writeFile(recordPath(id), JSON.stringify(record, null, 2), "utf8");
+	} catch (error) {
+		if (!shouldFallbackToMemory(error)) throw error;
+		activateMemoryFallback(error);
+		memoryRecords.set(id, record);
+	}
 	return record;
 }
 
@@ -99,8 +153,13 @@ async function rollbackGeneratedTool(id: string, toVersion: number): Promise<Gen
 }
 
 async function listGeneratedTools(): Promise<GeneratedToolRecord[]> {
+	if (storageMode === "memory") {
+		return [...memoryRecords.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+	}
 	try {
-		await ensureStoreDir();
+		if (!(await ensureStoreDir())) {
+			return [...memoryRecords.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+		}
 		const files = await readdir(STORE_DIR);
 		const records = await Promise.all(
 			files
@@ -117,7 +176,11 @@ async function listGeneratedTools(): Promise<GeneratedToolRecord[]> {
 		return records
 			.filter((record): record is GeneratedToolRecord => record !== null)
 			.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-	} catch {
+	} catch (error) {
+		if (shouldFallbackToMemory(error)) {
+			activateMemoryFallback(error);
+			return [...memoryRecords.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+		}
 		return [];
 	}
 }
