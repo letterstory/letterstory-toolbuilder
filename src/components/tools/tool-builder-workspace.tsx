@@ -18,7 +18,7 @@ import { IFRAME_SANDBOX, buildEmbedSnippet } from "@/lib/embed/contract";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardAction, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
@@ -520,18 +520,18 @@ export function ToolBuilderWorkspace() {
 			) : null}
 
 			<Card className="lg:col-span-2">
-				<CardHeader className="flex-row items-center justify-between space-y-0">
-					<div>
-						<CardTitle className="flex items-center gap-2">
-							<History className="size-4" />
-							Recent tools
-						</CardTitle>
-						<CardDescription>Reopen a previously generated tool to preview or re-embed it.</CardDescription>
-					</div>
-					<Button type="button" variant="ghost" size="sm" onClick={() => void loadRecentTools()} disabled={recentLoading}>
-						<RefreshCw className={recentLoading ? "size-4 animate-spin" : "size-4"} />
-						Refresh
-					</Button>
+				<CardHeader>
+					<CardTitle className="flex items-center gap-2">
+						<History className="size-4" />
+						Recent tools
+					</CardTitle>
+					<CardDescription>Reopen a previously generated tool to preview or re-embed it.</CardDescription>
+					<CardAction>
+						<Button type="button" variant="ghost" size="sm" onClick={() => void loadRecentTools()} disabled={recentLoading}>
+							<RefreshCw className={recentLoading ? "size-4 animate-spin" : "size-4"} />
+							Refresh
+						</Button>
+					</CardAction>
 				</CardHeader>
 				<CardContent>
 					{recentTools.length === 0 ? (
