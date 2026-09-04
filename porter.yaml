@@ -33,6 +33,14 @@ services:
     healthCheck:
       enabled: true
       httpPath: /api/health
+    # /api/tools/generate can chain up to three sequential Anthropic calls
+    # (HTML build + retry + advisory copy/fidelity checks) and can run past
+    # nginx's default 60s proxy timeout, which returns an HTML 504 page that
+    # breaks client-side response.json() parsing. Give it headroom.
+    ingressAnnotations:
+      nginx.ingress.kubernetes.io/proxy-connect-timeout: "60"
+      nginx.ingress.kubernetes.io/proxy-send-timeout: "180"
+      nginx.ingress.kubernetes.io/proxy-read-timeout: "180"
     autoscaling:
       enabled: true
       minInstances: 1

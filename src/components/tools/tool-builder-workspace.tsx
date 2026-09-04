@@ -15,6 +15,7 @@ import {
 import type { ToolGenerationResult } from "@/lib/generation";
 import type { GeneratedToolRecord } from "@/lib/generation/store";
 import { IFRAME_SANDBOX, buildEmbedSnippet } from "@/lib/embed/contract";
+import { normalizeSiteUrl } from "@/lib/utils";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -149,13 +150,15 @@ export function ToolBuilderWorkspace() {
 			: "";
 
 	async function runGeneration(toolId: string | undefined) {
+		const normalizedSiteUrl = normalizeSiteUrl(siteUrl);
+		setSiteUrl(normalizedSiteUrl);
 		setRequestState(toolId ? "updating" : "generating");
 		setCopiedTarget(null);
 		setStatusMessage({
 			title: toolId ? "Updating tool" : "Generating tool",
 			description: toolId
 				? "Asking Claude to revise the current tool in place, using your new description as edit instructions. This can take up to a minute."
-				: siteUrl
+				: normalizedSiteUrl
 					? "Pulling brand context, then asking Claude to build the real tool logic. This can take up to a minute."
 					: "Asking Claude to build the real tool logic. This can take up to a minute.",
 			tone: "info",
@@ -165,8 +168,16 @@ export function ToolBuilderWorkspace() {
 			const response = await fetch("/api/tools/generate", {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ projectName, siteUrl, prompt, toolId }),
+				body: JSON.stringify({ projectName, siteUrl: normalizedSiteUrl, prompt, toolId }),
 			});
+			const contentType = response.headers.get("content-type") ?? "";
+			if (!contentType.includes("application/json")) {
+				throw new Error(
+					response.status === 504
+						? "The request timed out before the tool finished generating. Try a shorter description, or try again."
+						: `Unexpected ${response.status} response from the server — try again in a moment.`
+				);
+			}
 			const data = (await response.json()) as ToolGenerationResult;
 			setStatusMessage(toStatusMessage(data, Boolean(toolId)));
 			if (data.status === "success") {
@@ -301,6 +312,7 @@ export function ToolBuilderWorkspace() {
 									id="siteUrl"
 									value={siteUrl}
 									onChange={(event) => setSiteUrl(event.target.value)}
+									onBlur={(event) => setSiteUrl(normalizeSiteUrl(event.target.value))}
 									placeholder="https://stripe.com"
 								/>
 							</div>

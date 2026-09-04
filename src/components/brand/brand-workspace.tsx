@@ -40,16 +40,9 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
-import { cn } from "@/lib/utils";
+import { cn, normalizeSiteUrl } from "@/lib/utils";
 
 const INITIAL_URL = "https://stripe.com";
-
-/** Prepends https:// when the user omits a protocol (e.g. "google.com" -> "https://google.com"). */
-function normalizeSiteUrl(raw: string): string {
-	const trimmed = raw.trim();
-	if (!trimmed) return trimmed;
-	return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
-}
 
 type RequestState = "idle" | "loading" | "submitting-validation" | "submitting-compare";
 
