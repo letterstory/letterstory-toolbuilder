@@ -62,6 +62,12 @@ describe("buildEmbedIframeTag", () => {
 		expect(tag).toMatch(/min-height:\d+px/);
 		expect(tag).not.toMatch(/[^-]height:\d+px/);
 	});
+
+	it("keeps the iframe sandbox isolated from same-origin access", () => {
+		expect(IFRAME_SANDBOX).not.toContain("allow-same-origin");
+		const tag = buildEmbedIframeTag({ origin: "https://example.com", toolId: "abc123", projectName: "My Tool" });
+		expect(tag).toContain(`sandbox="${IFRAME_SANDBOX}"`);
+	});
 });
 
 describe("buildEmbedListenerScript", () => {
@@ -71,6 +77,12 @@ describe("buildEmbedListenerScript", () => {
 		expect(script).toContain(TOOL_RESIZE_MESSAGE_SOURCE);
 		expect(script).toContain("event.origin");
 		expect(script).toContain('"abc123"');
+	});
+
+	it("resizes the iframe only when the message payload matches the contract", () => {
+		const script = buildEmbedListenerScript("abc123");
+		expect(script).toContain("frame.style.height = data.height + \"px\"");
+		expect(script).toContain(`data.source !== ${JSON.stringify(TOOL_RESIZE_MESSAGE_SOURCE)}`);
 	});
 });
 

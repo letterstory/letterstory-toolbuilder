@@ -11,6 +11,7 @@
     "test": "vitest run",
     "brand:probe": "node --env-file=.env.local --import tsx scripts/test-brand-ingestion.ts",
     "smoke:generate": "node --env-file=.env.local --import tsx scripts/smoke-test-generate.ts",
+    "smoke:domains": "node --env-file=.env.local --import tsx scripts/domain-test-suite.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "brand:validate": "node --env-file=.env.local --import tsx scripts/test-brand-validation.ts"
