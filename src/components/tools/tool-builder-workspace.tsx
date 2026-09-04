@@ -60,7 +60,7 @@ export function ToolBuilderWorkspace() {
 	const [prompt, setPrompt] = useState(EXAMPLE_PROMPTS[0]);
 	const [requestState, setRequestState] = useState<RequestState>("idle");
 	const [statusMessage, setStatusMessage] = useState<StatusMessage>(INITIAL_STATUS);
-	const [copied, setCopied] = useState(false);
+	const [copiedTarget, setCopiedTarget] = useState<"iframe" | "full" | null>(null);
 
 	// The tool currently shown in the preview/embed panel — either a fresh
 	// generation or a previously generated one reopened from the recent list.
@@ -87,14 +87,23 @@ export function ToolBuilderWorkspace() {
 	}, [loadRecentTools]);
 
 	const previewUrl = activeTool ? `/t/${activeTool.id}` : null;
-	const embedSnippet = activeTool
+	const iframeTag = activeTool
 		? `<iframe src="${typeof window !== "undefined" ? window.location.origin : ""}/t/${activeTool.id}" sandbox="${IFRAME_SANDBOX}" style="width:100%;min-height:520px;border:0" title="${activeTool.projectName}"></iframe>`
 		: "";
+	const embedSnippet = iframeTag;
+	const fullEmbedSnippet =
+		activeTool && activeTool.copy
+			? [
+					`<h2>${escapeHtml(activeTool.copy.headline)}</h2>`,
+					`<p>${escapeHtml(activeTool.copy.supportingCopy)}</p>`,
+					iframeTag,
+				].join("\n")
+			: "";
 
 	async function handleGenerate(event: FormEvent<HTMLFormElement>) {
 		event.preventDefault();
 		setRequestState("loading");
-		setCopied(false);
+		setCopiedTarget(null);
 		setStatusMessage({
 			title: "Generating tool",
 			description: siteUrl
@@ -125,7 +134,7 @@ export function ToolBuilderWorkspace() {
 
 	function handleReopenRecent(item: ToolSummary) {
 		setActiveTool(item);
-		setCopied(false);
+		setCopiedTarget(null);
 		setStatusMessage({
 			title: "Reopened tool",
 			description: `Showing "${item.projectName}" from ${formatTimestamp(item.createdAt)}.`,
@@ -133,11 +142,11 @@ export function ToolBuilderWorkspace() {
 		});
 	}
 
-	async function handleCopyEmbed() {
+	async function handleCopyEmbed(target: "iframe" | "full", text: string) {
 		try {
-			await navigator.clipboard.writeText(embedSnippet);
-			setCopied(true);
-			setTimeout(() => setCopied(false), 2000);
+			await navigator.clipboard.writeText(text);
+			setCopiedTarget(target);
+			setTimeout(() => setCopiedTarget(null), 2000);
 		} catch {
 			// Clipboard access can be denied by the browser; the snippet is still
 			// selectable/copyable manually from the <pre> below.
@@ -245,6 +254,19 @@ export function ToolBuilderWorkspace() {
 						</CardFooter>
 					</Card>
 
+					{activeTool.copy ? (
+						<Card>
+							<CardHeader>
+								<CardTitle>Supporting copy</CardTitle>
+								<CardDescription>Suggested headline + explanation to place above the embedded tool.</CardDescription>
+							</CardHeader>
+							<CardContent className="space-y-2">
+								<p className="text-sm font-semibold">{activeTool.copy.headline}</p>
+								<p className="text-sm text-muted-foreground">{activeTool.copy.supportingCopy}</p>
+							</CardContent>
+						</Card>
+					) : null}
+
 					<Card>
 						<CardHeader>
 							<CardTitle>Embed snippet</CardTitle>
@@ -252,15 +274,23 @@ export function ToolBuilderWorkspace() {
 						</CardHeader>
 						<CardContent className="space-y-4">
 							<pre className="min-w-0 overflow-x-auto rounded-lg border bg-muted/40 p-3 text-xs [overflow-wrap:anywhere] whitespace-pre-wrap">
-								{embedSnippet}
+								{fullEmbedSnippet || embedSnippet}
 							</pre>
-							<div className="flex items-center gap-2">
+							<div className="flex flex-wrap items-center gap-2">
 								<Badge variant="secondary">{activeTool.model}</Badge>
 								{activeTool.siteUrl ? <Badge variant="secondary">{activeTool.siteUrl}</Badge> : null}
 								{activeTool.brandSnapshot?.brandName ? (
 									<Badge variant="secondary">{activeTool.brandSnapshot.brandName}</Badge>
 								) : null}
+								{activeTool.brandFidelity ? (
+									<Badge variant={brandFidelityBadgeVariant(activeTool.brandFidelity.verdict)}>
+										Brand fidelity: {activeTool.brandFidelity.verdict}
+									</Badge>
+								) : null}
 							</div>
+							{activeTool.brandFidelity?.notes ? (
+								<p className="text-xs text-muted-foreground">{activeTool.brandFidelity.notes}</p>
+							) : null}
 							{activeTool.warnings.length ? (
 								<Alert>
 									<AlertCircle className="size-4" />
@@ -275,11 +305,22 @@ export function ToolBuilderWorkspace() {
 								</Alert>
 							) : null}
 						</CardContent>
-						<CardFooter>
-							<Button type="button" variant="outline" size="sm" onClick={handleCopyEmbed}>
-								{copied ? <Check className="size-4" /> : <Copy className="size-4" />}
-								{copied ? "Copied" : "Copy embed code"}
+						<CardFooter className="flex flex-wrap gap-2">
+							<Button type="button" variant="outline" size="sm" onClick={() => void handleCopyEmbed("iframe", embedSnippet)}>
+								{copiedTarget === "iframe" ? <Check className="size-4" /> : <Copy className="size-4" />}
+								{copiedTarget === "iframe" ? "Copied" : "Copy iframe only"}
 							</Button>
+							{fullEmbedSnippet ? (
+								<Button
+									type="button"
+									variant="outline"
+									size="sm"
+									onClick={() => void handleCopyEmbed("full", fullEmbedSnippet)}
+								>
+									{copiedTarget === "full" ? <Check className="size-4" /> : <Copy className="size-4" />}
+									{copiedTarget === "full" ? "Copied" : "Copy with headline & copy"}
+								</Button>
+							) : null}
 						</CardFooter>
 					</Card>
 					<Separator className="lg:col-span-2" />
@@ -380,4 +421,19 @@ function formatTimestamp(iso: string): string {
 	} catch {
 		return iso;
 	}
+}
+
+function brandFidelityBadgeVariant(verdict: "pass" | "warn" | "fail"): "secondary" | "outline" | "destructive" {
+	if (verdict === "fail") return "destructive";
+	if (verdict === "warn") return "outline";
+	return "secondary";
+}
+
+function escapeHtml(value: string): string {
+	return value
+		.replace(/&/g, "&amp;")
+		.replace(/</g, "&lt;")
+		.replace(/>/g, "&gt;")
+		.replace(/"/g, "&quot;")
+		.replace(/'/g, "&#39;");
 }

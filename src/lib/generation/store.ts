@@ -19,6 +19,18 @@ export interface GeneratedToolBrandSnapshot {
 	logoDataUri: string | null;
 }
 
+export interface GeneratedToolCopy {
+	headline: string;
+	supportingCopy: string;
+}
+
+export type BrandFidelityVerdict = "pass" | "warn" | "fail";
+
+export interface GeneratedToolBrandFidelity {
+	verdict: BrandFidelityVerdict;
+	notes: string;
+}
+
 export interface GeneratedToolRecord {
 	id: string;
 	projectName: string;
@@ -26,6 +38,10 @@ export interface GeneratedToolRecord {
 	siteUrl: string | null;
 	brandSnapshot: GeneratedToolBrandSnapshot | null;
 	html: string;
+	/** Headline + supporting copy meant to sit above the iframe on the customer's own CMS page. */
+	copy: GeneratedToolCopy | null;
+	/** Advisory-only LLM cross-check of whether the generated tool's styling is faithful to the brand. */
+	brandFidelity: GeneratedToolBrandFidelity | null;
 	model: string;
 	warnings: string[];
 	createdAt: string;

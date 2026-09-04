@@ -20,7 +20,9 @@ import { isBrandIngestionConfigured, pullBrandProfile, type BrandProfile } from 
 import { looksLikeHtmlDocument, sanitizeGeneratedHtml, type SanitizedHtml } from "@/lib/generation/sanitize";
 import {
 	saveGeneratedTool,
+	type GeneratedToolBrandFidelity,
 	type GeneratedToolBrandSnapshot,
+	type GeneratedToolCopy,
 	type GeneratedToolRecord,
 } from "@/lib/generation/store";
 
@@ -44,9 +46,14 @@ export interface ToolGenerationFailureResult {
 export type ToolGenerationResult = ToolGenerationSuccessResult | ToolGenerationFailureResult;
 
 const ANTHROPIC_TIMEOUT_MS = 120_000;
+const ADVISORY_TIMEOUT_MS = 30_000;
 const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-6";
 const MAX_TOKENS = 8_000;
 const MAX_GENERATION_ATTEMPTS = 2;
+// <head>/<style> plus the top of <body> carries almost all brand-relevant
+// signal (colors, fonts, logo <img>) — capping keeps this a cheap, fast
+// advisory check instead of resending the whole (possibly large) document.
+const MAX_FIDELITY_HTML_CHARS = 6_000;
 
 interface AnthropicMessagesResponse {
 	content?: Array<{ type: string; text?: string }>;
@@ -109,12 +116,42 @@ export async function generateTool(request: ToolGenerationRequest): Promise<Tool
 
 	const warnings = [...(brandWarning ? [brandWarning] : []), ...sanitized.warnings];
 
+	// Both of these are advisory, fail-soft enrichments — Mathew's brief
+	// explicitly calls for (a) supporting headline/copy around the embedded
+	// iframe, and (b) an LLM cross-check that the generated tool doesn't
+	// drift from the brand. Neither should block shipping the tool itself;
+	// a failure just surfaces as a warning for the customer to review.
+	const copy = await requestSupportingCopy({
+		projectName: request.projectName,
+		prompt: request.prompt,
+		brandSnapshot,
+	});
+	if (!copy) {
+		warnings.push("Could not generate supporting headline/copy for this tool — add your own before embedding.");
+	}
+
+	let brandFidelity: GeneratedToolBrandFidelity | null = null;
+	if (brandSnapshot) {
+		brandFidelity = await requestBrandFidelityCheck({ html: sanitized.html, brandSnapshot });
+		if (!brandFidelity) {
+			warnings.push("Brand fidelity check could not be completed for this tool.");
+		} else if (brandFidelity.verdict !== "pass") {
+			warnings.push(
+				`Brand fidelity check (${brandFidelity.verdict}): ${
+					brandFidelity.notes || "review the generated styling against the brand."
+				}`
+			);
+		}
+	}
+
 	const tool = await saveGeneratedTool({
 		projectName: request.projectName.trim() || "Untitled tool",
 		prompt: request.prompt,
 		siteUrl: normalizedSiteUrl || null,
 		brandSnapshot,
 		html: sanitized.html,
+		copy,
+		brandFidelity,
 		model: envServer.ANTHROPIC_MODEL || DEFAULT_ANTHROPIC_MODEL,
 		warnings,
 	});
@@ -246,4 +283,130 @@ async function requestToolHtml(opts: {
 	}
 
 	return text;
+}
+
+/**
+ * Shared low-level "ask Claude for plain text" call used by the two advisory
+ * follow-ups below. Unlike requestToolHtml, callers treat any failure here as
+ * non-fatal (return null), so this intentionally never throws.
+ */
+async function requestAdvisoryText(opts: {
+	system: string;
+	userContent: string;
+	maxTokens: number;
+}): Promise<string | null> {
+	const apiKey = envServer.ANTHROPIC_API_KEY;
+	if (!apiKey) return null;
+	const model = envServer.ANTHROPIC_MODEL || DEFAULT_ANTHROPIC_MODEL;
+
+	try {
+		const response = await fetch("https://api.anthropic.com/v1/messages", {
+			method: "POST",
+			headers: {
+				"x-api-key": apiKey,
+				"anthropic-version": "2023-06-01",
+				"content-type": "application/json",
+			},
+			body: JSON.stringify({
+				model,
+				max_tokens: opts.maxTokens,
+				system: opts.system,
+				messages: [{ role: "user", content: opts.userContent }],
+			}),
+			signal: AbortSignal.timeout(ADVISORY_TIMEOUT_MS),
+		});
+
+		const body = (await response.json().catch(() => ({}))) as AnthropicMessagesResponse;
+		if (!response.ok) return null;
+
+		const text = body.content
+			?.filter((block) => block.type === "text")
+			.map((block) => block.text ?? "")
+			.join("\n")
+			.trim();
+
+		return text || null;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Generates the headline + short supporting paragraph meant to sit above the
+ * embedded iframe on the customer's own CMS page — Mathew's brief explicitly
+ * calls out that "the page around the iframe can include supporting copy
+ * such as a headline and rich-text explanation."
+ */
+async function requestSupportingCopy(opts: {
+	projectName: string;
+	prompt: string;
+	brandSnapshot: GeneratedToolBrandSnapshot | null;
+}): Promise<GeneratedToolCopy | null> {
+	const system = [
+		"You write short, conversion-focused marketing copy that will sit ABOVE an embedded interactive tool on a customer's own website page.",
+		"Output EXACTLY two lines, nothing else, no markdown:",
+		"HEADLINE: <a punchy, specific headline, under 70 characters>",
+		"COPY: <one short paragraph (2-3 sentences) explaining what the tool does and why someone would use it>",
+	].join("\n");
+
+	const brandContext = opts.brandSnapshot?.brandName
+		? `Brand: ${opts.brandSnapshot.brandName}. Match their tone — professional and on-brand, not generic.`
+		: "No specific brand — keep the tone clean and professional.";
+
+	const userContent = [`Tool name: ${opts.projectName || "Untitled tool"}`, `Tool description: ${opts.prompt}`, brandContext].join(
+		"\n"
+	);
+
+	const text = await requestAdvisoryText({ system, userContent, maxTokens: 300 });
+	if (!text) return null;
+
+	const headline = text.match(/HEADLINE:\s*(.+)/i)?.[1]?.trim();
+	const supportingCopy = text.match(/COPY:\s*([\s\S]+)/i)?.[1]?.trim();
+	if (!headline || !supportingCopy) return null;
+
+	return { headline, supportingCopy };
+}
+
+/**
+ * Advisory LLM cross-check that the generated tool's actual implementation
+ * (colors, fonts, logo usage, tone) is faithful to the brand it was supposed
+ * to be built for — the "cross-checks that brand understanding so the
+ * output does not look like a different company" requirement. This is a
+ * source-level check (no rendered screenshot pipeline exists for
+ * locally-hosted generated tools yet), unlike the full Claude-vision
+ * screenshot comparison already used for brand-ingestion validation.
+ */
+async function requestBrandFidelityCheck(opts: {
+	html: string;
+	brandSnapshot: GeneratedToolBrandSnapshot;
+}): Promise<GeneratedToolBrandFidelity | null> {
+	const system = [
+		"You are a brand QA reviewer. You are given a brand's design tokens and the source of a generated HTML tool. Decide whether the tool's actual implementation (colors, fonts, tone, logo usage) is faithful to the brand, well enough that a visitor would believe it's from the same company.",
+		"Reason about what the CSS/HTML will actually render as, not just whether the tokens are mentioned in a comment.",
+		"Output EXACTLY two lines, nothing else, no markdown:",
+		"VERDICT: <one of pass, warn, fail>",
+		"NOTES: <one short sentence explaining the verdict; empty if pass>",
+	].join("\n");
+
+	const brandContext = [
+		`Brand name: ${opts.brandSnapshot.brandName ?? "Unknown"}`,
+		`Expected colors: ${JSON.stringify(opts.brandSnapshot.colors)}`,
+		`Expected fonts: ${opts.brandSnapshot.fonts.join(", ") || "none detected"}`,
+	].join("\n");
+
+	const truncatedHtml =
+		opts.html.length > MAX_FIDELITY_HTML_CHARS
+			? `${opts.html.slice(0, MAX_FIDELITY_HTML_CHARS)}\n<!-- truncated for review -->`
+			: opts.html;
+
+	const userContent = [brandContext, "", "Generated tool source:", truncatedHtml].join("\n");
+
+	const text = await requestAdvisoryText({ system, userContent, maxTokens: 200 });
+	if (!text) return null;
+
+	const verdictRaw = text.match(/VERDICT:\s*(\w+)/i)?.[1]?.toLowerCase();
+	const notes = text.match(/NOTES:\s*(.*)/i)?.[1]?.trim() ?? "";
+	if (verdictRaw !== "pass" && verdictRaw !== "warn" && verdictRaw !== "fail") return null;
+
+	return { verdict: verdictRaw, notes };
 }

@@ -21,14 +21,30 @@ const originalEnv = {
 	ANTHROPIC_MODEL: process.env.ANTHROPIC_MODEL,
 };
 
-function mockAnthropicSuccess(text: string) {
-	global.fetch = vi.fn().mockResolvedValue(
-		new Response(JSON.stringify({ content: [{ type: "text", text }] }), {
-			status: 200,
-			headers: { "content-type": "application/json" },
-		})
-	) as unknown as typeof fetch;
+function mockAnthropicSuccess(mainText: string) {
+	global.fetch = vi.fn().mockImplementation(async (_url, init) => {
+		const parsedBody = JSON.parse(String((init as RequestInit | undefined)?.body ?? "{}")) as { system?: string };
+		const system = parsedBody.system ?? "";
+		if (system.includes("VERDICT:")) {
+			return new Response(JSON.stringify({ content: [{ type: "text", text: "VERDICT: pass\nNOTES:" }] }), {
+				status: 200,
+			});
+		}
+		if (system.includes("HEADLINE:")) {
+			return new Response(
+				JSON.stringify({ content: [{ type: "text", text: "HEADLINE: Test headline\nCOPY: Test copy." }] }),
+				{ status: 200 }
+			);
+		}
+		return new Response(JSON.stringify({ content: [{ type: "text", text: mainText }] }), { status: 200 });
+	}) as unknown as typeof fetch;
 }
+
+/** Fallback response used for the advisory (copy/fidelity) calls in tests that hand-sequence the main generation call(s). */
+const advisoryFallbackResponse = () =>
+	new Response(JSON.stringify({ content: [{ type: "text", text: "HEADLINE: Test headline\nCOPY: Test copy." }] }), {
+		status: 200,
+	});
 
 describe("generateTool", () => {
 	beforeEach(() => {
@@ -109,6 +125,84 @@ describe("generateTool", () => {
 				fonts: ["Inter"],
 				logoDataUri: "data:image/png;base64,abc",
 			});
+			expect(result.tool.brandFidelity).toEqual({ verdict: "pass", notes: "" });
+		}
+	});
+
+	it("generates supporting headline/copy alongside the tool", async () => {
+		mockAnthropicSuccess("<!doctype html><html><body>hi</body></html>");
+
+		const result = await generateTool({ projectName: "Calc", siteUrl: "", prompt: "a calculator" });
+
+		expect(result.status).toBe("success");
+		if (result.status === "success") {
+			expect(result.tool.copy).toEqual({ headline: "Test headline", supportingCopy: "Test copy." });
+			expect(result.tool.brandFidelity).toBeNull();
+		}
+	});
+
+	it("adds a warning but still succeeds when supporting-copy generation is unparseable", async () => {
+		global.fetch = vi.fn().mockImplementation(async (_url, init) => {
+			const parsedBody = JSON.parse(String((init as RequestInit | undefined)?.body ?? "{}")) as { system?: string };
+			if ((parsedBody.system ?? "").includes("HEADLINE:")) {
+				return new Response(JSON.stringify({ content: [{ type: "text", text: "I refuse to answer." }] }), {
+					status: 200,
+				});
+			}
+			return new Response(
+				JSON.stringify({ content: [{ type: "text", text: "<!doctype html><html><body>hi</body></html>" }] }),
+				{ status: 200 }
+			);
+		}) as unknown as typeof fetch;
+
+		const result = await generateTool({ projectName: "Calc", siteUrl: "", prompt: "a calculator" });
+
+		expect(result.status).toBe("success");
+		if (result.status === "success") {
+			expect(result.tool.copy).toBeNull();
+			expect(result.tool.warnings.some((w) => w.includes("supporting headline/copy"))).toBe(true);
+		}
+	});
+
+	it("adds a warning when the brand fidelity check returns a warn/fail verdict", async () => {
+		isBrandIngestionConfiguredMock.mockReturnValue(true);
+		pullBrandProfileMock.mockResolvedValue({
+			brandName: "Stripe",
+			colors: { primary: "#635bff" },
+			fonts: ["Inter"],
+			images: { logo: { canonicalDataUri: null } },
+		});
+		global.fetch = vi.fn().mockImplementation(async (_url, init) => {
+			const parsedBody = JSON.parse(String((init as RequestInit | undefined)?.body ?? "{}")) as { system?: string };
+			const system = parsedBody.system ?? "";
+			if (system.includes("VERDICT:")) {
+				return new Response(
+					JSON.stringify({ content: [{ type: "text", text: "VERDICT: fail\nNOTES: uses a different color palette" }] }),
+					{ status: 200 }
+				);
+			}
+			if (system.includes("HEADLINE:")) {
+				return new Response(
+					JSON.stringify({ content: [{ type: "text", text: "HEADLINE: Test headline\nCOPY: Test copy." }] }),
+					{ status: 200 }
+				);
+			}
+			return new Response(
+				JSON.stringify({ content: [{ type: "text", text: "<!doctype html><html><body>hi</body></html>" }] }),
+				{ status: 200 }
+			);
+		}) as unknown as typeof fetch;
+
+		const result = await generateTool({
+			projectName: "Calc",
+			siteUrl: "https://stripe.com",
+			prompt: "a calculator",
+		});
+
+		expect(result.status).toBe("success");
+		if (result.status === "success") {
+			expect(result.tool.brandFidelity).toEqual({ verdict: "fail", notes: "uses a different color palette" });
+			expect(result.tool.warnings.some((w) => w.includes("Brand fidelity check (fail)"))).toBe(true);
 		}
 	});
 
@@ -174,12 +268,14 @@ describe("generateTool", () => {
 					}),
 					{ status: 200 }
 				)
-			);
+			)
+			.mockResolvedValue(advisoryFallbackResponse());
 		global.fetch = fetchMock as unknown as typeof fetch;
 
 		const result = await generateTool({ projectName: "Calc", siteUrl: "", prompt: "a calculator" });
 
-		expect(fetchMock).toHaveBeenCalledTimes(2);
+		// 2 attempts for the main HTML generation + 1 advisory supporting-copy call.
+		expect(fetchMock).toHaveBeenCalledTimes(3);
 		expect(result.status).toBe("success");
 	});
 
@@ -210,12 +306,14 @@ describe("generateTool", () => {
 					}),
 					{ status: 200 }
 				)
-			);
+			)
+			.mockResolvedValue(advisoryFallbackResponse());
 		global.fetch = fetchMock as unknown as typeof fetch;
 
 		const result = await generateTool({ projectName: "Calc", siteUrl: "", prompt: "a calculator" });
 
-		expect(fetchMock).toHaveBeenCalledTimes(2);
+		// 2 attempts for the main HTML generation + 1 advisory supporting-copy call.
+		expect(fetchMock).toHaveBeenCalledTimes(3);
 		expect(result.status).toBe("success");
 		if (result.status === "success") {
 			expect(result.tool.html).toContain("complete</body></html>");

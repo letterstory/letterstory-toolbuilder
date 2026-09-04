@@ -121,6 +121,8 @@ describe("GET /api/tools", () => {
 				siteUrl: null,
 				brandSnapshot: null,
 				html: "<!doctype html>should not be exposed here</html>",
+				copy: { headline: "Test headline", supportingCopy: "Test copy." },
+				brandFidelity: { verdict: "pass", notes: "" },
 				model: "claude-sonnet-4-6",
 				warnings: [],
 				createdAt: "2024-01-01T00:00:00.000Z",
@@ -134,6 +136,11 @@ describe("GET /api/tools", () => {
 		expect(body.status).toBe("success");
 		expect(body.tools).toHaveLength(1);
 		expect(body.tools[0]).not.toHaveProperty("html");
-		expect(body.tools[0]).toMatchObject({ id: "abc", projectName: "Calc" });
+		expect(body.tools[0]).toMatchObject({
+			id: "abc",
+			projectName: "Calc",
+			copy: { headline: "Test headline", supportingCopy: "Test copy." },
+			brandFidelity: { verdict: "pass", notes: "" },
+		});
 	});
 });

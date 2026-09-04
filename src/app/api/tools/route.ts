@@ -11,6 +11,8 @@ export async function GET() {
 		prompt: tool.prompt,
 		siteUrl: tool.siteUrl,
 		brandSnapshot: tool.brandSnapshot,
+		copy: tool.copy,
+		brandFidelity: tool.brandFidelity,
 		model: tool.model,
 		warnings: tool.warnings,
 		createdAt: tool.createdAt,
