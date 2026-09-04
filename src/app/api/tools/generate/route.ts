@@ -46,6 +46,12 @@ export async function POST(request: Request) {
 						`build;dur=${diagnostics.buildMs}`,
 						`advisory;dur=${diagnostics.advisoryMs}`,
 					].join(", "),
+					"X-Tool-Generation-Attempts": diagnostics.htmlAttempts
+						.map(
+							(attempt) =>
+								`${attempt.attempt}:${attempt.outcome}:${attempt.durationMs}/${attempt.timeoutMs}`
+						)
+						.join("|"),
 				}
 			: undefined,
 	});

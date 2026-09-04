@@ -163,6 +163,7 @@ describe("POST /api/tools/generate", () => {
 		expect(response.status).toBe(200);
 		expect(response.headers.get("server-timing")).toContain("total;dur=1234");
 		expect(response.headers.get("server-timing")).toContain("brand;dur=56");
+		expect(response.headers.get("x-tool-generation-attempts")).toBe("1:success:1100/210000");
 		await expect(response.json()).resolves.toMatchObject({ status: "success" });
 	});
 

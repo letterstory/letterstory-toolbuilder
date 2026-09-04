@@ -94,6 +94,7 @@ async function main() {
 		const elapsedMs = Math.round(performance.now() - startedAt);
 		const contentType = response.headers.get("content-type") ?? "(missing)";
 		const serverTiming = response.headers.get("server-timing");
+		const attemptHeader = response.headers.get("x-tool-generation-attempts");
 		const rawBody = await response.text();
 		const preview = truncate(rawBody);
 
@@ -101,6 +102,7 @@ async function main() {
 		console.log(`httpStatus=${response.status}`);
 		console.log(`contentType=${contentType}`);
 		console.log(`serverTiming=${serverTiming ?? "(missing)"}`);
+		console.log(`attempts=${attemptHeader ?? "(missing)"}`);
 		for (const timing of parseServerTiming(serverTiming)) {
 			console.log(`serverTiming.${timing.name}=${timing.durMs ?? "n/a"}ms`);
 		}
