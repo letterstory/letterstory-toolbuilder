@@ -44,6 +44,13 @@ import { cn } from "@/lib/utils";
 
 const INITIAL_URL = "https://stripe.com";
 
+/** Prepends https:// when the user omits a protocol (e.g. "google.com" -> "https://google.com"). */
+function normalizeSiteUrl(raw: string): string {
+	const trimmed = raw.trim();
+	if (!trimmed) return trimmed;
+	return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+}
+
 type RequestState = "idle" | "loading" | "submitting-validation" | "submitting-compare";
 
 type StatusTone = "info" | "success" | "warning" | "destructive";
@@ -73,6 +80,8 @@ export function BrandWorkspace() {
 
 	async function handleIngest(event: FormEvent<HTMLFormElement>) {
 		event.preventDefault();
+		const normalizedUrl = normalizeSiteUrl(siteUrl);
+		setSiteUrl(normalizedUrl);
 		setRequestState("loading");
 		setValidationResult(null);
 		setFixesApplied(false);
@@ -86,7 +95,7 @@ export function BrandWorkspace() {
 			const response = await fetch("/api/brand/ingest", {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ siteUrl }),
+				body: JSON.stringify({ siteUrl: normalizedUrl }),
 			});
 			const result = (await response.json()) as BrandIngestionResult;
 			setIngestionResult(result);
@@ -94,7 +103,7 @@ export function BrandWorkspace() {
 		} catch {
 			setIngestionResult({
 				status: "error",
-				requestedUrl: siteUrl,
+				requestedUrl: normalizedUrl,
 				message: "The request failed before Toolbuilder could read the response.",
 			});
 			setStatusMessage({
@@ -163,7 +172,7 @@ export function BrandWorkspace() {
 		if (!profile) return;
 		const competitorUrls = competitorUrlsInput
 			.split(",")
-			.map((entry) => entry.trim())
+			.map((entry) => normalizeSiteUrl(entry))
 			.filter(Boolean);
 		if (!competitorUrls.length) {
 			setStatusMessage({
@@ -225,10 +234,12 @@ export function BrandWorkspace() {
 							<Label htmlFor="brand-site-url">Site URL</Label>
 							<Input
 								id="brand-site-url"
-								type="url"
+								type="text"
+								inputMode="url"
 								placeholder="https://stripe.com"
 								value={siteUrl}
 								onChange={(event) => setSiteUrl(event.target.value)}
+								onBlur={(event) => setSiteUrl(normalizeSiteUrl(event.target.value))}
 								required
 							/>
 						</div>
