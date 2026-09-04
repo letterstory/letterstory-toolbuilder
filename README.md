@@ -38,3 +38,19 @@ npm run brand:probe
 ```
 
 That script calls the live Firecrawl scrape endpoint against a small set of real sites and prints the extracted logo URLs, colors, fonts, and higher-level branding fields for manual quality assessment.
+
+## Tool-generation smoke test
+
+To exercise the live `/api/tools/generate` endpoint with the current manual-retest payload (`gymshark.com` + `BMI Calculator`), run:
+
+```bash
+npm run smoke:generate
+```
+
+It defaults to `http://localhost:3000`. To point it at a deployed environment, override the base URL:
+
+```bash
+TOOL_GENERATOR_BASE_URL="https://your-deployed-origin" npm run smoke:generate
+```
+
+The script prints elapsed time, HTTP status, content type, and a truncated response preview, then exits non-zero on timeouts, non-2xx responses, or non-JSON bodies so it can be reused in CI or release verification.

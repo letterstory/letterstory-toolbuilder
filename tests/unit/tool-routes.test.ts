@@ -1,12 +1,19 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const generateToolMock = vi.hoisted(() => vi.fn());
 const getGeneratedToolMock = vi.hoisted(() => vi.fn());
 const listGeneratedToolsMock = vi.hoisted(() => vi.fn());
 const rollbackGeneratedToolMock = vi.hoisted(() => vi.fn());
+const checkRateLimitMock = vi.hoisted(() => vi.fn());
+const getClientIpMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/generation", () => ({
 	generateTool: generateToolMock,
+}));
+
+vi.mock("@/lib/security/rate-limit", () => ({
+	checkRateLimit: checkRateLimitMock,
+	getClientIp: getClientIpMock,
 }));
 
 vi.mock("@/lib/generation/store", () => ({
@@ -20,6 +27,23 @@ import { GET as toolsListGet } from "../../src/app/api/tools/route";
 import { GET as toolDetailGet } from "../../src/app/api/tools/[id]/route";
 import { POST as toolRollbackPost } from "../../src/app/api/tools/[id]/rollback/route";
 import { GET as toolGet } from "../../src/app/t/[id]/route";
+
+beforeEach(() => {
+	checkRateLimitMock.mockReset();
+	getClientIpMock.mockReset();
+	generateToolMock.mockReset();
+	getGeneratedToolMock.mockReset();
+	listGeneratedToolsMock.mockReset();
+	rollbackGeneratedToolMock.mockReset();
+
+	getClientIpMock.mockReturnValue("203.0.113.10");
+	checkRateLimitMock.mockResolvedValue({
+		allowed: true,
+		limit: 10,
+		remaining: 9,
+		retryAfterSeconds: 0,
+	});
+});
 
 describe("POST /api/tools/generate", () => {
 	it("returns 400 when prompt is missing or blank", async () => {
@@ -36,6 +60,40 @@ describe("POST /api/tools/generate", () => {
 		expect(generateToolMock).not.toHaveBeenCalled();
 	});
 
+	it("returns 429 with Retry-After when the caller is rate limited", async () => {
+		checkRateLimitMock.mockResolvedValueOnce({
+			allowed: false,
+			limit: 10,
+			remaining: 0,
+			retryAfterSeconds: 42,
+		});
+
+		const response = await generatePost(
+			new Request("http://localhost/api/tools/generate", {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+					"x-forwarded-for": "198.51.100.20",
+				},
+				body: JSON.stringify({ prompt: "a calculator" }),
+			})
+		);
+
+		expect(getClientIpMock).toHaveBeenCalled();
+		expect(checkRateLimitMock).toHaveBeenCalledWith("203.0.113.10", {
+			bucket: "tools.generate",
+			max: 10,
+			windowSeconds: 600,
+		});
+		expect(response.status).toBe(429);
+		expect(response.headers.get("Retry-After")).toBe("42");
+		await expect(response.json()).resolves.toMatchObject({
+			status: "error",
+			message: expect.stringMatching(/too many tool generation requests/i),
+		});
+		expect(generateToolMock).not.toHaveBeenCalled();
+	});
+
 	it("returns 400 for an unparseable body", async () => {
 		const response = await generatePost(
 			new Request("http://localhost/api/tools/generate", {
@@ -46,6 +104,27 @@ describe("POST /api/tools/generate", () => {
 		);
 
 		expect(response.status).toBe(400);
+	});
+
+	it("returns 400 with the orchestrator error shape when generation is not configured", async () => {
+		generateToolMock.mockResolvedValueOnce({
+			status: "not_configured",
+			message: "Set ANTHROPIC_API_KEY before generating tools.",
+		});
+
+		const response = await generatePost(
+			new Request("http://localhost/api/tools/generate", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ prompt: "a calculator" }),
+			})
+		);
+
+		expect(response.status).toBe(400);
+		await expect(response.json()).resolves.toMatchObject({
+			status: "not_configured",
+			message: "Set ANTHROPIC_API_KEY before generating tools.",
+		});
 	});
 
 	it("proxies generateTool including an optional toolId, and returns 200 on success", async () => {
