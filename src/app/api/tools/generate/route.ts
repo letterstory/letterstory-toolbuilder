@@ -34,6 +34,19 @@ export async function POST(request: Request) {
 		prompt: body.prompt,
 		toolId: typeof body.toolId === "string" && body.toolId.trim() ? body.toolId.trim() : undefined,
 	});
+	const { diagnostics, ...responseBody } = result;
 
-	return NextResponse.json(result, { status: result.status === "success" ? 200 : 400 });
+	return NextResponse.json(responseBody, {
+		status: result.status === "success" ? 200 : 400,
+		headers: diagnostics
+			? {
+					"Server-Timing": [
+						`total;dur=${diagnostics.totalMs}`,
+						`brand;dur=${diagnostics.brandContextMs}`,
+						`build;dur=${diagnostics.buildMs}`,
+						`advisory;dur=${diagnostics.advisoryMs}`,
+					].join(", "),
+				}
+			: undefined,
+	});
 }

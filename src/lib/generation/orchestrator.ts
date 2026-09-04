@@ -46,29 +46,35 @@ export interface ToolGenerationRequest {
 export interface ToolGenerationSuccessResult {
 	status: "success";
 	tool: GeneratedToolRecord;
+	diagnostics?: ToolGenerationDiagnostics;
 }
 
 export interface ToolGenerationFailureResult {
 	status: "not_configured" | "error";
 	message: string;
+	diagnostics?: ToolGenerationDiagnostics;
 }
 
 export type ToolGenerationResult = ToolGenerationSuccessResult | ToolGenerationFailureResult;
 
 export const NGINX_GENERATION_ROUTE_BUDGET_MS = 300_000;
-export const TOOL_GENERATION_TARGET_BUDGET_MS = 260_000;
-const PRIMARY_ANTHROPIC_TIMEOUT_MS = 160_000;
-const RETRY_ANTHROPIC_TIMEOUT_MS = 40_000;
-const ADVISORY_TIMEOUT_MS = 20_000;
+export const TOOL_GENERATION_TARGET_BUDGET_MS = 280_000;
+const PRIMARY_ANTHROPIC_TIMEOUT_MS = 210_000;
+const RETRY_ANTHROPIC_TIMEOUT_MS = 35_000;
+const ADVISORY_TIMEOUT_MS = 15_000;
 const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-6";
-const MAX_TOKENS = 8_000;
+const MAX_TOKENS = 5_000;
 const MAX_GENERATION_ATTEMPTS = 2;
-// Worst-case Anthropic budget math for one /api/tools/generate request:
-// - primary HTML generation attempt: 160s
-// - fallback retry (only for malformed HTML / transient upstream failures): 40s
-// - advisory copy + brand-fidelity checks: 20s max wall time because they run in parallel
-// Total Anthropic wall time cap = 220s, leaving ~80s inside nginx's 300s budget
-// for brand-context pulling, storage, and Next.js response overhead.
+const MAX_PROMPT_BRAND_COLORS = 4;
+const MAX_PROMPT_BRAND_FONTS = 2;
+const MAX_PROMPT_LOGO_DATA_URI_CHARS = 0;
+const MIN_ADVISORY_BUDGET_MS = 5_000;
+// Worst-case request-budget math for one /api/tools/generate request:
+// - primary HTML generation attempt: 210s
+// - fallback retry (only for malformed HTML / transient 5xx/network failures): 35s
+// - advisory copy + brand-fidelity checks: 15s max wall time because they run in parallel
+// Total capped post-brand-fetch wall time = 260s, leaving ~40s inside nginx's
+// 300s budget for brand-context fetching, storage, and Next.js response overhead.
 export const MAX_ANTHROPIC_PIPELINE_WORST_CASE_MS =
 	PRIMARY_ANTHROPIC_TIMEOUT_MS + RETRY_ANTHROPIC_TIMEOUT_MS + ADVISORY_TIMEOUT_MS;
 // <head>/<style> plus the top of <body> carries almost all brand-relevant
@@ -79,6 +85,20 @@ const MAX_FIDELITY_HTML_CHARS = 6_000;
 interface AnthropicMessagesResponse {
 	content?: Array<{ type: string; text?: string }>;
 	error?: { message?: string };
+}
+
+export interface ToolGenerationDiagnostics {
+	totalMs: number;
+	brandContextMs: number;
+	buildMs: number;
+	advisoryMs: number;
+	advisorySkipped: boolean;
+	htmlAttempts: Array<{
+		attempt: number;
+		timeoutMs: number;
+		durationMs: number;
+		outcome: string;
+	}>;
 }
 
 type ToolGenerationStepErrorCode = "timeout" | "upstream_4xx" | "upstream_5xx" | "empty_response" | "network";
@@ -100,22 +120,30 @@ export function isToolGenerationConfigured(): boolean {
 }
 
 export async function generateTool(request: ToolGenerationRequest): Promise<ToolGenerationResult> {
+	const startedAt = Date.now();
 	if (!isToolGenerationConfigured()) {
 		return {
 			status: "not_configured",
 			message: "Set ANTHROPIC_API_KEY before generating tools.",
+			diagnostics: emptyDiagnostics(Date.now() - startedAt),
 		};
 	}
 	if (!request.prompt.trim()) {
-		return { status: "error", message: "Describe the tool you want generated." };
+		return {
+			status: "error",
+			message: "Describe the tool you want generated.",
+			diagnostics: emptyDiagnostics(Date.now() - startedAt),
+		};
 	}
 
 	if (request.toolId) {
-		return reviseTool(request.toolId, request);
+		return reviseTool(request.toolId, request, startedAt);
 	}
 
 	const normalizedSiteUrl = request.siteUrl.trim();
+	const brandStartedAt = Date.now();
 	const { brandProfile, brandWarning } = await resolveBrandContext(normalizedSiteUrl);
+	const brandContextMs = Date.now() - brandStartedAt;
 	const brandSnapshot = toBrandSnapshot(brandProfile);
 
 	const built = await buildToolContent({
@@ -123,8 +151,18 @@ export async function generateTool(request: ToolGenerationRequest): Promise<Tool
 		prompt: request.prompt,
 		brandSnapshot,
 		brandWarning,
+		requestStartedAt: startedAt,
 	});
-	if (built.status === "error") return built;
+	if (built.status === "error") {
+		return {
+			...built,
+			diagnostics: finalizeDiagnostics({
+				...built.diagnostics,
+				brandContextMs,
+				totalMs: Date.now() - startedAt,
+			}),
+		};
+	}
 
 	const tool = await saveGeneratedTool({
 		...built.content,
@@ -132,7 +170,15 @@ export async function generateTool(request: ToolGenerationRequest): Promise<Tool
 		siteUrl: normalizedSiteUrl || null,
 	});
 
-	return { status: "success", tool };
+	return {
+		status: "success",
+		tool,
+		diagnostics: finalizeDiagnostics({
+			...built.diagnostics,
+			brandContextMs,
+			totalMs: Date.now() - startedAt,
+		}),
+	};
 }
 
 /**
@@ -142,10 +188,14 @@ export async function generateTool(request: ToolGenerationRequest): Promise<Tool
  * quickly" requirement) doesn't force the customer to start over or re-embed
  * anything. The previous version is kept in `history` for rollback.
  */
-async function reviseTool(toolId: string, request: ToolGenerationRequest): Promise<ToolGenerationResult> {
+async function reviseTool(toolId: string, request: ToolGenerationRequest, startedAt: number): Promise<ToolGenerationResult> {
 	const existing = await getGeneratedTool(toolId);
 	if (!existing) {
-		return { status: "error", message: "Could not find the tool to update — it may have been removed." };
+		return {
+			status: "error",
+			message: "Could not find the tool to update — it may have been removed.",
+			diagnostics: emptyDiagnostics(Date.now() - startedAt),
+		};
 	}
 
 	const normalizedSiteUrl = request.siteUrl.trim();
@@ -154,8 +204,11 @@ async function reviseTool(toolId: string, request: ToolGenerationRequest): Promi
 	// re-resolve it when the customer actually points at a different site.
 	let brandSnapshot = existing.brandSnapshot;
 	let brandWarning: string | null = null;
+	let brandContextMs = 0;
 	if (normalizedSiteUrl && normalizedSiteUrl !== (existing.siteUrl ?? "")) {
+		const brandStartedAt = Date.now();
 		const resolved = await resolveBrandContext(normalizedSiteUrl);
+		brandContextMs = Date.now() - brandStartedAt;
 		brandSnapshot = toBrandSnapshot(resolved.brandProfile);
 		brandWarning = resolved.brandWarning;
 	}
@@ -166,8 +219,18 @@ async function reviseTool(toolId: string, request: ToolGenerationRequest): Promi
 		brandSnapshot,
 		brandWarning,
 		existingHtml: existing.html,
+		requestStartedAt: startedAt,
 	});
-	if (built.status === "error") return built;
+	if (built.status === "error") {
+		return {
+			...built,
+			diagnostics: finalizeDiagnostics({
+				...built.diagnostics,
+				brandContextMs,
+				totalMs: Date.now() - startedAt,
+			}),
+		};
+	}
 
 	const tool = await updateGeneratedTool(toolId, {
 		...built.content,
@@ -178,10 +241,26 @@ async function reviseTool(toolId: string, request: ToolGenerationRequest): Promi
 		copy: built.content.copy ?? existing.copy,
 	});
 	if (!tool) {
-		return { status: "error", message: "Could not save the revised tool — it may have been removed." };
+		return {
+			status: "error",
+			message: "Could not save the revised tool — it may have been removed.",
+			diagnostics: finalizeDiagnostics({
+				...built.diagnostics,
+				brandContextMs,
+				totalMs: Date.now() - startedAt,
+			}),
+		};
 	}
 
-	return { status: "success", tool };
+	return {
+		status: "success",
+		tool,
+		diagnostics: finalizeDiagnostics({
+			...built.diagnostics,
+			brandContextMs,
+			totalMs: Date.now() - startedAt,
+		}),
+	};
 }
 
 interface BuildToolContentResult {
@@ -197,6 +276,7 @@ interface BuildToolContentResult {
 		model: string;
 		warnings: string[];
 	};
+	diagnostics: Omit<ToolGenerationDiagnostics, "totalMs" | "brandContextMs">;
 }
 
 /**
@@ -212,8 +292,10 @@ async function buildToolContent(opts: {
 	brandSnapshot: GeneratedToolBrandSnapshot | null;
 	brandWarning: string | null;
 	existingHtml?: string;
-}): Promise<BuildToolContentResult | { status: "error"; message: string }> {
+	requestStartedAt: number;
+}): Promise<BuildToolContentResult | { status: "error"; message: string; diagnostics: Omit<ToolGenerationDiagnostics, "totalMs" | "brandContextMs"> }> {
 	const buildStartedAt = Date.now();
+	const htmlAttempts: ToolGenerationDiagnostics["htmlAttempts"] = [];
 	logGenerationStep("build_started", {
 		projectName: opts.projectName || "Untitled tool",
 		promptChars: opts.prompt.length,
@@ -230,7 +312,16 @@ async function buildToolContent(opts: {
 		| { kind: "invalid_html"; message: string }
 		| null = null;
 	for (let attempt = 1; attempt <= MAX_GENERATION_ATTEMPTS; attempt += 1) {
-		const timeoutMs = attempt === 1 ? PRIMARY_ANTHROPIC_TIMEOUT_MS : RETRY_ANTHROPIC_TIMEOUT_MS;
+		const timeSpentMs = Date.now() - opts.requestStartedAt;
+		const remainingBudgetMs = Math.max(0, TOOL_GENERATION_TARGET_BUDGET_MS - timeSpentMs);
+		const reservedAdvisoryMs = opts.existingHtml ? 0 : ADVISORY_TIMEOUT_MS;
+		const timeoutMs = Math.max(
+			MIN_ADVISORY_BUDGET_MS,
+			Math.min(
+				attempt === 1 ? PRIMARY_ANTHROPIC_TIMEOUT_MS : RETRY_ANTHROPIC_TIMEOUT_MS,
+				Math.max(MIN_ADVISORY_BUDGET_MS, remainingBudgetMs - reservedAdvisoryMs)
+			)
+		);
 		const attemptStartedAt = Date.now();
 		let rawHtml: string;
 		try {
@@ -244,6 +335,12 @@ async function buildToolContent(opts: {
 			});
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
+			htmlAttempts.push({
+				attempt,
+				timeoutMs,
+				durationMs: Date.now() - attemptStartedAt,
+				outcome: error instanceof ToolGenerationStepError ? error.code : "unknown_error",
+			});
 			lastFailure = { kind: "step_error", error, message };
 			logGenerationStep("html_generation_failed", {
 				attempt,
@@ -258,6 +355,12 @@ async function buildToolContent(opts: {
 		const candidate = sanitizeGeneratedHtml(rawHtml);
 		if (looksLikeHtmlDocument(candidate.html)) {
 			sanitized = candidate;
+			htmlAttempts.push({
+				attempt,
+				timeoutMs,
+				durationMs: Date.now() - attemptStartedAt,
+				outcome: "success",
+			});
 			logGenerationStep("html_generation_succeeded", {
 				attempt,
 				timeoutMs,
@@ -273,6 +376,12 @@ async function buildToolContent(opts: {
 				? "Revision returned an incomplete or invalid HTML document."
 				: "Generation returned an incomplete or invalid HTML document.",
 		};
+		htmlAttempts.push({
+			attempt,
+			timeoutMs,
+			durationMs: Date.now() - attemptStartedAt,
+			outcome: "invalid_html",
+		});
 		logGenerationStep("html_generation_invalid_document", {
 			attempt,
 			timeoutMs,
@@ -289,6 +398,12 @@ async function buildToolContent(opts: {
 		return {
 			status: "error",
 			message: formatBuildFailureMessage(lastFailure, Boolean(opts.existingHtml)),
+			diagnostics: {
+				buildMs: Date.now() - buildStartedAt,
+				advisoryMs: 0,
+				advisorySkipped: true,
+				htmlAttempts,
+			},
 		};
 	}
 
@@ -299,39 +414,57 @@ async function buildToolContent(opts: {
 	// iframe, and (b) an LLM cross-check that the generated tool doesn't
 	// drift from the brand. Neither should block shipping the tool itself;
 	// a failure just surfaces as a warning for the customer to review.
-	const advisoryStartedAt = Date.now();
-	const [copy, brandFidelity] = await Promise.all([
-		timeGenerationStep("supporting_copy_completed", () =>
-			requestSupportingCopy({
-				projectName: opts.projectName,
-				prompt: opts.prompt,
-				brandSnapshot: opts.brandSnapshot,
-			})
-		),
-		opts.brandSnapshot
-			? timeGenerationStep("brand_fidelity_completed", () =>
-					requestBrandFidelityCheck({ html: sanitized.html, brandSnapshot: opts.brandSnapshot as GeneratedToolBrandSnapshot })
-				)
-			: Promise.resolve(null),
-	]);
-	logGenerationStep("advisory_phase_completed", {
-		durationMs: Date.now() - advisoryStartedAt,
-		ranBrandFidelity: Boolean(opts.brandSnapshot),
-	});
-	if (!copy) {
-		warnings.push("Could not generate supporting headline/copy for this tool — add your own before embedding.");
-	}
-
-	if (opts.brandSnapshot) {
-		if (!brandFidelity) {
-			warnings.push("Brand fidelity check could not be completed for this tool.");
-		} else if (brandFidelity.verdict !== "pass") {
-			warnings.push(
-				`Brand fidelity check (${brandFidelity.verdict}): ${
-					brandFidelity.notes || "review the generated styling against the brand."
-				}`
-			);
+	let advisoryMs = 0;
+	let advisorySkipped = false;
+	let copy: GeneratedToolCopy | null = null;
+	let brandFidelity: GeneratedToolBrandFidelity | null = null;
+	const remainingBudgetMs = TOOL_GENERATION_TARGET_BUDGET_MS - (Date.now() - opts.requestStartedAt);
+	if (remainingBudgetMs >= ADVISORY_TIMEOUT_MS + MIN_ADVISORY_BUDGET_MS) {
+		const advisoryStartedAt = Date.now();
+		[copy, brandFidelity] = await Promise.all([
+			timeGenerationStep("supporting_copy_completed", () =>
+				requestSupportingCopy({
+					projectName: opts.projectName,
+					prompt: opts.prompt,
+					brandSnapshot: opts.brandSnapshot,
+				})
+			),
+			opts.brandSnapshot
+				? timeGenerationStep("brand_fidelity_completed", () =>
+						requestBrandFidelityCheck({
+							html: sanitized.html,
+							brandSnapshot: opts.brandSnapshot as GeneratedToolBrandSnapshot,
+						})
+					)
+				: Promise.resolve(null),
+		]);
+		advisoryMs = Date.now() - advisoryStartedAt;
+		logGenerationStep("advisory_phase_completed", {
+			durationMs: advisoryMs,
+			ranBrandFidelity: Boolean(opts.brandSnapshot),
+		});
+		if (!copy) {
+			warnings.push("Could not generate supporting headline/copy for this tool — add your own before embedding.");
 		}
+
+		if (opts.brandSnapshot) {
+			if (!brandFidelity) {
+				warnings.push("Brand fidelity check could not be completed for this tool.");
+			} else if (brandFidelity.verdict !== "pass") {
+				warnings.push(
+					`Brand fidelity check (${brandFidelity.verdict}): ${
+						brandFidelity.notes || "review the generated styling against the brand."
+					}`
+				);
+			}
+		}
+	} else {
+		advisorySkipped = true;
+		warnings.push("Supporting copy and brand QA were skipped to return the generated tool within the live request budget.");
+		logGenerationStep("advisory_phase_skipped", {
+			remainingBudgetMs,
+			requiredBudgetMs: ADVISORY_TIMEOUT_MS + MIN_ADVISORY_BUDGET_MS,
+		});
 	}
 
 	logGenerationStep("build_succeeded", {
@@ -350,6 +483,12 @@ async function buildToolContent(opts: {
 			brandFidelity,
 			model: envServer.ANTHROPIC_MODEL || DEFAULT_ANTHROPIC_MODEL,
 			warnings,
+		},
+		diagnostics: {
+			buildMs: Date.now() - buildStartedAt,
+			advisoryMs,
+			advisorySkipped,
+			htmlAttempts,
 		},
 	};
 }
@@ -408,6 +547,7 @@ async function requestToolHtml(opts: {
 	}
 	const model = envServer.ANTHROPIC_MODEL || DEFAULT_ANTHROPIC_MODEL;
 	const isRevision = Boolean(opts.existingHtml);
+	const brandPrompt = buildBrandPrompt(opts.brandSnapshot);
 
 	const instructions = [
 		"You are a senior product engineer building a small, real, functional web tool for a customer to embed on their own website as an iframe.",
@@ -424,20 +564,12 @@ async function requestToolHtml(opts: {
 		"- Do NOT reference any external scripts, stylesheets, fonts, or images by URL (no CDNs, no Google Fonts, no remote <img src>). The document must work with zero network access after initial load.",
 		"- Implement the ACTUAL requested behavior with real working logic (real calculations, real state, real interactivity) — not a static mockup or placeholder. If the tool computes something, the computation must be correct and wired to visible inputs/outputs.",
 		"- Design must be clean, modern, accessible (labeled inputs, sufficient color contrast, keyboard-usable), and responsive so it looks correct at both narrow (embedded iframe) and wide layouts.",
-		"- If brand tokens are provided below, use them for the visual identity: primary/accent colors, font family names (assume standard web-safe fallbacks after the named font), and the logo image if given as a data URI. Do not fabricate a different brand.",
+		"- Keep the implementation compact: no comments, no placeholder sections, no unnecessary copy, and only as much CSS/JS as the tool actually needs.",
+		"- If brand tokens are provided below, use them for the visual identity: primary/accent colors, font family names (assume standard web-safe fallbacks after the named font), and the logo image only if an inline logo asset is explicitly provided. Do not fabricate a different brand.",
 		"- Keep the whole document self-sufficient and safe: no forms that submit to external endpoints, no fetch()/XMLHttpRequest calls to external hosts.",
 		"- Include a small, unobtrusive 'Powered by Letterstory' text credit near the bottom.",
 		...(isRevision ? ["- Return the ENTIRE updated document (not a diff/patch), following all the requirements above."] : []),
 	].join("\n");
-
-	const brandContext = opts.brandSnapshot
-		? [
-				`Brand name: ${opts.brandSnapshot.brandName ?? "Unknown"}`,
-				`Colors: ${JSON.stringify(opts.brandSnapshot.colors)}`,
-				`Fonts: ${opts.brandSnapshot.fonts.join(", ") || "none detected"}`,
-				`Logo data URI available: ${opts.brandSnapshot.logoDataUri ? "yes (embed it as-is via <img src>)" : "no"}`,
-			].join("\n")
-		: "No brand context provided — use a clean, neutral, professional visual style.";
 
 	const userContent = [
 		`Tool name: ${opts.projectName || "Untitled tool"}`,
@@ -446,10 +578,7 @@ async function requestToolHtml(opts: {
 			: [`Tool request: ${opts.prompt}`]),
 		"",
 		"Brand context:",
-		brandContext,
-		...(opts.brandSnapshot?.logoDataUri
-			? [`Logo data URI: ${opts.brandSnapshot.logoDataUri}`]
-			: []),
+		brandPrompt,
 		...(opts.isRetry
 			? [
 					"",
@@ -457,6 +586,13 @@ async function requestToolHtml(opts: {
 				]
 			: []),
 	].join("\n");
+	logGenerationStep("html_generation_prompt_prepared", {
+		timeoutMs: opts.timeoutMs,
+		isRevision,
+		brandPromptChars: brandPrompt.length,
+		includesInlineLogo: brandPrompt.includes("Logo data URI:"),
+		userContentChars: userContent.length,
+	});
 
 	let response: Response;
 	try {
@@ -634,6 +770,27 @@ async function requestBrandFidelityCheck(opts: {
 	return { verdict: verdictRaw, notes };
 }
 
+function buildBrandPrompt(brandSnapshot: GeneratedToolBrandSnapshot | null): string {
+	if (!brandSnapshot) return "No brand context provided — use a clean, neutral, professional visual style.";
+
+	const colorLines = Object.entries(brandSnapshot.colors)
+		.slice(0, MAX_PROMPT_BRAND_COLORS)
+		.map(([name, value]) => `${name}: ${value}`);
+	const fontList = brandSnapshot.fonts.slice(0, MAX_PROMPT_BRAND_FONTS);
+	const includeLogo =
+		Boolean(brandSnapshot.logoDataUri) &&
+		(brandSnapshot.logoDataUri?.length ?? 0) <= MAX_PROMPT_LOGO_DATA_URI_CHARS;
+
+	return [
+		`Brand name: ${brandSnapshot.brandName ?? "Unknown"}`,
+		`Colors: ${colorLines.length ? colorLines.join(", ") : "none detected"}`,
+		`Fonts: ${fontList.join(", ") || "none detected"}`,
+		includeLogo
+			? `Logo data URI: ${brandSnapshot.logoDataUri}`
+			: "Logo asset omitted from the prompt to keep generation fast; if no inline logo asset is provided, rely on color, typography, and brand name treatment instead.",
+	].join("\n");
+}
+
 function shouldRetryHtmlGeneration(error: unknown, attempt: number): boolean {
 	if (attempt >= MAX_GENERATION_ATTEMPTS) return false;
 	if (!(error instanceof ToolGenerationStepError)) return true;
@@ -699,4 +856,29 @@ async function timeGenerationStep<T>(event: string, fn: () => Promise<T>): Promi
 			: {}),
 	});
 	return result;
+}
+
+function emptyDiagnostics(totalMs: number): ToolGenerationDiagnostics {
+	return {
+		totalMs,
+		brandContextMs: 0,
+		buildMs: 0,
+		advisoryMs: 0,
+		advisorySkipped: true,
+		htmlAttempts: [],
+	};
+}
+
+function finalizeDiagnostics(diagnostics: ToolGenerationDiagnostics): ToolGenerationDiagnostics {
+	return {
+		...diagnostics,
+		totalMs: Math.round(diagnostics.totalMs),
+		brandContextMs: Math.round(diagnostics.brandContextMs),
+		buildMs: Math.round(diagnostics.buildMs),
+		advisoryMs: Math.round(diagnostics.advisoryMs),
+		htmlAttempts: diagnostics.htmlAttempts.map((attempt) => ({
+			...attempt,
+			durationMs: Math.round(attempt.durationMs),
+		})),
+	};
 }

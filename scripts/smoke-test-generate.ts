@@ -47,6 +47,23 @@ function truncate(value: string): string {
 	return `${value.slice(0, RESPONSE_PREVIEW_LIMIT)}…`;
 }
 
+function parseServerTiming(header: string | null): Array<{ name: string; durMs: number | null }> {
+	if (!header) return [];
+	return header
+		.split(",")
+		.map((part) => part.trim())
+		.filter(Boolean)
+		.map((part) => {
+			const [name, ...params] = part.split(";");
+			const durParam = params.find((param) => param.trim().startsWith("dur="));
+			const durMs = durParam ? Number(durParam.trim().slice("dur=".length)) : Number.NaN;
+			return {
+				name: name.trim(),
+				durMs: Number.isFinite(durMs) ? durMs : null,
+			};
+		});
+}
+
 async function main() {
 	const { baseUrl, timeoutMs } = parseArgs(process.argv.slice(2));
 	const url = `${baseUrl}/api/tools/generate`;
@@ -76,12 +93,17 @@ async function main() {
 
 		const elapsedMs = Math.round(performance.now() - startedAt);
 		const contentType = response.headers.get("content-type") ?? "(missing)";
+		const serverTiming = response.headers.get("server-timing");
 		const rawBody = await response.text();
 		const preview = truncate(rawBody);
 
 		console.log(`elapsedMs=${elapsedMs}`);
 		console.log(`httpStatus=${response.status}`);
 		console.log(`contentType=${contentType}`);
+		console.log(`serverTiming=${serverTiming ?? "(missing)"}`);
+		for (const timing of parseServerTiming(serverTiming)) {
+			console.log(`serverTiming.${timing.name}=${timing.durMs ?? "n/a"}ms`);
+		}
 		console.log(`responsePreview=${preview}`);
 
 		if (!contentType.toLowerCase().includes("application/json")) {

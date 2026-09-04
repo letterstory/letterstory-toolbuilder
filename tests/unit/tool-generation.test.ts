@@ -158,6 +158,34 @@ describe("generateTool", () => {
 		}
 	});
 
+	it("omits oversized inline logos from the main HTML generation prompt", async () => {
+		isBrandIngestionConfiguredMock.mockReturnValue(true);
+		pullBrandProfileMock.mockResolvedValue({
+			brandName: "Gymshark",
+			colors: { primary: "#111111", accent: "#ffffff" },
+			fonts: ["Inter", "Arial"],
+			images: { logo: { canonicalDataUri: `data:image/png;base64,${"a".repeat(5000)}` } },
+		});
+		mockAnthropicSuccess("<!doctype html><html><body>hi</body></html>");
+
+		const result = await generateTool({
+			projectName: "BMI Calculator",
+			siteUrl: "https://gymshark.com",
+			prompt: "a calculator",
+		});
+
+		expect(result.status).toBe("success");
+		const htmlCall = (global.fetch as ReturnType<typeof vi.fn>).mock.calls.find(([, init]) => {
+			const parsed = JSON.parse(String((init as RequestInit | undefined)?.body ?? "{}")) as { system?: string };
+			return !(parsed.system ?? "").includes("VERDICT:") && !(parsed.system ?? "").includes("HEADLINE:");
+		});
+		const htmlCallBody = JSON.parse(String((htmlCall?.[1] as RequestInit | undefined)?.body ?? "{}")) as {
+			messages?: Array<{ content: string }>;
+		};
+		expect(htmlCallBody.messages?.[0]?.content).toContain("Logo asset omitted from the prompt");
+		expect(htmlCallBody.messages?.[0]?.content).not.toContain(`data:image/png;base64,${"a".repeat(5000)}`);
+	});
+
 	it("generates supporting headline/copy alongside the tool", async () => {
 		mockAnthropicSuccess("<!doctype html><html><body>hi</body></html>");
 
@@ -331,8 +359,8 @@ describe("generateTool", () => {
 		const result = await generateTool({ projectName: "Calc", siteUrl: "", prompt: "a calculator" });
 
 		expect(result.status).toBe("success");
-		expect(timeoutSpy).toHaveBeenNthCalledWith(1, 160000);
-		expect(timeoutSpy).toHaveBeenNthCalledWith(2, 20000);
+		expect(timeoutSpy).toHaveBeenNthCalledWith(1, 210000);
+		expect(timeoutSpy).toHaveBeenNthCalledWith(2, 15000);
 		expect(timeoutSpy).toHaveBeenCalledTimes(2);
 	});
 

@@ -131,6 +131,14 @@ describe("POST /api/tools/generate", () => {
 		generateToolMock.mockResolvedValueOnce({
 			status: "success",
 			tool: { id: "abc", projectName: "Calc" },
+			diagnostics: {
+				totalMs: 1234,
+				brandContextMs: 56,
+				buildMs: 1100,
+				advisoryMs: 78,
+				advisorySkipped: false,
+				htmlAttempts: [{ attempt: 1, timeoutMs: 210000, durationMs: 1100, outcome: "success" }],
+			},
 		});
 
 		const response = await generatePost(
@@ -153,6 +161,8 @@ describe("POST /api/tools/generate", () => {
 			toolId: "abc",
 		});
 		expect(response.status).toBe(200);
+		expect(response.headers.get("server-timing")).toContain("total;dur=1234");
+		expect(response.headers.get("server-timing")).toContain("brand;dur=56");
 		await expect(response.json()).resolves.toMatchObject({ status: "success" });
 	});
 
