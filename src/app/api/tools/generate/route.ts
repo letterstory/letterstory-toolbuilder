@@ -2,10 +2,10 @@ import { NextResponse } from "next/server";
 import { generateTool } from "@/lib/generation";
 import { checkRateLimit, getClientIp } from "@/lib/security/rate-limit";
 
-// Tool generation is the most expensive route in the app (up to three
-// Anthropic calls per request: HTML build + one retry + advisory copy/
-// fidelity checks) and is reachable with no auth, so it gets the tightest
-// limit of the paid-API-backed routes.
+// Tool generation is the most expensive route in the app (up to four
+// Anthropic requests per request: primary HTML build, one fallback retry,
+// plus advisory copy + brand-fidelity checks) and is reachable with no
+// auth, so it gets the tightest limit of the paid-API-backed routes.
 const RATE_LIMIT = { bucket: "tools.generate", max: 10, windowSeconds: 600 };
 
 export async function POST(request: Request) {

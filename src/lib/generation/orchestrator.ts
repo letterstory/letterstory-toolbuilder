@@ -55,11 +55,22 @@ export interface ToolGenerationFailureResult {
 
 export type ToolGenerationResult = ToolGenerationSuccessResult | ToolGenerationFailureResult;
 
-const ANTHROPIC_TIMEOUT_MS = 120_000;
-const ADVISORY_TIMEOUT_MS = 30_000;
+export const NGINX_GENERATION_ROUTE_BUDGET_MS = 300_000;
+export const TOOL_GENERATION_TARGET_BUDGET_MS = 260_000;
+const PRIMARY_ANTHROPIC_TIMEOUT_MS = 160_000;
+const RETRY_ANTHROPIC_TIMEOUT_MS = 40_000;
+const ADVISORY_TIMEOUT_MS = 20_000;
 const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-6";
 const MAX_TOKENS = 8_000;
 const MAX_GENERATION_ATTEMPTS = 2;
+// Worst-case Anthropic budget math for one /api/tools/generate request:
+// - primary HTML generation attempt: 160s
+// - fallback retry (only for malformed HTML / transient upstream failures): 40s
+// - advisory copy + brand-fidelity checks: 20s max wall time because they run in parallel
+// Total Anthropic wall time cap = 220s, leaving ~80s inside nginx's 300s budget
+// for brand-context pulling, storage, and Next.js response overhead.
+export const MAX_ANTHROPIC_PIPELINE_WORST_CASE_MS =
+	PRIMARY_ANTHROPIC_TIMEOUT_MS + RETRY_ANTHROPIC_TIMEOUT_MS + ADVISORY_TIMEOUT_MS;
 // <head>/<style> plus the top of <body> carries almost all brand-relevant
 // signal (colors, fonts, logo <img>) — capping keeps this a cheap, fast
 // advisory check instead of resending the whole (possibly large) document.
@@ -68,6 +79,20 @@ const MAX_FIDELITY_HTML_CHARS = 6_000;
 interface AnthropicMessagesResponse {
 	content?: Array<{ type: string; text?: string }>;
 	error?: { message?: string };
+}
+
+type ToolGenerationStepErrorCode = "timeout" | "upstream_4xx" | "upstream_5xx" | "empty_response" | "network";
+
+class ToolGenerationStepError extends Error {
+	readonly code: ToolGenerationStepErrorCode;
+	readonly status?: number;
+
+	constructor(message: string, code: ToolGenerationStepErrorCode, status?: number) {
+		super(message);
+		this.name = "ToolGenerationStepError";
+		this.code = code;
+		this.status = status;
+	}
 }
 
 export function isToolGenerationConfigured(): boolean {
@@ -188,13 +213,25 @@ async function buildToolContent(opts: {
 	brandWarning: string | null;
 	existingHtml?: string;
 }): Promise<BuildToolContentResult | { status: "error"; message: string }> {
+	const buildStartedAt = Date.now();
+	logGenerationStep("build_started", {
+		projectName: opts.projectName || "Untitled tool",
+		promptChars: opts.prompt.length,
+		hasBrandSnapshot: Boolean(opts.brandSnapshot),
+		isRevision: Boolean(opts.existingHtml),
+	});
 	// A single bad or slow generation (truncated by max_tokens, the model
 	// wrapping the doc in prose, or a transient Anthropic timeout/5xx)
 	// shouldn't cost the customer a full manual retry — we get one automatic
 	// retry with a stronger instruction before surfacing an error.
 	let sanitized: SanitizedHtml | null = null;
-	let lastErrorMessage: string | null = null;
+	let lastFailure:
+		| { kind: "step_error"; error: unknown; message: string }
+		| { kind: "invalid_html"; message: string }
+		| null = null;
 	for (let attempt = 1; attempt <= MAX_GENERATION_ATTEMPTS; attempt += 1) {
+		const timeoutMs = attempt === 1 ? PRIMARY_ANTHROPIC_TIMEOUT_MS : RETRY_ANTHROPIC_TIMEOUT_MS;
+		const attemptStartedAt = Date.now();
 		let rawHtml: string;
 		try {
 			rawHtml = await requestToolHtml({
@@ -203,30 +240,55 @@ async function buildToolContent(opts: {
 				brandSnapshot: opts.brandSnapshot,
 				isRetry: attempt > 1,
 				existingHtml: opts.existingHtml,
+				timeoutMs,
 			});
 		} catch (error) {
-			lastErrorMessage = error instanceof Error ? error.message : String(error);
+			const message = error instanceof Error ? error.message : String(error);
+			lastFailure = { kind: "step_error", error, message };
+			logGenerationStep("html_generation_failed", {
+				attempt,
+				timeoutMs,
+				durationMs: Date.now() - attemptStartedAt,
+				error: message,
+			});
+			if (!shouldRetryHtmlGeneration(error, attempt)) break;
 			continue;
 		}
 
 		const candidate = sanitizeGeneratedHtml(rawHtml);
 		if (looksLikeHtmlDocument(candidate.html)) {
 			sanitized = candidate;
+			logGenerationStep("html_generation_succeeded", {
+				attempt,
+				timeoutMs,
+				durationMs: Date.now() - attemptStartedAt,
+				htmlChars: candidate.html.length,
+				warningCount: candidate.warnings.length,
+			});
 			break;
 		}
-		lastErrorMessage = opts.existingHtml
-			? "Revision returned an incomplete or invalid HTML document."
-			: "Generation returned an incomplete or invalid HTML document.";
+		lastFailure = {
+			kind: "invalid_html",
+			message: opts.existingHtml
+				? "Revision returned an incomplete or invalid HTML document."
+				: "Generation returned an incomplete or invalid HTML document.",
+		};
+		logGenerationStep("html_generation_invalid_document", {
+			attempt,
+			timeoutMs,
+			durationMs: Date.now() - attemptStartedAt,
+			htmlChars: candidate.html.length,
+		});
 	}
 
 	if (!sanitized) {
+		logGenerationStep("build_failed", {
+			durationMs: Date.now() - buildStartedAt,
+			reason: lastFailure?.message ?? "unknown build failure",
+		});
 		return {
 			status: "error",
-			message:
-				lastErrorMessage ??
-				(opts.existingHtml
-					? "Revision did not return a usable HTML document. Try again or refine the instructions."
-					: "Generation did not return a usable HTML document. Try again or refine the prompt."),
+			message: formatBuildFailureMessage(lastFailure, Boolean(opts.existingHtml)),
 		};
 	}
 
@@ -237,18 +299,30 @@ async function buildToolContent(opts: {
 	// iframe, and (b) an LLM cross-check that the generated tool doesn't
 	// drift from the brand. Neither should block shipping the tool itself;
 	// a failure just surfaces as a warning for the customer to review.
-	const copy = await requestSupportingCopy({
-		projectName: opts.projectName,
-		prompt: opts.prompt,
-		brandSnapshot: opts.brandSnapshot,
+	const advisoryStartedAt = Date.now();
+	const [copy, brandFidelity] = await Promise.all([
+		timeGenerationStep("supporting_copy_completed", () =>
+			requestSupportingCopy({
+				projectName: opts.projectName,
+				prompt: opts.prompt,
+				brandSnapshot: opts.brandSnapshot,
+			})
+		),
+		opts.brandSnapshot
+			? timeGenerationStep("brand_fidelity_completed", () =>
+					requestBrandFidelityCheck({ html: sanitized.html, brandSnapshot: opts.brandSnapshot as GeneratedToolBrandSnapshot })
+				)
+			: Promise.resolve(null),
+	]);
+	logGenerationStep("advisory_phase_completed", {
+		durationMs: Date.now() - advisoryStartedAt,
+		ranBrandFidelity: Boolean(opts.brandSnapshot),
 	});
 	if (!copy) {
 		warnings.push("Could not generate supporting headline/copy for this tool — add your own before embedding.");
 	}
 
-	let brandFidelity: GeneratedToolBrandFidelity | null = null;
 	if (opts.brandSnapshot) {
-		brandFidelity = await requestBrandFidelityCheck({ html: sanitized.html, brandSnapshot: opts.brandSnapshot });
 		if (!brandFidelity) {
 			warnings.push("Brand fidelity check could not be completed for this tool.");
 		} else if (brandFidelity.verdict !== "pass") {
@@ -260,6 +334,10 @@ async function buildToolContent(opts: {
 		}
 	}
 
+	logGenerationStep("build_succeeded", {
+		durationMs: Date.now() - buildStartedAt,
+		totalWarnings: warnings.length,
+	});
 	return {
 		status: "success",
 		content: {
@@ -320,6 +398,7 @@ async function requestToolHtml(opts: {
 	prompt: string;
 	brandSnapshot: GeneratedToolBrandSnapshot | null;
 	isRetry?: boolean;
+	timeoutMs: number;
 	/** When set, this is a revision: edit this HTML per the prompt instead of building from scratch. */
 	existingHtml?: string;
 }): Promise<string> {
@@ -379,26 +458,41 @@ async function requestToolHtml(opts: {
 			: []),
 	].join("\n");
 
-	const response = await fetch("https://api.anthropic.com/v1/messages", {
-		method: "POST",
-		headers: {
-			"x-api-key": apiKey,
-			"anthropic-version": "2023-06-01",
-			"content-type": "application/json",
-		},
-		body: JSON.stringify({
-			model,
-			max_tokens: MAX_TOKENS,
-			system: instructions,
-			messages: [{ role: "user", content: userContent }],
-		}),
-		signal: AbortSignal.timeout(ANTHROPIC_TIMEOUT_MS),
-	});
+	let response: Response;
+	try {
+		response = await fetch("https://api.anthropic.com/v1/messages", {
+			method: "POST",
+			headers: {
+				"x-api-key": apiKey,
+				"anthropic-version": "2023-06-01",
+				"content-type": "application/json",
+			},
+			body: JSON.stringify({
+				model,
+				max_tokens: MAX_TOKENS,
+				system: instructions,
+				messages: [{ role: "user", content: userContent }],
+			}),
+			signal: AbortSignal.timeout(opts.timeoutMs),
+		});
+	} catch (error) {
+		if (isAnthropicTimeoutError(error)) {
+			throw new ToolGenerationStepError("The operation was aborted due to timeout", "timeout");
+		}
+		throw new ToolGenerationStepError(
+			error instanceof Error ? error.message : String(error),
+			"network"
+		);
+	}
 
 	const body = (await response.json().catch(() => ({}))) as AnthropicMessagesResponse;
 
 	if (!response.ok) {
-		throw new Error(`Anthropic generation failed (${response.status}): ${body.error?.message ?? "unknown error"}`);
+		throw new ToolGenerationStepError(
+			`Anthropic generation failed (${response.status}): ${body.error?.message ?? "unknown error"}`,
+			response.status >= 500 ? "upstream_5xx" : "upstream_4xx",
+			response.status
+		);
 	}
 
 	const text = body.content
@@ -408,7 +502,7 @@ async function requestToolHtml(opts: {
 		.trim();
 
 	if (!text) {
-		throw new Error("Anthropic generation returned no text response.");
+		throw new ToolGenerationStepError("Anthropic generation returned no text response.", "empty_response");
 	}
 
 	return text;
@@ -538,4 +632,71 @@ async function requestBrandFidelityCheck(opts: {
 	if (verdictRaw !== "pass" && verdictRaw !== "warn" && verdictRaw !== "fail") return null;
 
 	return { verdict: verdictRaw, notes };
+}
+
+function shouldRetryHtmlGeneration(error: unknown, attempt: number): boolean {
+	if (attempt >= MAX_GENERATION_ATTEMPTS) return false;
+	if (!(error instanceof ToolGenerationStepError)) return true;
+	return error.code === "empty_response" || error.code === "network" || error.code === "upstream_5xx";
+}
+
+function formatBuildFailureMessage(
+	failure:
+		| { kind: "step_error"; error: unknown; message: string }
+		| { kind: "invalid_html"; message: string }
+		| null,
+	isRevision: boolean
+): string {
+	if (!failure) {
+		return isRevision
+			? "Revision did not return a usable HTML document. Try again or refine the instructions."
+			: "Generation did not return a usable HTML document. Try again or refine the prompt.";
+	}
+
+	if (failure.kind === "invalid_html") {
+		return failure.message;
+	}
+
+	if (failure.error instanceof ToolGenerationStepError) {
+		if (failure.error.code === "timeout") {
+			return isRevision
+				? "Tool revision took too long to finish within the current request budget. Try a smaller change set, or retry after simplifying the instructions."
+				: "Tool generation took too long to finish within the current request budget. Try a simpler prompt, or generate without brand context first and then revise it.";
+		}
+	}
+
+	return failure.message;
+}
+
+function isAnthropicTimeoutError(error: unknown): boolean {
+	if (!error) return false;
+	if (typeof DOMException !== "undefined" && error instanceof DOMException) {
+		return error.name === "AbortError" || error.name === "TimeoutError";
+	}
+	if (!(error instanceof Error)) return false;
+	return /aborted due to timeout|aborterror|timeout/i.test(error.message);
+}
+
+function logGenerationStep(event: string, details: Record<string, unknown>): void {
+	console.info(
+		"[tool-generation]",
+		JSON.stringify({
+			event,
+			...details,
+		})
+	);
+}
+
+async function timeGenerationStep<T>(event: string, fn: () => Promise<T>): Promise<T> {
+	const startedAt = Date.now();
+	const result = await fn();
+	const isObject = typeof result === "object" && result !== null;
+	logGenerationStep(event, {
+		durationMs: Date.now() - startedAt,
+		success: Boolean(result),
+		...(isObject && "verdict" in (result as Record<string, unknown>)
+			? { verdict: (result as { verdict?: unknown }).verdict ?? null }
+			: {}),
+	});
+	return result;
 }

@@ -17,7 +17,13 @@ vi.mock("@/lib/generation/store", () => ({
 	updateGeneratedTool: updateGeneratedToolMock,
 }));
 
-import { generateTool, isToolGenerationConfigured } from "../../src/lib/generation/orchestrator";
+import {
+	generateTool,
+	isToolGenerationConfigured,
+	MAX_ANTHROPIC_PIPELINE_WORST_CASE_MS,
+	NGINX_GENERATION_ROUTE_BUDGET_MS,
+	TOOL_GENERATION_TARGET_BUDGET_MS,
+} from "../../src/lib/generation/orchestrator";
 
 const originalFetch = global.fetch;
 const originalEnv = {
@@ -53,6 +59,7 @@ const advisoryFallbackResponse = () =>
 describe("generateTool", () => {
 	beforeEach(() => {
 		vi.restoreAllMocks();
+		vi.spyOn(console, "info").mockImplementation(() => {});
 		pullBrandProfileMock.mockReset();
 		isBrandIngestionConfiguredMock.mockReset();
 		saveGeneratedToolMock.mockReset();
@@ -83,6 +90,11 @@ describe("generateTool", () => {
 			version: 2,
 			history: [],
 		}));
+	});
+
+	it("keeps the Anthropic pipeline budget under both the target and nginx caps", () => {
+		expect(MAX_ANTHROPIC_PIPELINE_WORST_CASE_MS).toBeLessThanOrEqual(TOOL_GENERATION_TARGET_BUDGET_MS);
+		expect(MAX_ANTHROPIC_PIPELINE_WORST_CASE_MS).toBeLessThan(NGINX_GENERATION_ROUTE_BUDGET_MS);
 	});
 
 	it("reports not_configured when ANTHROPIC_API_KEY is unset", async () => {
@@ -274,10 +286,25 @@ describe("generateTool", () => {
 		expect(saveGeneratedToolMock).not.toHaveBeenCalled();
 	});
 
-	it("retries once and succeeds when the first Anthropic call times out/errors", async () => {
+	it("returns a friendlier timeout message without retrying a second full HTML build", async () => {
 		const fetchMock = vi
 			.fn()
-			.mockRejectedValueOnce(new Error("The operation was aborted due to timeout"))
+			.mockRejectedValueOnce(new Error("The operation was aborted due to timeout"));
+		global.fetch = fetchMock as unknown as typeof fetch;
+
+		const result = await generateTool({ projectName: "Calc", siteUrl: "", prompt: "a calculator" });
+
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+		expect(result.status).toBe("error");
+		if (result.status === "error") {
+			expect(result.message).toMatch(/took too long/i);
+		}
+	});
+
+	it("retries once and succeeds when the first Anthropic call gets a transient 5xx", async () => {
+		const fetchMock = vi
+			.fn()
+			.mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: "overloaded" } }), { status: 529 }))
 			.mockResolvedValueOnce(
 				new Response(
 					JSON.stringify({
@@ -291,9 +318,22 @@ describe("generateTool", () => {
 
 		const result = await generateTool({ projectName: "Calc", siteUrl: "", prompt: "a calculator" });
 
-		// 2 attempts for the main HTML generation + 1 advisory supporting-copy call.
 		expect(fetchMock).toHaveBeenCalledTimes(3);
 		expect(result.status).toBe("success");
+	});
+
+	it("uses the expected timeout budgets for the main and advisory Claude calls", async () => {
+		const timeoutSpy = vi.spyOn(AbortSignal, "timeout").mockImplementation(
+			((ms: number) => ({ timeoutMs: ms }) as unknown as AbortSignal) as typeof AbortSignal.timeout
+		);
+		mockAnthropicSuccess("<!doctype html><html><body>hi</body></html>");
+
+		const result = await generateTool({ projectName: "Calc", siteUrl: "", prompt: "a calculator" });
+
+		expect(result.status).toBe("success");
+		expect(timeoutSpy).toHaveBeenNthCalledWith(1, 160000);
+		expect(timeoutSpy).toHaveBeenNthCalledWith(2, 20000);
+		expect(timeoutSpy).toHaveBeenCalledTimes(2);
 	});
 
 	it("returns an error result when Anthropic returns no text content at all", async () => {
@@ -357,6 +397,7 @@ describe("generateTool", () => {
 describe("generateTool — revisions (toolId set)", () => {
 	beforeEach(() => {
 		vi.restoreAllMocks();
+		vi.spyOn(console, "info").mockImplementation(() => {});
 		pullBrandProfileMock.mockReset();
 		isBrandIngestionConfiguredMock.mockReset();
 		saveGeneratedToolMock.mockReset();
