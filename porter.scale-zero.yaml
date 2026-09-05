@@ -1,0 +1,31 @@
+version: v2
+name: letterstory-toolbuilder
+
+build:
+  method: docker
+  dockerfile: ./Dockerfile
+  context: .
+
+env:
+  ANTHROPIC_MODEL: claude-sonnet-4-6
+  CONTEXT_DEV_BASE_URL: https://api.context.dev/v1
+  PORTER_ENVIRONMENT: staging
+
+services:
+  - name: web
+    type: web
+    run: node server.js
+    instances: 0
+    port: 3000
+    healthCheck:
+      enabled: true
+      httpPath: /api/health
+    ingressAnnotations:
+      nginx.ingress.kubernetes.io/proxy-connect-timeout: "60"
+      nginx.ingress.kubernetes.io/proxy-send-timeout: "180"
+      nginx.ingress.kubernetes.io/proxy-read-timeout: "180"
+    autoscaling:
+      enabled: false
+    resources:
+      cpuCores: 0.5
+      ramMegabytes: 512

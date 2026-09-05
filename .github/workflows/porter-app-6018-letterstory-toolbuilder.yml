@@ -11,9 +11,21 @@ jobs:
               uses: actions/checkout@v4
             - name: Setup porter
               uses: porter-dev/setup-porter@v0.2.0
-            - name: Deploy stack
+            - name: Build and apply desired revision
               timeout-minutes: 30
-              run: porter apply --wait --tag "$GITHUB_SHA"
+              run: porter apply --tag "$GITHUB_SHA"
+              env:
+                PORTER_APP_NAME: letterstory-toolbuilder
+                PORTER_CLUSTER: "6018"
+                PORTER_DEPLOYMENT_TARGET_ID: 57c6c7ab-370f-43b9-a1e9-f061af782fdf
+                PORTER_HOST: https://dashboard.porter.run
+                PORTER_PROJECT: "19766"
+                PORTER_TOKEN: ${{ secrets.PORTER_APP_19766_22301 }}
+            - name: Roll out without surge
+              timeout-minutes: 30
+              run: |
+                porter apply -f porter.scale-zero.yaml --app "$PORTER_APP_NAME" --tag "$GITHUB_SHA" --no-build --exact --wait
+                porter apply -f porter.yaml --app "$PORTER_APP_NAME" --tag "$GITHUB_SHA" --no-build --exact --wait
               env:
                 PORTER_APP_NAME: letterstory-toolbuilder
                 PORTER_CLUSTER: "6018"
