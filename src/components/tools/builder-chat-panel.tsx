@@ -6,8 +6,6 @@ import {
 	ChevronDown,
 	ChevronRight,
 	LoaderCircle,
-	Paperclip,
-	Target,
 } from "lucide-react";
 import { formatDuration } from "@/components/tools/builder-activity";
 import type {
@@ -265,26 +263,7 @@ export function BuilderChatPanel({
 						disabled={isRunning}
 						className="min-h-[120px] resize-none rounded-2xl border-0 bg-transparent px-1 text-sm shadow-none focus-visible:ring-0"
 					/>
-					<div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-brand/10 pt-3">
-						<div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-							<Button
-								type="button"
-								variant="ghost"
-								size="icon"
-								className="rounded-md text-brand-text hover:bg-brand-light/35 hover:text-brand-text"
-								onClick={onNormalizeSiteUrl}
-								aria-label="Normalize brand site URL"
-							>
-								<Paperclip className="size-4" />
-							</Button>
-							<span className="inline-flex items-center gap-2 rounded-md border border-brand/10 bg-transparent px-2 py-1 text-xs font-medium text-brand-text">
-								<Target className="size-3.5" />
-								Auto
-							</span>
-							<span className="text-xs font-medium uppercase tracking-[0.14em] text-brand-text/50">
-								Build
-							</span>
-						</div>
+					<div className="mt-3 flex justify-end border-t border-brand/10 pt-3">
 						<Button
 							type="submit"
 							disabled={isRunning}
