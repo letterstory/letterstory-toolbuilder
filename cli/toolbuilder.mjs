@@ -1,11 +1,13 @@
 #!/usr/bin/env node
+import { pathToFileURL } from "node:url";
+
 import { ToolbuilderClient, parseArgv } from "./client.mjs";
 import { runBrandCommand } from "./commands/brand.mjs";
 import { runHealthCommand } from "./commands/health.mjs";
 import { runToolsCommand } from "./commands/tools.mjs";
 
-function printHelp() {
-	console.log(`toolbuilder CLI
+export function printHelp(logger = console.log) {
+	logger(`toolbuilder CLI
 
 Usage:
   toolbuilder [--url <base-url>] health
@@ -20,16 +22,16 @@ Usage:
 `);
 }
 
-async function main() {
-	const { positionals, options } = parseArgv(process.argv.slice(2), {
+export async function runCli(argv = process.argv.slice(2), { createClient = (options) => new ToolbuilderClient(options) } = {}) {
+	const { positionals, options } = parseArgv(argv, {
 		stopAtFirstPositional: true,
 	});
 	if (options.help || positionals.length === 0) {
 		printHelp();
-		process.exit(0);
+		return 0;
 	}
 
-	const client = new ToolbuilderClient({
+	const client = createClient({
 		baseUrl: typeof options.url === "string" ? options.url : undefined,
 	});
 
@@ -45,10 +47,19 @@ async function main() {
 		throw new Error(`Unknown command: ${command}`);
 	}
 
-	process.exit(exitCode);
+	return exitCode;
 }
 
-main().catch((error) => {
-	console.error(error instanceof Error ? error.message : String(error));
-	process.exit(1);
-});
+export async function runCliMain(argv = process.argv.slice(2), { logError = console.error, createClient } = {}) {
+	try {
+		return await runCli(argv, { createClient });
+	} catch (error) {
+		logError(error instanceof Error ? error.message : String(error));
+		return 1;
+	}
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+	const exitCode = await runCliMain();
+	process.exit(exitCode);
+}

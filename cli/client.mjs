@@ -1,5 +1,20 @@
 const DEFAULT_API_URL = process.env.TOOLBUILDER_API_URL || "http://localhost:3000";
 
+function getResponseContentType(response) {
+	return response.headers.get("content-type") ?? "unknown";
+}
+
+export async function parseJsonResponse(response) {
+	try {
+		return await response.json();
+	} catch (error) {
+		throw new Error(
+			`Server returned a non-JSON response (HTTP ${response.status}). This can happen during deploys/cold starts — wait a moment and retry. (Content-Type: ${getResponseContentType(response)})`,
+			{ cause: error }
+		);
+	}
+}
+
 export function parseArgv(argv, { stopAtFirstPositional = false } = {}) {
 	const positionals = [];
 	const options = {};
@@ -55,8 +70,9 @@ export class ToolbuilderClient {
 		const response = await fetch(this.endpoint, {
 			headers: { Accept: "application/json" },
 		});
+		const payload = await parseJsonResponse(response);
 		if (!response.ok) throw new Error(`Discovery failed with HTTP ${response.status}`);
-		return response.json();
+		return payload;
 	}
 
 	async rpc(method, params = {}) {
@@ -73,7 +89,7 @@ export class ToolbuilderClient {
 				params,
 			}),
 		});
-		const payload = await response.json();
+		const payload = await parseJsonResponse(response);
 		if (payload.error) {
 			const error = new Error(payload.error.message);
 			error.code = payload.error.code;
