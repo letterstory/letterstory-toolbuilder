@@ -3,6 +3,8 @@
 // store.supabase.ts) and the dispatcher (store.ts) can depend on the same
 // shapes without a circular import.
 
+import type { BrandCompetitorContext } from "@/lib/brand/competitor-context";
+
 export interface GeneratedToolBrandFontFace {
 	family: string;
 	google: boolean;
@@ -26,6 +28,7 @@ export interface GeneratedToolBrandSnapshot {
 	 */
 	logoPolicy?: "exact_asset" | "text_only";
 	logoDataUri: string | null;
+	competitorContext?: BrandCompetitorContext | null;
 }
 
 export interface GeneratedToolCopy {

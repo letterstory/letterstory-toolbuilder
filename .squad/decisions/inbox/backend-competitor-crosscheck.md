@@ -1,0 +1,4 @@
+### 2026-09-05: Competitor brand cross-check is an advisory ingestion enrichment
+**By:** Backend
+**What:** Tool generation now enriches the stored brand snapshot with a `competitorContext` advisory block. It uses a cheap Anthropic structured prompt to identify 2-3 direct competitors, scrapes each competitor with Firecrawl branding extraction, aggregates simple norms (palette family, typography category, logo treatment), and surfaces a non-blocking sanity signal in the dashboard.
+**Why:** This adds a lightweight check for suspicious brand drift or competitor leakage without changing the final HTML generation contract or blocking successful tool creation when Anthropic/Firecrawl competitor calls fail or time out.

@@ -189,6 +189,77 @@ export function BuilderDashboardPanel({
 										)}
 									</div>
 								</div>
+								{activeTool.brandSnapshot?.competitorContext ? (
+									<div className="rounded-3xl border border-brand/10 bg-brand-light/12 p-4">
+										<p className="text-xs uppercase tracking-[0.16em] text-brand-text/55">
+											Competitor sanity check
+										</p>
+										<p className="mt-2 text-sm font-medium text-foreground">
+											{activeTool.brandSnapshot.competitorContext.summary}
+										</p>
+										<div className="mt-3 flex flex-wrap gap-2">
+											<Badge
+												variant="outline"
+												className="border-brand/10 bg-white/70 text-brand-text"
+											>
+												Signal:{" "}
+												{activeTool.brandSnapshot.competitorContext.signal.replace(/_/g, " ")}
+											</Badge>
+											{activeTool.brandSnapshot.competitorContext.industry ? (
+												<Badge
+													variant="outline"
+													className="border-brand/10 bg-white/70 text-brand-text"
+												>
+													{activeTool.brandSnapshot.competitorContext.industry}
+												</Badge>
+											) : null}
+										</div>
+										<div className="mt-3 space-y-2">
+											{activeTool.brandSnapshot.competitorContext.competitors.map((competitor) => (
+												<div
+													key={competitor.domain}
+													className="rounded-2xl border border-brand/10 bg-white/70 px-3 py-3 text-xs text-brand-text"
+												>
+													<div className="flex flex-wrap items-center gap-2">
+														<span className="font-medium text-foreground">
+															{competitor.companyName}
+														</span>
+														<span className="text-muted-foreground">{competitor.domain}</span>
+														<Badge variant="secondary">{competitor.status}</Badge>
+													</div>
+													{competitor.status === "analyzed" ? (
+														<p className="mt-2 text-muted-foreground">
+															{[
+																competitor.primaryColor
+																	? `${competitor.primaryColor} ${competitor.primaryColorFamily}`
+																	: null,
+																competitor.fontFamily
+																	? `${competitor.fontFamily} (${competitor.fontCategory})`
+																	: competitor.fontCategory !== "unknown"
+																		? competitor.fontCategory
+																		: null,
+																competitor.logoStyle !== "unknown"
+																	? competitor.logoStyle
+																	: null,
+															]
+																.filter(Boolean)
+																.join(" · ") || "Limited extracted brand signal."}
+														</p>
+													) : competitor.notes.length ? (
+														<p className="mt-2 text-muted-foreground">{competitor.notes[0]}</p>
+													) : null}
+												</div>
+											))}
+										</div>
+										{activeTool.brandSnapshot.competitorContext.notes.length ? (
+											<ul className="mt-3 list-disc space-y-1 pl-5 text-xs text-muted-foreground">
+												{activeTool.brandSnapshot.competitorContext.notes.map((note) => (
+													<li key={note}>{note}</li>
+												))}
+											</ul>
+										) : null}
+									</div>
+								) : null}
 							</div>
 						</div>
 

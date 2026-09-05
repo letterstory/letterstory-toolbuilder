@@ -18,6 +18,7 @@
 import { envServer } from "@/lib/config/env.server";
 import { requestAnthropicText } from "@/lib/anthropic/messages";
 import { isBrandIngestionConfigured, pullBrandProfile, type BrandProfile } from "@/lib/brand";
+import { buildCompetitorContextForBrand } from "@/lib/brand/competitor-context";
 import { enforceBrandPresentation } from "@/lib/generation/brand-enforcement";
 import {
 	looksLikeHtmlDocument,
@@ -165,9 +166,11 @@ export async function generateTool(request: ToolGenerationRequest): Promise<Tool
 
 	const normalizedSiteUrl = request.siteUrl.trim();
 	const brandStartedAt = Date.now();
-	const { brandProfile, brandWarning } = await resolveBrandContext(normalizedSiteUrl);
+	const { brandProfile, brandWarning, competitorContext } = await resolveBrandContext(
+		normalizedSiteUrl
+	);
 	const brandContextMs = Date.now() - brandStartedAt;
-	const brandSnapshot = toBrandSnapshot(brandProfile);
+	const brandSnapshot = toBrandSnapshot(brandProfile, competitorContext);
 
 	const built = await buildToolContent({
 		projectName: request.projectName,
@@ -236,7 +239,7 @@ async function reviseTool(
 		const brandStartedAt = Date.now();
 		const resolved = await resolveBrandContext(normalizedSiteUrl);
 		brandContextMs = Date.now() - brandStartedAt;
-		brandSnapshot = toBrandSnapshot(resolved.brandProfile);
+		brandSnapshot = toBrandSnapshot(resolved.brandProfile, resolved.competitorContext);
 		brandWarning = resolved.brandWarning;
 	}
 
@@ -559,30 +562,46 @@ async function buildToolContent(opts: {
  */
 async function resolveBrandContext(
 	siteUrl: string
-): Promise<{ brandProfile: BrandProfile | null; brandWarning: string | null }> {
-	if (!siteUrl) return { brandProfile: null, brandWarning: null };
+): Promise<{
+	brandProfile: BrandProfile | null;
+	brandWarning: string | null;
+	competitorContext: GeneratedToolBrandSnapshot["competitorContext"];
+}> {
+	if (!siteUrl) return { brandProfile: null, brandWarning: null, competitorContext: null };
 
 	if (!isBrandIngestionConfigured()) {
 		return {
 			brandProfile: null,
 			brandWarning:
 				"Context.dev isn't configured, so this tool was generated without brand context.",
+			competitorContext: null,
 		};
 	}
 
 	try {
-		return { brandProfile: await pullBrandProfile(siteUrl), brandWarning: null };
+		const brandProfile = await pullBrandProfile(siteUrl);
+		let competitorContext: GeneratedToolBrandSnapshot["competitorContext"] = null;
+		try {
+			competitorContext = await buildCompetitorContextForBrand(brandProfile);
+		} catch {
+			competitorContext = null;
+		}
+		return { brandProfile, brandWarning: null, competitorContext };
 	} catch (error) {
 		return {
 			brandProfile: null,
 			brandWarning: `Brand ingestion failed (${
 				error instanceof Error ? error.message : String(error)
 			}); generated without brand context.`,
+			competitorContext: null,
 		};
 	}
 }
 
-function toBrandSnapshot(profile: BrandProfile | null): GeneratedToolBrandSnapshot | null {
+function toBrandSnapshot(
+	profile: BrandProfile | null,
+	competitorContext: GeneratedToolBrandSnapshot["competitorContext"] = null
+): GeneratedToolBrandSnapshot | null {
 	if (!profile) return null;
 	const logoDataUri = resolveGenerationLogoDataUri(profile);
 	const logoPolicy =
@@ -613,6 +632,7 @@ function toBrandSnapshot(profile: BrandProfile | null): GeneratedToolBrandSnapsh
 			: null,
 		logoPolicy,
 		logoDataUri: logoPolicy === "exact_asset" ? logoDataUri : null,
+		competitorContext,
 	};
 }
 

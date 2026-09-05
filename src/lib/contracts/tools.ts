@@ -7,6 +7,42 @@ export const generatedToolBrandSnapshotSchema = z.object({
 	headingFont: z.string().nullable().optional(),
 	bodyFont: z.string().nullable().optional(),
 	logoDataUri: z.string().nullable(),
+	competitorContext: z
+		.object({
+			industry: z.string().nullable(),
+			signal: z.enum(["matches", "mixed", "diverges", "suspicious_match", "limited"]),
+			summary: z.string(),
+			target: z.object({
+				primaryColor: z.string().nullable(),
+				primaryColorFamily: z.enum(["cool", "warm", "neutral", "unknown"]),
+				fontFamily: z.string().nullable(),
+				fontCategory: z.enum(["sans-serif", "serif", "monospace", "display", "unknown"]),
+				logoStyle: z.enum(["wordmark", "logo-mark", "combination", "unknown"]),
+			}),
+			industryNorms: z.object({
+				sampleSize: z.number().int().nonnegative(),
+				primaryColorFamily: z.enum(["cool", "warm", "neutral", "unknown"]),
+				fontCategory: z.enum(["sans-serif", "serif", "monospace", "display", "unknown"]),
+				logoStyle: z.enum(["wordmark", "logo-mark", "combination", "unknown"]),
+			}),
+			competitors: z.array(
+				z.object({
+					companyName: z.string(),
+					domain: z.string(),
+					status: z.enum(["analyzed", "unavailable"]),
+					brandName: z.string().nullable(),
+					primaryColor: z.string().nullable(),
+					primaryColorFamily: z.enum(["cool", "warm", "neutral", "unknown"]),
+					fontFamily: z.string().nullable(),
+					fontCategory: z.enum(["sans-serif", "serif", "monospace", "display", "unknown"]),
+					logoStyle: z.enum(["wordmark", "logo-mark", "combination", "unknown"]),
+					notes: z.array(z.string()),
+				})
+			),
+			notes: z.array(z.string()),
+		})
+		.nullable()
+		.optional(),
 });
 
 export const generatedToolCopySchema = z.object({

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const pullBrandProfileMock = vi.hoisted(() => vi.fn());
 const isBrandIngestionConfiguredMock = vi.hoisted(() => vi.fn());
+const buildCompetitorContextForBrandMock = vi.hoisted(() => vi.fn());
 const saveGeneratedToolMock = vi.hoisted(() => vi.fn());
 const getGeneratedToolMock = vi.hoisted(() => vi.fn());
 const updateGeneratedToolMock = vi.hoisted(() => vi.fn());
@@ -9,6 +10,10 @@ const updateGeneratedToolMock = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/brand", () => ({
 	pullBrandProfile: pullBrandProfileMock,
 	isBrandIngestionConfigured: isBrandIngestionConfiguredMock,
+}));
+
+vi.mock("@/lib/brand/competitor-context", () => ({
+	buildCompetitorContextForBrand: buildCompetitorContextForBrandMock,
 }));
 
 vi.mock("@/lib/generation/store", () => ({
@@ -77,6 +82,7 @@ describe("generateTool", () => {
 		vi.spyOn(console, "info").mockImplementation(() => {});
 		pullBrandProfileMock.mockReset();
 		isBrandIngestionConfiguredMock.mockReset();
+		buildCompetitorContextForBrandMock.mockReset();
 		saveGeneratedToolMock.mockReset();
 		getGeneratedToolMock.mockReset();
 		updateGeneratedToolMock.mockReset();
@@ -105,6 +111,7 @@ describe("generateTool", () => {
 			version: 2,
 			history: [],
 		}));
+		buildCompetitorContextForBrandMock.mockResolvedValue(null);
 	});
 
 	it("keeps the Anthropic pipeline budget under both the target and nginx caps", () => {
@@ -171,6 +178,39 @@ describe("generateTool", () => {
 			typography: { headingFont: "Inter", bodyFont: "Inter" },
 			images: { logo: { canonicalDataUri: "data:image/png;base64,abc" } },
 		});
+		buildCompetitorContextForBrandMock.mockResolvedValue({
+			industry: "payments",
+			signal: "matches",
+			summary: "Competitor read for payments: cool palette, sans-serif typography. Extracted target broadly matches that pattern.",
+			target: {
+				primaryColor: "#635BFF",
+				primaryColorFamily: "cool",
+				fontFamily: "Inter",
+				fontCategory: "sans-serif",
+				logoStyle: "wordmark",
+			},
+			industryNorms: {
+				sampleSize: 2,
+				primaryColorFamily: "cool",
+				fontCategory: "sans-serif",
+				logoStyle: "wordmark",
+			},
+			competitors: [
+				{
+					companyName: "Adyen",
+					domain: "adyen.com",
+					status: "analyzed",
+					brandName: "Adyen",
+					primaryColor: "#0ABF53",
+					primaryColorFamily: "cool",
+					fontFamily: "Inter",
+					fontCategory: "sans-serif",
+					logoStyle: "wordmark",
+					notes: [],
+				},
+			],
+			notes: [],
+		});
 		mockAnthropicSuccess("<!doctype html><html><body>hi</body></html>");
 
 		const result = await generateTool({
@@ -190,6 +230,10 @@ describe("generateTool", () => {
 				bodyFont: "Inter",
 				logoPolicy: "exact_asset",
 				logoDataUri: "data:image/png;base64,abc",
+				competitorContext: expect.objectContaining({
+					industry: "payments",
+					signal: "matches",
+				}),
 			});
 			expect(result.tool.brandFidelity).toEqual({ verdict: "pass", notes: "" });
 		}
