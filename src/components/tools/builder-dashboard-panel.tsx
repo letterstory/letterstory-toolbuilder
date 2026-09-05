@@ -1,0 +1,285 @@
+import { AlertCircle, Check, Copy, History, Palette, RefreshCw, Type } from "lucide-react";
+import { formatTimestamp } from "@/components/tools/builder-activity";
+import type { RequestState, ToolHistoryEntry, ToolSummary } from "@/components/tools/builder-types";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+
+interface BuilderDashboardPanelProps {
+	activeTool: ToolSummary | null;
+	toolHistory: ToolHistoryEntry[];
+	recentTools: ToolSummary[];
+	embedSnippet: string;
+	fullEmbedSnippet: string;
+	copiedTarget: "iframe" | "full" | null;
+	requestState: RequestState;
+	onCopy: (target: "iframe" | "full", text: string) => void;
+	onRollback: (version: number) => void;
+	onReopenRecent: (tool: ToolSummary) => void;
+}
+
+export function BuilderDashboardPanel({
+	activeTool,
+	toolHistory,
+	recentTools,
+	embedSnippet,
+	fullEmbedSnippet,
+	copiedTarget,
+	requestState,
+	onCopy,
+	onRollback,
+	onReopenRecent,
+}: BuilderDashboardPanelProps) {
+	return (
+		<div className="space-y-4 rounded-[32px] border border-black/5 bg-[linear-gradient(180deg,_#f6f4ff_0%,_#fafaff_100%)] p-4">
+			<div className="rounded-[28px] bg-white p-5 shadow-sm">
+				<p className="text-sm font-semibold text-slate-950">Dashboard</p>
+				<p className="mt-1 text-sm text-slate-500">
+					{activeTool
+						? "Embed snippets, brand tokens, version history, and warnings live here so the preview canvas can stay uncluttered."
+						: "Generate or reopen a tool to inspect embed code, brand details, and version history."}
+				</p>
+			</div>
+
+			{activeTool ? (
+				<>
+					<section className="rounded-[28px] bg-white p-5 shadow-sm">
+						<div className="flex flex-wrap items-center gap-2">
+							<Badge variant="secondary">{activeTool.model}</Badge>
+							<Badge variant="secondary">v{activeTool.version}</Badge>
+							{activeTool.brandSnapshot?.brandName ? (
+								<Badge variant="secondary">{activeTool.brandSnapshot.brandName}</Badge>
+							) : null}
+							{activeTool.brandFidelity ? (
+								<Badge variant={brandFidelityBadgeVariant(activeTool.brandFidelity.verdict)}>
+									Brand fidelity: {activeTool.brandFidelity.verdict}
+								</Badge>
+							) : null}
+						</div>
+						{activeTool.copy ? (
+							<div className="mt-4 rounded-3xl bg-slate-50 p-4">
+								<p className="text-sm font-semibold text-slate-950">{activeTool.copy.headline}</p>
+								<p className="mt-2 text-sm leading-6 text-slate-600">
+									{activeTool.copy.supportingCopy}
+								</p>
+							</div>
+						) : null}
+						{activeTool.brandFidelity?.notes ? (
+							<p className="mt-3 text-xs text-slate-500">{activeTool.brandFidelity.notes}</p>
+						) : null}
+					</section>
+
+					<section className="rounded-[28px] bg-white p-5 shadow-sm">
+						<div className="flex flex-wrap items-center justify-between gap-3">
+							<div>
+								<p className="text-sm font-semibold text-slate-950">Embed snippet</p>
+								<p className="text-sm text-slate-500">
+									Copy the iframe snippet alone or include supporting copy above it.
+								</p>
+							</div>
+							<div className="flex flex-wrap items-center gap-2">
+								<Button
+									type="button"
+									variant="outline"
+									size="sm"
+									onClick={() => onCopy("iframe", embedSnippet)}
+								>
+									{copiedTarget === "iframe" ? (
+										<Check className="size-4" />
+									) : (
+										<Copy className="size-4" />
+									)}
+									{copiedTarget === "iframe" ? "Copied" : "Copy iframe"}
+								</Button>
+								{fullEmbedSnippet ? (
+									<Button
+										type="button"
+										variant="outline"
+										size="sm"
+										onClick={() => onCopy("full", fullEmbedSnippet)}
+									>
+										{copiedTarget === "full" ? (
+											<Check className="size-4" />
+										) : (
+											<Copy className="size-4" />
+										)}
+										{copiedTarget === "full" ? "Copied" : "Copy with copy"}
+									</Button>
+								) : null}
+							</div>
+						</div>
+						<pre className="mt-4 min-w-0 overflow-x-auto rounded-[24px] border border-black/5 bg-slate-50 p-4 text-xs [overflow-wrap:anywhere] whitespace-pre-wrap">
+							{fullEmbedSnippet || embedSnippet}
+						</pre>
+					</section>
+
+					<section className="grid gap-4 xl:grid-cols-2">
+						<div className="rounded-[28px] bg-white p-5 shadow-sm">
+							<div className="flex items-center gap-2">
+								<Palette className="size-4 text-slate-500" />
+								<p className="text-sm font-semibold text-slate-950">Brand snapshot</p>
+							</div>
+							<div className="mt-4 space-y-4">
+								<div>
+									<p className="text-xs uppercase tracking-[0.16em] text-slate-400">Colors</p>
+									<div className="mt-2 flex flex-wrap gap-2">
+										{Object.entries(activeTool.brandSnapshot?.colors ?? {}).length ? (
+											Object.entries(activeTool.brandSnapshot?.colors ?? {}).map(
+												([name, value]) => (
+													<div
+														key={name}
+														className="rounded-2xl border border-black/5 bg-slate-50 px-3 py-2 text-xs text-slate-600"
+													>
+														<div className="mb-2 flex items-center gap-2">
+															<span
+																className="size-4 rounded-full border border-black/10"
+																style={{ backgroundColor: value }}
+															/>
+															<span className="font-medium text-slate-900">{name}</span>
+														</div>
+														<span>{value}</span>
+													</div>
+												)
+											)
+										) : (
+											<p className="text-sm text-slate-500">
+												No brand colors captured for this run.
+											</p>
+										)}
+									</div>
+								</div>
+								<div>
+									<div className="flex items-center gap-2">
+										<Type className="size-4 text-slate-500" />
+										<p className="text-xs uppercase tracking-[0.16em] text-slate-400">Fonts</p>
+									</div>
+									<div className="mt-2 flex flex-wrap gap-2">
+										{activeTool.brandSnapshot?.fonts.length ? (
+											activeTool.brandSnapshot.fonts.map((font) => (
+												<Badge
+													key={font}
+													variant="outline"
+													className="rounded-full border-black/10 bg-slate-50 text-slate-600"
+												>
+													{font}
+												</Badge>
+											))
+										) : (
+											<p className="text-sm text-slate-500">
+												No brand fonts captured for this run.
+											</p>
+										)}
+									</div>
+								</div>
+							</div>
+						</div>
+
+						<div className="rounded-[28px] bg-white p-5 shadow-sm">
+							<div className="flex items-center gap-2">
+								<History className="size-4 text-slate-500" />
+								<p className="text-sm font-semibold text-slate-950">Version history</p>
+							</div>
+							<div className="mt-4 space-y-3">
+								{toolHistory.length ? (
+									toolHistory.map((entry) => (
+										<div
+											key={entry.version}
+											className="flex items-center justify-between gap-3 rounded-2xl bg-slate-50 px-4 py-3"
+										>
+											<div className="min-w-0">
+												<p className="text-sm font-medium text-slate-950">
+													Version {entry.version}
+												</p>
+												<p className="truncate text-xs text-slate-500">
+													{formatTimestamp(entry.createdAt)} · {entry.prompt.slice(0, 72)}
+													{entry.prompt.length > 72 ? "…" : ""}
+												</p>
+											</div>
+											<Button
+												type="button"
+												variant="outline"
+												size="sm"
+												disabled={requestState !== "idle"}
+												onClick={() => onRollback(entry.version)}
+											>
+												<RefreshCw className="size-4" />
+												Restore
+											</Button>
+										</div>
+									))
+								) : (
+									<p className="rounded-2xl bg-slate-50 px-4 py-6 text-sm text-slate-500">
+										No previous versions yet.
+									</p>
+								)}
+							</div>
+						</div>
+					</section>
+
+					{activeTool.warnings.length ? (
+						<Alert className="rounded-[28px] border-amber-200 bg-amber-50 text-amber-900">
+							<AlertCircle className="size-4" />
+							<AlertTitle>Generation notes</AlertTitle>
+							<AlertDescription>
+								<ul className="list-disc space-y-1 pl-5">
+									{activeTool.warnings.map((warning) => (
+										<li key={warning}>{warning}</li>
+									))}
+								</ul>
+							</AlertDescription>
+						</Alert>
+					) : null}
+				</>
+			) : null}
+
+			<section className="rounded-[28px] bg-white p-5 shadow-sm">
+				<p className="text-sm font-semibold text-slate-950">Recent tools</p>
+				<p className="mt-1 text-sm text-slate-500">
+					Project switching also lives in the top-left pill; this is the full list view.
+				</p>
+				<div className="mt-4 space-y-3">
+					{recentTools.length ? (
+						recentTools.map((tool) => (
+							<button
+								key={tool.id}
+								type="button"
+								onClick={() => onReopenRecent(tool)}
+								className={cn(
+									"w-full rounded-2xl border px-4 py-3 text-left transition",
+									activeTool?.id === tool.id
+										? "border-[#c6c0ff] bg-[#f4f1ff]"
+										: "border-black/5 bg-slate-50 hover:bg-white"
+								)}
+							>
+								<div className="flex items-start justify-between gap-3">
+									<div className="min-w-0">
+										<p className="truncate text-sm font-medium text-slate-950">
+											{tool.projectName}
+										</p>
+										<p className="truncate text-xs text-slate-500">
+											{tool.siteUrl ?? "No brand site"} · v{tool.version}
+										</p>
+									</div>
+									<span className="text-xs text-slate-400">{formatTimestamp(tool.updatedAt)}</span>
+								</div>
+							</button>
+						))
+					) : (
+						<p className="rounded-2xl bg-slate-50 px-4 py-6 text-sm text-slate-500">
+							No saved tools yet.
+						</p>
+					)}
+				</div>
+			</section>
+		</div>
+	);
+}
+
+function brandFidelityBadgeVariant(
+	verdict: "pass" | "warn" | "fail"
+): "secondary" | "outline" | "destructive" {
+	if (verdict === "fail") return "destructive";
+	if (verdict === "warn") return "outline";
+	return "secondary";
+}
