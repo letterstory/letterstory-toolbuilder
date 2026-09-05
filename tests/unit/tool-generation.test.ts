@@ -538,7 +538,7 @@ describe("generateTool", () => {
 					content: [
 						{
 							type: "text",
-							text: '<!doctype html><html><head><style>body{color:#111;}</style></head><body><header><div class="brand-mark"><svg></svg></div><div>Mailchimp</div></header><main></main></body></html>',
+							text: '<!doctype html><html><head><style>body{color:#111;}header{background:#040404;color:#fff;}</style></head><body><header><div class="brand-mark"><svg></svg></div><div>Mailchimp</div></header><main></main></body></html>',
 						},
 					],
 				}),
@@ -555,7 +555,11 @@ describe("generateTool", () => {
 		expect(result.status).toBe("success");
 		if (result.status === "success") {
 			expect(result.tool.html).toContain('class="ls-brand-verified-header"');
+			expect(result.tool.html).toContain("header{background:#040404;color:#fff;}");
 			expect(result.tool.html).toContain('src="data:image/png;base64,abc"');
+			expect(result.tool.html).toContain(
+				'.ls-brand-lockup--exact_asset {\n  background: #FFFFFF;\n  padding: 0.5rem 0.75rem;\n  border-radius: 0.75rem;'
+			);
 			expect(result.tool.html).not.toContain("Graphik Web");
 			expect(result.tool.html).not.toContain("Iowan Old Style");
 			expect(result.tool.html).not.toContain("Times New Roman");
