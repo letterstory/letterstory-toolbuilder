@@ -9,11 +9,16 @@ const FONT_FETCH_TIMEOUT_MS = 15_000;
 const MAX_FONT_EMBED_BYTES = 2_500_000;
 const SYSTEM_SANS_STACK =
 	'-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
-const SYSTEM_SERIF_STACK =
-	'"Iowan Old Style", Georgia, Cambria, "Times New Roman", Times, serif';
+const SYSTEM_SERIF_STACK = '"Iowan Old Style", Georgia, Cambria, "Times New Roman", Times, serif';
 const BRAND_LOCKUP_SURFACE = "#FFFFFF";
 const MIN_LOCKUP_TEXT_CONTRAST = 4.5;
 const BRAND_ENFORCEMENT_STYLE_TAG = "data-letterstory-brand-enforcement";
+const CTA_ORDER_STYLE_TAG = "data-letterstory-cta-order-style";
+const CTA_ORDER_SCRIPT_TAG = "data-letterstory-cta-order";
+const CTA_RESULT_MARKER =
+	/data-letterstory-result\s*=\s*["']true["']|data-role\s*=\s*["']tool-result["']/i;
+const CTA_BRAND_MARKER =
+	/data-letterstory-brand-cta\s*=\s*["']true["']|data-role\s*=\s*["']brand-cta["']/i;
 
 interface EmbeddedFontSource {
 	url: string;
@@ -249,7 +254,10 @@ function rankFontWeightKey(key: string, target: number): number {
 	return distance;
 }
 
-function selectFontEntries(face: GeneratedToolBrandFontFace, role: "body" | "heading"): Array<[string, string]> {
+function selectFontEntries(
+	face: GeneratedToolBrandFontFace,
+	role: "body" | "heading"
+): Array<[string, string]> {
 	const entries = Object.entries(face.files).filter(([, url]) => /^https:\/\//i.test(url));
 	if (!entries.length) return [];
 	const primaryTarget = role === "heading" ? 700 : 400;
@@ -369,11 +377,7 @@ function buildBrandFontPlan(
 	warnings: string[]
 ): BrandFontPlan {
 	const embeddedFamilies = new Set(embeddedFaces.map((face) => face.family));
-	const body = buildRolePlan(
-		brandSnapshot.bodyFontFace,
-		brandSnapshot.bodyFont,
-		embeddedFamilies
-	);
+	const body = buildRolePlan(brandSnapshot.bodyFontFace, brandSnapshot.bodyFont, embeddedFamilies);
 	const heading = buildRolePlan(
 		brandSnapshot.headingFontFace ?? brandSnapshot.bodyFontFace,
 		brandSnapshot.headingFont ?? brandSnapshot.bodyFont,
@@ -410,20 +414,42 @@ function buildDeterministicHeaderHtml(
 	].join("\n");
 }
 
-function upsertBrandEnforcementStyleTag(html: string, css: string): string {
-	const styleTag = `<style ${BRAND_ENFORCEMENT_STYLE_TAG}="true">\n${css}\n</style>`;
-	const existingStyleTag = new RegExp(
-		`<style\\b[^>]*\\b${BRAND_ENFORCEMENT_STYLE_TAG}=["']true["'][^>]*>[\\s\\S]*?<\\/style>\\s*`,
+function upsertManagedHeadTag(
+	html: string,
+	tagName: "style" | "script",
+	marker: string,
+	content: string
+): string {
+	const tag = `<${tagName} ${marker}="true">\n${content}\n</${tagName}>`;
+	const existingTag = new RegExp(
+		`<${tagName}\\b[^>]*\\b${marker}=["']true["'][^>]*>[\\s\\S]*?<\\/${tagName}>\\s*`,
 		"gi"
 	);
-	const withoutExisting = html.replace(existingStyleTag, "");
+	const withoutExisting = html.replace(existingTag, "");
 	if (/<\/head>/i.test(withoutExisting)) {
-		return withoutExisting.replace(/<\/head>/i, `${styleTag}\n</head>`);
+		return withoutExisting.replace(/<\/head>/i, `${tag}\n</head>`);
 	}
 	if (/<body([^>]*)>/i.test(withoutExisting)) {
-		return withoutExisting.replace(/<body([^>]*)>/i, `${styleTag}\n<body$1>`);
+		return withoutExisting.replace(/<body([^>]*)>/i, `${tag}\n<body$1>`);
 	}
-	return `${styleTag}\n${withoutExisting}`;
+	return `${tag}\n${withoutExisting}`;
+}
+
+function upsertBrandEnforcementStyleTag(html: string, css: string): string {
+	return upsertManagedHeadTag(html, "style", BRAND_ENFORCEMENT_STYLE_TAG, css);
+}
+
+function upsertManagedBodyScriptTag(html: string, marker: string, script: string): string {
+	const tag = `<script ${marker}="true">\n${script}\n</script>`;
+	const existingTag = new RegExp(
+		`<script\\b[^>]*\\b${marker}=["']true["'][^>]*>[\\s\\S]*?<\\/script>\\s*`,
+		"gi"
+	);
+	const withoutExisting = html.replace(existingTag, "");
+	if (/<\/body>/i.test(withoutExisting)) {
+		return withoutExisting.replace(/<\/body>/i, `${tag}\n</body>`);
+	}
+	return `${withoutExisting}\n${tag}`;
 }
 
 function rewriteHeader(html: string, headerHtml: string): string {
@@ -450,7 +476,9 @@ function rewriteFontFamilies(html: string, plan: BrandFontPlan): string {
 	const bodyStack = plan.body.stack;
 	const headingStack = plan.heading.stack;
 	return html.replace(/font-family\s*:\s*([^;}{]+)([;}]?)/gi, (match, value, suffix, offset) => {
-		const window = html.slice(Math.max(0, offset - 80), Math.min(html.length, offset + 40)).toLowerCase();
+		const window = html
+			.slice(Math.max(0, offset - 80), Math.min(html.length, offset + 40))
+			.toLowerCase();
 		const likelyHeading = /(h1|h2|h3|header|title|brand|wordmark)/.test(window);
 		const nextValue = likelyHeading ? headingStack : bodyStack;
 		return `font-family: ${nextValue}${suffix}`;
@@ -468,8 +496,7 @@ function buildEnforcementCss(
 		"#111111";
 	const secondaryColor =
 		brandSnapshot.colors.secondary ?? brandSnapshot.colors.accent ?? brandColor;
-	const accentColor =
-		brandSnapshot.colors.accent ?? brandSnapshot.colors.secondary ?? brandColor;
+	const accentColor = brandSnapshot.colors.accent ?? brandSnapshot.colors.secondary ?? brandColor;
 	const backgroundColor = brandSnapshot.colors.background ?? "#FFFFFF";
 	const textColor = brandSnapshot.colors.text ?? "#111111";
 	const wordmarkColor = selectWordmarkColor(brandSnapshot);
@@ -541,7 +568,9 @@ function buildEnforcementCss(
 		.join("\n");
 }
 
-async function resolveBrandFontPlan(brandSnapshot: GeneratedToolBrandSnapshot): Promise<BrandFontPlan> {
+async function resolveBrandFontPlan(
+	brandSnapshot: GeneratedToolBrandSnapshot
+): Promise<BrandFontPlan> {
 	const warnings: string[] = [];
 	const roleFaces: Array<{ face: GeneratedToolBrandFontFace; role: "body" | "heading" }> = [];
 	if (brandSnapshot.bodyFontFace) {
@@ -582,13 +611,56 @@ async function resolveBrandFontPlan(brandSnapshot: GeneratedToolBrandSnapshot): 
 	return buildBrandFontPlan(brandSnapshot, [...embeddedFaceMap.values()], warnings);
 }
 
+function buildCtaOrderEnforcementStyle(): string {
+	return [
+		'[data-letterstory-brand-cta="true"], [data-role="brand-cta"] {',
+		"  display: block;",
+		"  margin-top: 1.5rem;",
+		"}",
+	].join("\n");
+}
+
+function buildCtaOrderEnforcementScript(): string {
+	return [
+		"(() => {",
+		"  const pick = (selectors) => selectors.map((selector) => document.querySelector(selector)).find(Boolean);",
+		"  const tool = pick(['[data-letterstory-tool=\"true\"]', '[data-role=\"tool\"]']);",
+		"  const result = pick(['[data-letterstory-result=\"true\"]', '[data-role=\"tool-result\"]']);",
+		"  const cta = pick(['[data-letterstory-brand-cta=\"true\"]', '[data-role=\"brand-cta\"]']);",
+		"  if (!(result instanceof HTMLElement) || !(cta instanceof HTMLElement)) return;",
+		"  const anchor = tool instanceof HTMLElement ? tool : result;",
+		"  const desiredParent = anchor.parentElement ?? result.parentElement;",
+		"  if (!desiredParent) return;",
+		"  const relation = anchor.compareDocumentPosition(cta);",
+		"  const isAlreadyAfter = Boolean(relation & Node.DOCUMENT_POSITION_FOLLOWING) && cta.parentElement === desiredParent;",
+		"  if (!isAlreadyAfter) desiredParent.insertBefore(cta, anchor.nextSibling);",
+		"  cta.setAttribute('data-letterstory-cta-ordered', 'true');",
+		"})();",
+	].join("\n");
+}
+
+function enforceCtaOrdering(html: string): string {
+	if (!CTA_BRAND_MARKER.test(html) || !CTA_RESULT_MARKER.test(html)) return html;
+	const withStyle = upsertManagedHeadTag(
+		html,
+		"style",
+		CTA_ORDER_STYLE_TAG,
+		buildCtaOrderEnforcementStyle()
+	);
+	return upsertManagedBodyScriptTag(
+		withStyle,
+		CTA_ORDER_SCRIPT_TAG,
+		buildCtaOrderEnforcementScript()
+	);
+}
+
 export async function enforceBrandPresentation(opts: {
 	html: string;
 	projectName: string;
 	brandSnapshot: GeneratedToolBrandSnapshot | null;
 }): Promise<{ sanitized: SanitizedHtml; warnings: string[] }> {
 	if (!opts.brandSnapshot) {
-		return { sanitized: sanitizeGeneratedHtml(opts.html), warnings: [] };
+		return { sanitized: sanitizeGeneratedHtml(enforceCtaOrdering(opts.html)), warnings: [] };
 	}
 
 	const plan = await resolveBrandFontPlan(opts.brandSnapshot);
@@ -597,6 +669,7 @@ export async function enforceBrandPresentation(opts: {
 	html = rewriteHeader(html, buildDeterministicHeaderHtml(opts.projectName, opts.brandSnapshot));
 	html = rewriteFontFamilies(html, plan);
 	html = upsertBrandEnforcementStyleTag(html, buildEnforcementCss(opts.brandSnapshot, plan));
+	html = enforceCtaOrdering(html);
 
 	return {
 		sanitized: sanitizeGeneratedHtml(html),

@@ -10,6 +10,11 @@ function extractEnforcementStyle(html: string): string {
 	return match?.[1] ?? "";
 }
 
+function extractManagedScript(html: string, marker: string): string {
+	const match = html.match(new RegExp(`<script\\s+${marker}="true">([\\s\\S]*?)<\\/script>`, "i"));
+	return match?.[1] ?? "";
+}
+
 function normalizeHexColor(value: string): string {
 	const trimmed = value.trim();
 	const shortHex = trimmed.match(/^#([0-9a-f]{3})$/i);
@@ -40,7 +45,9 @@ function contrastRatio(left: string, right: string): number {
 	return (lighter + 0.05) / (darker + 0.05);
 }
 
-function makeBrandSnapshot(overrides: Partial<GeneratedToolBrandSnapshot>): GeneratedToolBrandSnapshot {
+function makeBrandSnapshot(
+	overrides: Partial<GeneratedToolBrandSnapshot>
+): GeneratedToolBrandSnapshot {
 	return {
 		brandName: "Brand",
 		colors: {
@@ -101,7 +108,7 @@ describe("enforceBrandPresentation", () => {
 
 	it("gives text-only wordmarks a deterministic contrast-safe surface and text color", async () => {
 		const html =
-			'<!doctype html><html><head><style>header { background: #ED943B; }</style></head><body><header><h1>Original</h1></header><main></main></body></html>';
+			"<!doctype html><html><head><style>header { background: #ED943B; }</style></head><body><header><h1>Original</h1></header><main></main></body></html>";
 		const brandSnapshot = makeBrandSnapshot({
 			brandName: "Google",
 			colors: {
@@ -124,7 +131,8 @@ describe("enforceBrandPresentation", () => {
 		)?.[1];
 		const surfaceColor = sharedLockupBlock?.match(/background:\s*([^;]+);/i)?.[1]?.trim() ?? null;
 		const wordmarkColor =
-			style.match(/\.ls-brand-lockup__wordmark\s*\{[\s\S]*?color:\s*([^;]+);/i)?.[1]?.trim() ?? null;
+			style.match(/\.ls-brand-lockup__wordmark\s*\{[\s\S]*?color:\s*([^;]+);/i)?.[1]?.trim() ??
+			null;
 
 		expect(result.sanitized.html).toContain('class="ls-brand-lockup ls-brand-lockup--text_only"');
 		expect(surfaceColor).toBe("#FFFFFF");
@@ -162,7 +170,8 @@ describe("enforceBrandPresentation", () => {
 		const style = extractEnforcementStyle(result.sanitized.html);
 		const verifiedCopyBlock = style.match(/\.ls-brand-verified-copy\s*\{([\s\S]*?)\}/i)?.[1] ?? "";
 		const titleColor =
-			style.match(/\.ls-brand-verified-copy h1\s*\{[\s\S]*?color:\s*([^;]+);/i)?.[1]?.trim() ?? null;
+			style.match(/\.ls-brand-verified-copy h1\s*\{[\s\S]*?color:\s*([^;]+);/i)?.[1]?.trim() ??
+			null;
 		const surfaceColor = verifiedCopyBlock.match(/background:\s*([^;]+);/i)?.[1]?.trim() ?? null;
 
 		expect(result.sanitized.html).toContain('class="ls-brand-verified-copy"');
@@ -172,6 +181,34 @@ describe("enforceBrandPresentation", () => {
 		expect(contrastRatio(titleColor!, surfaceColor!)).toBeGreaterThanOrEqual(4.5);
 		expect(verifiedCopyBlock).toContain("padding: 0.5rem 0.75rem;");
 		expect(verifiedCopyBlock).toContain("border-radius: 0.75rem;");
+	});
+
+	it("injects CTA ordering helpers when generated markup opts into brand CTA markers", async () => {
+		const html = [
+			"<!doctype html>",
+			"<html><head><style></style></head><body>",
+			'<section data-letterstory-brand-cta="true"><a href="#">Explore product</a></section>',
+			'<main><div data-letterstory-tool="true"><form><div data-letterstory-result="true">$362.50</div></form></div></main>',
+			"</body></html>",
+		].join("");
+
+		const result = await enforceBrandPresentation({
+			html,
+			projectName: "Mileage Calculator",
+			brandSnapshot: null,
+		});
+
+		const finalHtml = result.sanitized.html;
+		const ctaStyle =
+			finalHtml.match(
+				/<style\s+data-letterstory-cta-order-style="true">([\s\S]*?)<\/style>/i
+			)?.[1] ?? "";
+		const ctaScript = extractManagedScript(finalHtml, "data-letterstory-cta-order");
+
+		expect(ctaStyle).toContain('[data-letterstory-brand-cta="true"], [data-role="brand-cta"]');
+		expect(ctaScript).toContain('data-letterstory-tool="true"');
+		expect(ctaScript).toContain('data-letterstory-result="true"');
+		expect(ctaScript).toContain('data-letterstory-brand-cta="true"');
 	});
 
 	it("treats Robinhood's Martina Plantijn heading as serif when self-hosting is unavailable", async () => {

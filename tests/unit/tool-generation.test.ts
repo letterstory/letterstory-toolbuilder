@@ -239,6 +239,46 @@ describe("generateTool", () => {
 		}
 	});
 
+	it("encodes the Ramp UX rules into the main generation system prompt", async () => {
+		mockAnthropicSuccess("<!doctype html><html><body>hi</body></html>");
+
+		const result = await generateTool({
+			projectName: "Invoice Late Fee Calculator",
+			siteUrl: "",
+			prompt: "estimate late fees for overdue invoices",
+		});
+
+		expect(result.status).toBe("success");
+		const htmlCall = (global.fetch as ReturnType<typeof vi.fn>).mock.calls.find(([, init]) => {
+			const parsed = JSON.parse(String((init as RequestInit | undefined)?.body ?? "{}")) as {
+				system?: string;
+			};
+			return (
+				!(parsed.system ?? "").includes("VERDICT:") && !(parsed.system ?? "").includes("HEADLINE:")
+			);
+		});
+		const htmlCallBody = JSON.parse(
+			String((htmlCall?.[1] as RequestInit | undefined)?.body ?? "{}")
+		) as {
+			system?: string;
+		};
+
+		expect(htmlCallBody.system).toContain(
+			"Ramp UX rule 1 — contextualized results, never naked numbers"
+		);
+		expect(htmlCallBody.system).toContain("Total Deduction: $362.50");
+		expect(htmlCallBody.system).toContain("100% business miles reimbursed");
+		expect(htmlCallBody.system).toContain("data-letterstory-tool='true'");
+		expect(htmlCallBody.system).toContain(
+			"See how [Brand] [automates/handles/simplifies] [topic] for [X] [customers/businesses]"
+		);
+		expect(htmlCallBody.system).toContain("Business miles driven ($0.725 / mile)");
+		expect(htmlCallBody.system).toContain(
+			"fixed-formula calculators must use exactly two action buttons in this order"
+		);
+		expect(htmlCallBody.system).toContain("Copy mission` + `Try again");
+	});
+
 	it("describes programmatic exact-logo injection in the main generation prompt", async () => {
 		isBrandIngestionConfiguredMock.mockReturnValue(true);
 		pullBrandProfileMock.mockResolvedValue({
@@ -272,7 +312,9 @@ describe("generateTool", () => {
 			messages?: Array<{ content: string }>;
 		};
 		expect(htmlCallBody.system).toContain("treat them as authoritative");
-		expect(htmlCallBody.system).toContain("render that asset instead of typing a substitute wordmark");
+		expect(htmlCallBody.system).toContain(
+			"render that asset instead of typing a substitute wordmark"
+		);
 		expect(htmlCallBody.messages?.[0]?.content).toContain(
 			"Use the supplied colors as the header, CTA, and highlight anchors. Ignore any conflicting legacy palette."
 		);
@@ -602,7 +644,7 @@ describe("generateTool", () => {
 			expect(result.tool.html).toContain("header{background:#040404;color:#fff;}");
 			expect(result.tool.html).toContain('src="data:image/png;base64,abc"');
 			expect(result.tool.html).toContain(
-				'.ls-brand-lockup--exact_asset,\n.ls-brand-lockup--text_only,\n.ls-brand-verified-copy {\n  background: #FFFFFF;\n  padding: 0.5rem 0.75rem;\n  border-radius: 0.75rem;'
+				".ls-brand-lockup--exact_asset,\n.ls-brand-lockup--text_only,\n.ls-brand-verified-copy {\n  background: #FFFFFF;\n  padding: 0.5rem 0.75rem;\n  border-radius: 0.75rem;"
 			);
 			expect(result.tool.html).not.toContain("Graphik Web");
 			expect(result.tool.html).not.toContain("Iowan Old Style");
@@ -669,7 +711,10 @@ describe("generateTool", () => {
 
 		expect(result.status).toBe("success");
 		if (result.status === "success") {
-			expect(result.tool.brandSnapshot).toMatchObject({ logoPolicy: "text_only", bodyFont: "DD Norms" });
+			expect(result.tool.brandSnapshot).toMatchObject({
+				logoPolicy: "text_only",
+				bodyFont: "DD Norms",
+			});
 			expect(result.tool.html).toContain('class="ls-brand-lockup__wordmark"');
 			expect(result.tool.html).toContain("DoorDash");
 			expect(result.tool.html).not.toContain("brand-mark");
@@ -757,7 +802,7 @@ describe("generateTool", () => {
 		expect(result.status).toBe("success");
 		if (result.status === "success") {
 			expect(result.tool.html).toContain("@font-face");
-			expect(result.tool.html).toContain('font-family: Inter');
+			expect(result.tool.html).toContain("font-family: Inter");
 			expect(result.tool.html).toContain("data:font/woff2;base64");
 			expect(result.tool.html).not.toContain("Spotify Mix");
 			expect(result.tool.html).not.toContain("Times New Roman");

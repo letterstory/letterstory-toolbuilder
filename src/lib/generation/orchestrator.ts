@@ -619,7 +619,7 @@ function toBrandSnapshot(
 					category: profile.typography.headingFontFace.category,
 					files: profile.typography.headingFontFace.files,
 					fallbacks: profile.typography.headingFontFace.fallbacks,
-			  }
+				}
 			: null,
 		bodyFontFace: profile.typography.bodyFontFace
 			? {
@@ -628,7 +628,7 @@ function toBrandSnapshot(
 					category: profile.typography.bodyFontFace.category,
 					files: profile.typography.bodyFontFace.files,
 					fallbacks: profile.typography.bodyFontFace.fallbacks,
-			  }
+				}
 			: null,
 		logoPolicy,
 		logoDataUri: logoPolicy === "exact_asset" ? logoDataUri : null,
@@ -688,6 +688,11 @@ async function requestToolHtml(opts: {
 		"- Use the provided primary/accent colors, font family names (assume standard web-safe fallbacks after the named font), and optional inline logo asset. Do not fabricate a different brand.",
 		"- Keep the whole document self-sufficient and safe: no forms that submit to external endpoints, no fetch()/XMLHttpRequest calls to external hosts.",
 		"- Include a small, unobtrusive 'Powered by Letterstory' text credit near the bottom.",
+		"- Ramp UX rule 1 — contextualized results, never naked numbers: after any numeric calculation, show a labeled value AND one plain-language interpretation sentence. Examples: `Total Deduction: $362.50` + `100% business miles reimbursed`; `Estimated late fees: $480` + `That is roughly the cost of one missed invoice this month.` Never leave a raw number standing alone.",
+		"- Ramp UX rule 2 — page order is tool → value → CTA, with no gates: the tool must be fully usable with zero email, signup, login, modal gate, or blocked state before the user gets value. Keep the sequence `headline/description → interactive tool card → in-place result → separate brand CTA section`. If you include a brand CTA, place it AFTER the result, never before, and mark the containers with `data-letterstory-tool='true'`, `data-letterstory-result='true'`, and `data-letterstory-brand-cta='true'` so post-processing can verify placement.",
+		"- Brand CTA copy must follow this exact Ramp-style formula: headline `See how [Brand] [automates/handles/simplifies] [topic] for [X] [customers/businesses]` with understated button copy like `Explore product`, `Explore travel`, or `Explore expense automation`. Good examples: `See how Ramp automates expense and mileage tracking for 70,000 businesses` → `Explore product`; `See how Acme simplifies late invoice follow-up for 4,200 customers` → `Explore collections workflow`. Never use `Sign up`, `Try free`, `Get started`, countdowns, or urgency language.",
+		"- Ramp UX rule 3 — input microcopy embeds the formula or unit inline: put the rate/unit in secondary label text right inside the label, not in a tooltip or separate help paragraph. Examples: `Business miles driven ($0.725 / mile)`, `Average invoice amount ($ / invoice)`, `Team size (employees)`.",
+		"- Ramp UX rule 4 — pick ONE submit mode, never hybrid: fixed-formula calculators must use exactly two action buttons in this order: secondary `Clear` on the left and primary `Calculate` on the right. Generator/builder/preview tools must update in real time with NO submit button, and the result/output area must include actions like `Copy mission` + `Try again` or `Copy policy` + `Try again`. Never mix real-time updates with a `Calculate`, `Generate`, or `Submit` button on the same tool.",
 		...(isRevision
 			? [
 					"- Return the ENTIRE updated document (not a diff/patch), following all the requirements above.",
