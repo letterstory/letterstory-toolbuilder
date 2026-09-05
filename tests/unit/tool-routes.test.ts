@@ -1,25 +1,29 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const generateToolMock = vi.hoisted(() => vi.fn());
+const generateToolSurfaceMock = vi.hoisted(() => vi.fn());
+const generateToolRateLimitedMock = vi.hoisted(() => vi.fn());
+const getGeneratedToolSurfaceMock = vi.hoisted(() => vi.fn());
+const listGeneratedToolsSurfaceMock = vi.hoisted(() => vi.fn());
+const rollbackGeneratedToolSurfaceMock = vi.hoisted(() => vi.fn());
 const getGeneratedToolMock = vi.hoisted(() => vi.fn());
-const listGeneratedToolsMock = vi.hoisted(() => vi.fn());
-const rollbackGeneratedToolMock = vi.hoisted(() => vi.fn());
 const checkRateLimitMock = vi.hoisted(() => vi.fn());
 const getClientIpMock = vi.hoisted(() => vi.fn());
-
-vi.mock("@/lib/generation", () => ({
-	generateTool: generateToolMock,
-}));
 
 vi.mock("@/lib/security/rate-limit", () => ({
 	checkRateLimit: checkRateLimitMock,
 	getClientIp: getClientIpMock,
 }));
 
+vi.mock("@/lib/surfaces/tools", () => ({
+	generateToolSurface: generateToolSurfaceMock,
+	generateToolRateLimited: generateToolRateLimitedMock,
+	getGeneratedToolSurface: getGeneratedToolSurfaceMock,
+	listGeneratedToolsSurface: listGeneratedToolsSurfaceMock,
+	rollbackGeneratedToolSurface: rollbackGeneratedToolSurfaceMock,
+}));
+
 vi.mock("@/lib/generation/store", () => ({
 	getGeneratedTool: getGeneratedToolMock,
-	listGeneratedTools: listGeneratedToolsMock,
-	rollbackGeneratedTool: rollbackGeneratedToolMock,
 }));
 
 import { POST as generatePost } from "../../src/app/api/tools/generate/route";
@@ -31,10 +35,12 @@ import { GET as toolGet } from "../../src/app/t/[id]/route";
 beforeEach(() => {
 	checkRateLimitMock.mockReset();
 	getClientIpMock.mockReset();
-	generateToolMock.mockReset();
+	generateToolSurfaceMock.mockReset();
+	generateToolRateLimitedMock.mockReset();
+	getGeneratedToolSurfaceMock.mockReset();
+	listGeneratedToolsSurfaceMock.mockReset();
+	rollbackGeneratedToolSurfaceMock.mockReset();
 	getGeneratedToolMock.mockReset();
-	listGeneratedToolsMock.mockReset();
-	rollbackGeneratedToolMock.mockReset();
 
 	getClientIpMock.mockReturnValue("203.0.113.10");
 	checkRateLimitMock.mockResolvedValue({
@@ -47,6 +53,11 @@ beforeEach(() => {
 
 describe("POST /api/tools/generate", () => {
 	it("returns 400 when prompt is missing or blank", async () => {
+		generateToolSurfaceMock.mockResolvedValueOnce({
+			statusCode: 400,
+			body: { status: "error", message: "Describe the tool you want generated." },
+		});
+
 		const response = await generatePost(
 			new Request("http://localhost/api/tools/generate", {
 				method: "POST",
@@ -57,7 +68,6 @@ describe("POST /api/tools/generate", () => {
 
 		expect(response.status).toBe(400);
 		await expect(response.json()).resolves.toMatchObject({ status: "error" });
-		expect(generateToolMock).not.toHaveBeenCalled();
 	});
 
 	it("returns 429 with Retry-After when the caller is rate limited", async () => {
@@ -66,6 +76,11 @@ describe("POST /api/tools/generate", () => {
 			limit: 10,
 			remaining: 0,
 			retryAfterSeconds: 42,
+		});
+		generateToolRateLimitedMock.mockReturnValueOnce({
+			statusCode: 429,
+			headers: { "Retry-After": "42" },
+			body: { status: "error", message: "Too many tool generation requests — please wait a bit and try again." },
 		});
 
 		const response = await generatePost(
@@ -80,21 +95,21 @@ describe("POST /api/tools/generate", () => {
 		);
 
 		expect(getClientIpMock).toHaveBeenCalled();
-		expect(checkRateLimitMock).toHaveBeenCalledWith("203.0.113.10", {
-			bucket: "tools.generate",
-			max: 10,
-			windowSeconds: 600,
-		});
 		expect(response.status).toBe(429);
 		expect(response.headers.get("Retry-After")).toBe("42");
 		await expect(response.json()).resolves.toMatchObject({
 			status: "error",
 			message: expect.stringMatching(/too many tool generation requests/i),
 		});
-		expect(generateToolMock).not.toHaveBeenCalled();
+		expect(generateToolSurfaceMock).not.toHaveBeenCalled();
 	});
 
 	it("returns 400 for an unparseable body", async () => {
+		generateToolSurfaceMock.mockResolvedValueOnce({
+			statusCode: 400,
+			body: { status: "error", message: "Describe the tool you want generated." },
+		});
+
 		const response = await generatePost(
 			new Request("http://localhost/api/tools/generate", {
 				method: "POST",
@@ -107,9 +122,12 @@ describe("POST /api/tools/generate", () => {
 	});
 
 	it("returns 400 with the orchestrator error shape when generation is not configured", async () => {
-		generateToolMock.mockResolvedValueOnce({
-			status: "not_configured",
-			message: "Set ANTHROPIC_API_KEY before generating tools.",
+		generateToolSurfaceMock.mockResolvedValueOnce({
+			statusCode: 400,
+			body: {
+				status: "not_configured",
+				message: "Set ANTHROPIC_API_KEY before generating tools.",
+			},
 		});
 
 		const response = await generatePost(
@@ -127,17 +145,16 @@ describe("POST /api/tools/generate", () => {
 		});
 	});
 
-	it("proxies generateTool including an optional toolId, and returns 200 on success", async () => {
-		generateToolMock.mockResolvedValueOnce({
-			status: "success",
-			tool: { id: "abc", projectName: "Calc" },
-			diagnostics: {
-				totalMs: 1234,
-				brandContextMs: 56,
-				buildMs: 1100,
-				advisoryMs: 78,
-				advisorySkipped: false,
-				htmlAttempts: [{ attempt: 1, timeoutMs: 210000, durationMs: 1100, outcome: "success" }],
+	it("proxies generate surface output including headers on success", async () => {
+		generateToolSurfaceMock.mockResolvedValueOnce({
+			statusCode: 200,
+			body: {
+				status: "success",
+				tool: { id: "abc", projectName: "Calc" },
+			},
+			headers: {
+				"Server-Timing": "total;dur=1234, brand;dur=56, build;dur=1100, advisory;dur=78",
+				"X-Tool-Generation-Attempts": "1:success:1100/210000",
 			},
 		});
 
@@ -154,7 +171,7 @@ describe("POST /api/tools/generate", () => {
 			})
 		);
 
-		expect(generateToolMock).toHaveBeenCalledWith({
+		expect(generateToolSurfaceMock).toHaveBeenCalledWith({
 			projectName: "Calc",
 			siteUrl: "https://stripe.com",
 			prompt: "a calculator",
@@ -162,49 +179,12 @@ describe("POST /api/tools/generate", () => {
 		});
 		expect(response.status).toBe(200);
 		expect(response.headers.get("server-timing")).toContain("total;dur=1234");
-		expect(response.headers.get("server-timing")).toContain("brand;dur=56");
 		expect(response.headers.get("x-tool-generation-attempts")).toBe("1:success:1100/210000");
 		await expect(response.json()).resolves.toMatchObject({ status: "success" });
 	});
 
-	it("omits toolId when not provided (fresh generation, not a revision)", async () => {
-		generateToolMock.mockResolvedValueOnce({
-			status: "success",
-			tool: { id: "abc", projectName: "Calc" },
-		});
-
-		await generatePost(
-			new Request("http://localhost/api/tools/generate", {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ projectName: "Calc", siteUrl: "https://stripe.com", prompt: "a calculator" }),
-			})
-		);
-
-		expect(generateToolMock).toHaveBeenCalledWith({
-			projectName: "Calc",
-			siteUrl: "https://stripe.com",
-			prompt: "a calculator",
-			toolId: undefined,
-		});
-	});
-
-	it("returns 400 when generateTool reports an error", async () => {
-		generateToolMock.mockResolvedValueOnce({ status: "error", message: "boom" });
-
-		const response = await generatePost(
-			new Request("http://localhost/api/tools/generate", {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ prompt: "a calculator" }),
-			})
-		);
-
-		expect(response.status).toBe(400);
-	});
-
-	it("returns a JSON 500 when generateTool throws unexpectedly", async () => {
-		generateToolMock.mockRejectedValueOnce(new Error("database offline"));
+	it("returns a JSON 500 when generateToolSurface throws unexpectedly", async () => {
+		generateToolSurfaceMock.mockRejectedValueOnce(new Error("database offline"));
 
 		const response = await generatePost(
 			new Request("http://localhost/api/tools/generate", {
@@ -253,24 +233,29 @@ describe("GET /t/[id]", () => {
 
 describe("GET /api/tools", () => {
 	it("returns tool summaries without the html body", async () => {
-		listGeneratedToolsMock.mockResolvedValueOnce([
-			{
-				id: "abc",
-				projectName: "Calc",
-				prompt: "a calculator",
-				siteUrl: null,
-				brandSnapshot: null,
-				html: "<!doctype html>should not be exposed here</html>",
-				copy: { headline: "Test headline", supportingCopy: "Test copy." },
-				brandFidelity: { verdict: "pass", notes: "" },
-				model: "claude-sonnet-4-6",
-				warnings: [],
-				createdAt: "2024-01-01T00:00:00.000Z",
-				updatedAt: "2024-01-02T00:00:00.000Z",
-				version: 2,
-				history: [{ version: 1, createdAt: "2024-01-01T00:00:00.000Z" }],
+		listGeneratedToolsSurfaceMock.mockResolvedValueOnce({
+			statusCode: 200,
+			body: {
+				status: "success",
+				tools: [
+					{
+						id: "abc",
+						projectName: "Calc",
+						prompt: "a calculator",
+						siteUrl: null,
+						brandSnapshot: null,
+						copy: { headline: "Test headline", supportingCopy: "Test copy." },
+						brandFidelity: { verdict: "pass", notes: "" },
+						model: "claude-sonnet-4-6",
+						warnings: [],
+						createdAt: "2024-01-01T00:00:00.000Z",
+						updatedAt: "2024-01-02T00:00:00.000Z",
+						version: 2,
+						previousVersionCount: 1,
+					},
+				],
 			},
-		]);
+		});
 
 		const response = await toolsListGet();
 		const body = (await response.json()) as { status: string; tools: Array<Record<string, unknown>> };
@@ -294,7 +279,10 @@ describe("GET /api/tools", () => {
 
 describe("GET /api/tools/[id]", () => {
 	it("returns 404 when the tool doesn't exist", async () => {
-		getGeneratedToolMock.mockResolvedValueOnce(null);
+		getGeneratedToolSurfaceMock.mockResolvedValueOnce({
+			statusCode: 404,
+			body: { status: "error", message: "Tool not found." },
+		});
 
 		const response = await toolDetailGet(new Request("http://localhost/api/tools/missing"), {
 			params: Promise.resolve({ id: "missing" }),
@@ -304,35 +292,39 @@ describe("GET /api/tools/[id]", () => {
 	});
 
 	it("returns tool detail with html stripped from the record and every history entry", async () => {
-		getGeneratedToolMock.mockResolvedValueOnce({
-			id: "abc",
-			projectName: "Calc",
-			prompt: "a calculator",
-			siteUrl: null,
-			brandSnapshot: null,
-			html: "<!doctype html>current</html>",
-			copy: null,
-			brandFidelity: null,
-			model: "claude-sonnet-4-6",
-			warnings: [],
-			createdAt: "2024-01-01T00:00:00.000Z",
-			updatedAt: "2024-01-02T00:00:00.000Z",
-			version: 2,
-			history: [
-				{
-					version: 1,
-					createdAt: "2024-01-01T00:00:00.000Z",
+		getGeneratedToolSurfaceMock.mockResolvedValueOnce({
+			statusCode: 200,
+			body: {
+				status: "success",
+				tool: {
+					id: "abc",
 					projectName: "Calc",
 					prompt: "a calculator",
 					siteUrl: null,
 					brandSnapshot: null,
-					html: "<!doctype html>old</html>",
 					copy: null,
 					brandFidelity: null,
 					model: "claude-sonnet-4-6",
 					warnings: [],
+					createdAt: "2024-01-01T00:00:00.000Z",
+					updatedAt: "2024-01-02T00:00:00.000Z",
+					version: 2,
+					history: [
+						{
+							version: 1,
+							createdAt: "2024-01-01T00:00:00.000Z",
+							projectName: "Calc",
+							prompt: "a calculator",
+							siteUrl: null,
+							brandSnapshot: null,
+							copy: null,
+							brandFidelity: null,
+							model: "claude-sonnet-4-6",
+							warnings: [],
+						},
+					],
 				},
-			],
+			},
 		});
 
 		const response = await toolDetailGet(new Request("http://localhost/api/tools/abc"), {
@@ -353,6 +345,11 @@ describe("GET /api/tools/[id]", () => {
 
 describe("POST /api/tools/[id]/rollback", () => {
 	it("returns 400 when version is missing or not a number", async () => {
+		rollbackGeneratedToolSurfaceMock.mockResolvedValueOnce({
+			statusCode: 400,
+			body: { status: "error", message: "Provide the numeric version to restore." },
+		});
+
 		const response = await toolRollbackPost(
 			new Request("http://localhost/api/tools/abc/rollback", {
 				method: "POST",
@@ -363,11 +360,13 @@ describe("POST /api/tools/[id]/rollback", () => {
 		);
 
 		expect(response.status).toBe(400);
-		expect(rollbackGeneratedToolMock).not.toHaveBeenCalled();
 	});
 
 	it("returns 404 when rollbackGeneratedTool can't find the tool/version", async () => {
-		rollbackGeneratedToolMock.mockResolvedValueOnce(null);
+		rollbackGeneratedToolSurfaceMock.mockResolvedValueOnce({
+			statusCode: 404,
+			body: { status: "error", message: "Could not find that tool/version to restore." },
+		});
 
 		const response = await toolRollbackPost(
 			new Request("http://localhost/api/tools/abc/rollback", {
@@ -382,7 +381,10 @@ describe("POST /api/tools/[id]/rollback", () => {
 	});
 
 	it("rolls back and returns the restored tool on success", async () => {
-		rollbackGeneratedToolMock.mockResolvedValueOnce({ id: "abc", version: 3 });
+		rollbackGeneratedToolSurfaceMock.mockResolvedValueOnce({
+			statusCode: 200,
+			body: { status: "success", tool: { id: "abc", version: 3 } },
+		});
 
 		const response = await toolRollbackPost(
 			new Request("http://localhost/api/tools/abc/rollback", {
@@ -393,7 +395,7 @@ describe("POST /api/tools/[id]/rollback", () => {
 			{ params: Promise.resolve({ id: "abc" }) }
 		);
 
-		expect(rollbackGeneratedToolMock).toHaveBeenCalledWith("abc", 1);
+		expect(rollbackGeneratedToolSurfaceMock).toHaveBeenCalledWith({ id: "abc", version: 1 });
 		expect(response.status).toBe(200);
 		await expect(response.json()).resolves.toMatchObject({ status: "success", tool: { id: "abc", version: 3 } });
 	});

@@ -1,10 +1,6 @@
 import { NextResponse } from "next/server";
-import { getPlatformScaffoldStatus } from "@/lib/platform/status";
+import { getHealthPayload } from "@/lib/surfaces/health";
 
 export function GET() {
-	return NextResponse.json({
-		ok: true,
-		service: "letterstory-toolbuilder",
-		status: getPlatformScaffoldStatus(),
-	});
+	return NextResponse.json(getHealthPayload());
 }

@@ -1,0 +1,125 @@
+import { z } from "zod";
+
+export const generatedToolBrandSnapshotSchema = z.object({
+	brandName: z.string().nullable(),
+	colors: z.record(z.string(), z.string()),
+	fonts: z.array(z.string()),
+	headingFont: z.string().nullable().optional(),
+	bodyFont: z.string().nullable().optional(),
+	logoDataUri: z.string().nullable(),
+});
+
+export const generatedToolCopySchema = z.object({
+	headline: z.string(),
+	supportingCopy: z.string(),
+});
+
+export const generatedToolBrandFidelitySchema = z.object({
+	verdict: z.enum(["pass", "warn", "fail"]),
+	notes: z.string(),
+});
+
+export const generatedToolHistoryEntrySchema = z.object({
+	projectName: z.string(),
+	prompt: z.string(),
+	siteUrl: z.string().nullable(),
+	brandSnapshot: generatedToolBrandSnapshotSchema.nullable(),
+	html: z.string(),
+	copy: generatedToolCopySchema.nullable(),
+	brandFidelity: generatedToolBrandFidelitySchema.nullable(),
+	model: z.string(),
+	warnings: z.array(z.string()),
+	version: z.number().int(),
+	createdAt: z.string(),
+});
+
+export const generatedToolRecordSchema = z.object({
+	id: z.string(),
+	projectName: z.string(),
+	prompt: z.string(),
+	siteUrl: z.string().nullable(),
+	brandSnapshot: generatedToolBrandSnapshotSchema.nullable(),
+	html: z.string(),
+	copy: generatedToolCopySchema.nullable(),
+	brandFidelity: generatedToolBrandFidelitySchema.nullable(),
+	model: z.string(),
+	warnings: z.array(z.string()),
+	createdAt: z.string(),
+	version: z.number().int(),
+	updatedAt: z.string(),
+	history: z.array(generatedToolHistoryEntrySchema),
+});
+
+export const listGeneratedToolsInputSchema = z.object({});
+
+export const generatedToolSummarySchema = generatedToolRecordSchema.omit({
+	html: true,
+	history: true,
+}).extend({
+	previousVersionCount: z.number().int().nonnegative(),
+});
+
+export const listGeneratedToolsOutputSchema = z.object({
+	status: z.literal("success"),
+	tools: z.array(generatedToolSummarySchema),
+});
+
+export const getGeneratedToolInputSchema = z.object({
+	id: z.string(),
+});
+
+export const generatedToolDetailSchema = generatedToolRecordSchema.omit({
+	html: true,
+	history: true,
+}).extend({
+	history: z.array(
+		generatedToolHistoryEntrySchema.omit({
+			html: true,
+		})
+	),
+});
+
+export const getGeneratedToolOutputSchema = z.union([
+	z.object({
+		status: z.literal("success"),
+		tool: generatedToolDetailSchema,
+	}),
+	z.object({
+		status: z.literal("error"),
+		message: z.string(),
+	}),
+]);
+
+export const generateToolInputSchema = z.object({
+	projectName: z.string().optional(),
+	siteUrl: z.string().optional(),
+	prompt: z.string(),
+	toolId: z.string().optional(),
+});
+
+export const generateToolOutputSchema = z.union([
+	z.object({
+		status: z.literal("success"),
+		tool: generatedToolRecordSchema,
+	}),
+	z.object({
+		status: z.enum(["not_configured", "error"]),
+		message: z.string(),
+	}),
+]);
+
+export const rollbackGeneratedToolInputSchema = z.object({
+	id: z.string(),
+	version: z.number().int(),
+});
+
+export const rollbackGeneratedToolOutputSchema = z.union([
+	z.object({
+		status: z.literal("success"),
+		tool: generatedToolRecordSchema,
+	}),
+	z.object({
+		status: z.literal("error"),
+		message: z.string(),
+	}),
+]);

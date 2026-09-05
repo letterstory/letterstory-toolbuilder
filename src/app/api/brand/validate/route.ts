@@ -1,33 +1,15 @@
 import { NextResponse } from "next/server";
-import type { BrandProfile } from "@/lib/brand";
-import { validateBrandFidelity } from "@/lib/brand";
+import { BRAND_VALIDATE_RATE_LIMIT } from "@/lib/rate-limit/rules";
 import { checkRateLimit, getClientIp } from "@/lib/security/rate-limit";
-
-const RATE_LIMIT = { bucket: "brand.validate", max: 20, windowSeconds: 600 };
+import { validateBrandFidelityRateLimited, validateBrandFidelitySurface } from "@/lib/surfaces/brand";
 
 export async function POST(request: Request) {
-	const rate = await checkRateLimit(getClientIp(request), RATE_LIMIT);
+	const rate = await checkRateLimit(getClientIp(request), BRAND_VALIDATE_RATE_LIMIT);
 	if (!rate.allowed) {
-		return NextResponse.json(
-			{ status: "error", requestedUrl: "", message: "Too many validation requests — please wait a bit and try again." },
-			{ status: 429, headers: { "Retry-After": String(rate.retryAfterSeconds) } }
-		);
+		const response = validateBrandFidelityRateLimited(rate.retryAfterSeconds);
+		return NextResponse.json(response.body, { status: response.statusCode, headers: response.headers });
 	}
 
-	const body = (await request.json().catch(() => null)) as {
-		siteUrl?: unknown;
-		profile?: BrandProfile;
-	} | null;
-
-	if (!body || typeof body.siteUrl !== "string" || !body.siteUrl.trim() || !body.profile) {
-		return NextResponse.json(
-			{ status: "error", requestedUrl: "", message: "Provide both siteUrl and profile." },
-			{ status: 400 }
-		);
-	}
-
-	const result = await validateBrandFidelity(body.profile, body.siteUrl);
-	return NextResponse.json(result, {
-		status: result.status === "error" ? 400 : 200,
-	});
+	const response = await validateBrandFidelitySurface(await request.json().catch(() => null));
+	return NextResponse.json(response.body, { status: response.statusCode, headers: response.headers });
 }

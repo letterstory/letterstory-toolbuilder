@@ -1,26 +1,15 @@
 import { NextResponse } from "next/server";
-import { ingestBrandContext } from "@/lib/brand";
+import { BRAND_INGEST_RATE_LIMIT } from "@/lib/rate-limit/rules";
 import { checkRateLimit, getClientIp } from "@/lib/security/rate-limit";
-
-const RATE_LIMIT = { bucket: "brand.ingest", max: 15, windowSeconds: 600 };
+import { ingestBrandContextRateLimited, ingestBrandContextSurface } from "@/lib/surfaces/brand";
 
 export async function POST(request: Request) {
-	const rate = await checkRateLimit(getClientIp(request), RATE_LIMIT);
+	const rate = await checkRateLimit(getClientIp(request), BRAND_INGEST_RATE_LIMIT);
 	if (!rate.allowed) {
-		return NextResponse.json(
-			{ status: "error", requestedUrl: "", message: "Too many brand ingestion requests — please wait a bit and try again." },
-			{ status: 429, headers: { "Retry-After": String(rate.retryAfterSeconds) } }
-		);
+		const response = ingestBrandContextRateLimited(rate.retryAfterSeconds);
+		return NextResponse.json(response.body, { status: response.statusCode, headers: response.headers });
 	}
 
-	const body = (await request.json().catch(() => null)) as { siteUrl?: unknown } | null;
-	if (!body || typeof body.siteUrl !== "string" || !body.siteUrl.trim()) {
-		return NextResponse.json(
-			{ status: "error", requestedUrl: "", message: "Provide a siteUrl string." },
-			{ status: 400 }
-		);
-	}
-
-	const result = await ingestBrandContext({ siteUrl: body.siteUrl });
-	return NextResponse.json(result, { status: result.status === "error" ? 400 : 200 });
+	const response = await ingestBrandContextSurface(await request.json().catch(() => null));
+	return NextResponse.json(response.body, { status: response.statusCode, headers: response.headers });
 }
