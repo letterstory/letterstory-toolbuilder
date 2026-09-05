@@ -2,6 +2,11 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { Separator } from "@/components/ui/separator";
 
+// Dashboard routes drive live tooling flows and must never be emitted as
+// long-lived static HTML, or intermediary caches can pin stale JS chunks.
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 const NAV_LINKS = [
 	{ href: "/brand", label: "Brand ingestion" },
 	{ href: "/build", label: "Build a tool" },
