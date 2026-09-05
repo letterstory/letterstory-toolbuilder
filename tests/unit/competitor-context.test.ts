@@ -1,8 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	buildCompetitorContextForBrand,
-	extractCompetitorSignalFromFirecrawl,
-	extractCompetitorSignalFromHtml,
+	extractCompetitorSignalFromBrandProfile,
 	parseCompetitorResponse,
 	type CompetitorCandidate,
 } from "../../src/lib/brand/competitor-context";
@@ -101,7 +100,7 @@ describe("competitor context", () => {
 	beforeEach(() => {
 		vi.restoreAllMocks();
 		process.env.ANTHROPIC_API_KEY = "test-key";
-		process.env.FIRECRAWL_BASE_URL = "https://firecrawl.example";
+		process.env.CONTEXT_DEV_API_KEY = "context-test-key";
 	});
 
 	it("aggregates competitor norms and flags divergence without blocking unavailable competitors", async () => {
@@ -134,35 +133,26 @@ describe("competitor context", () => {
 		const context = await buildCompetitorContextForBrand(makeProfile(), {
 			identifyCompetitors,
 			fetchCompetitorSignal,
-			fetchCompetitorSignalFallback: async (candidate) => ({
-				companyName: candidate.companyName,
-				domain: candidate.domain,
-				status: "analyzed",
-				brandName: candidate.companyName,
-				primaryColor: "#F63440",
-				primaryColorFamily: "warm",
-				fontFamily: "Inter",
-				fontCategory: "sans-serif",
-				logoStyle: "wordmark",
-				notes: ["Used direct-site fallback after Firecrawl failed."],
-			}),
 		});
 
 		expect(context).toMatchObject({
 			industry: "food delivery",
 			signal: "diverges",
 			industryNorms: {
-				sampleSize: 3,
+				sampleSize: 2,
 				primaryColorFamily: "warm",
 				fontCategory: "sans-serif",
 				logoStyle: "wordmark",
 			},
 		});
 		expect(context?.notes).toEqual(
-			expect.arrayContaining([expect.stringContaining("Target differs from competitor norms")])
+			expect.arrayContaining([
+				expect.stringContaining("Target differs from competitor norms"),
+				expect.stringContaining("Could not analyze Postmates"),
+			])
 		);
 		expect(context?.competitors.find((competitor) => competitor.domain === "postmates.com")?.notes).toContain(
-			"Used direct-site fallback after Firecrawl failed."
+			"timeout"
 		);
 		expect(identifyCompetitors).toHaveBeenCalledTimes(1);
 		expect(fetchCompetitorSignal).toHaveBeenCalledTimes(3);
@@ -216,27 +206,41 @@ describe("competitor context", () => {
 		expect(context?.notes.join(" ")).toContain("Airbnb");
 	});
 
-	it("extracts a lightweight brand signal from Firecrawl branding payloads", () => {
-		const signal = extractCompetitorSignalFromFirecrawl(
+	it("extracts a lightweight brand signal from a Context.dev brand profile", () => {
+		const signal = extractCompetitorSignalFromBrandProfile(
 			{ companyName: "Uber Eats", domain: "ubereats.com" },
-			{
-				branding: {
-					brandName: "Uber Eats",
-					colors: {
-						primary: "#06C167",
-						text: "#111111",
-					},
-					typography: {
-						primaryFont: "Uber Move",
-						fontStacks: { body: "sans-serif" },
-					},
-					images: {
-						logoAlt: "Uber Eats wordmark",
-						logo: { url: "https://cdn.example.com/uber-eats-wordmark.svg" },
+			makeProfile({
+				brandName: "Uber Eats",
+				colors: {
+					primary: "#06C167",
+					text: "#111111",
+					background: "#FFFFFF",
+				},
+				fonts: ["Uber Move", "Arial"],
+				typography: {
+					...makeProfile().typography,
+					primaryFont: "Uber Move",
+					bodyFont: "Uber Move",
+					fontStacks: { body: ["Uber Move", "Arial", "sans-serif"] },
+					bodyFontFace: {
+						family: "Uber Move",
+						google: false,
+						category: "sans-serif",
+						files: {},
+						fallbacks: ["Arial", "sans-serif"],
 					},
 				},
-				metadata: { title: "Uber Eats" },
-			}
+				images: {
+					...makeProfile().images,
+					logo: {
+						...makeProfile().images.logo,
+						alt: "Uber Eats wordmark",
+						type: "logo",
+						width: 260,
+						height: 64,
+					},
+				},
+			})
 		);
 
 		expect(signal).toMatchObject({
@@ -247,35 +251,6 @@ describe("competitor context", () => {
 			fontCategory: "sans-serif",
 			logoStyle: "wordmark",
 		});
-	});
-
-	it("extracts fallback brand heuristics from raw competitor HTML", () => {
-		const signal = extractCompetitorSignalFromHtml(
-			{ companyName: "Grubhub", domain: "grubhub.com" },
-			[
-				"<html><head>",
-				'<title>Grubhub | Food Delivery</title>',
-				'<meta property="og:site_name" content="Grubhub" />',
-				'<meta name="theme-color" content="#F63440" />',
-				"<style>",
-				":root { --brand-primary: #F63440; --font-body: 'GT America', sans-serif; }",
-				"body { font-family: 'GT America', Arial, sans-serif; }",
-				"</style>",
-				"</head><body>",
-				'<img alt="Grubhub wordmark logo" src="/logo.svg" />',
-				"</body></html>",
-			].join("")
-		);
-
-		expect(signal).toMatchObject({
-			brandName: "Grubhub",
-			primaryColor: "#F63440",
-			primaryColorFamily: "warm",
-			fontFamily: "GT America",
-			fontCategory: "sans-serif",
-			logoStyle: "wordmark",
-		});
-		expect(signal.notes).toContain("Used direct-site fallback after Firecrawl failed.");
 	});
 
 	it("parses competitor JSON wrapped in markdown fences", () => {

@@ -11,12 +11,6 @@ export const envServer = {
 	get CONTEXT_DEV_BASE_URL() {
 		return process.env.CONTEXT_DEV_BASE_URL?.trim() || "https://api.context.dev/v1";
 	},
-	get FIRECRAWL_API_KEY() {
-		return process.env.FIRECRAWL_API_KEY?.trim() ?? "";
-	},
-	get FIRECRAWL_BASE_URL() {
-		return process.env.FIRECRAWL_BASE_URL?.trim() || "https://api.firecrawl.dev";
-	},
 	get TOOLBUILDER_BASE_URL() {
 		return process.env.TOOLBUILDER_BASE_URL?.trim() ?? "";
 	},
