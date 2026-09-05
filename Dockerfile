@@ -5,11 +5,13 @@
 
 FROM node:22-slim AS deps
 WORKDIR /app
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 # openssl/ca-certificates: sharp/@resvg/resvg-js pull prebuilt native
 # binaries at install time and need these present on slim/debian bases.
 RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates && rm -rf /var/lib/apt/lists/*
 COPY package.json package-lock.json ./
 RUN npm ci
+RUN npx playwright install chromium
 
 FROM node:22-slim AS builder
 WORKDIR /app
@@ -62,7 +64,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=builder /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
-COPY --from=deps --chown=nextjs:nodejs /root/.cache/ms-playwright /ms-playwright
+COPY --from=deps --chown=nextjs:nodejs /ms-playwright /ms-playwright
 
 USER nextjs
 EXPOSE 3000
