@@ -558,7 +558,7 @@ describe("generateTool", () => {
 			expect(result.tool.html).toContain("header{background:#040404;color:#fff;}");
 			expect(result.tool.html).toContain('src="data:image/png;base64,abc"');
 			expect(result.tool.html).toContain(
-				'.ls-brand-lockup--exact_asset,\n.ls-brand-lockup--text_only {\n  background: #FFFFFF;\n  padding: 0.5rem 0.75rem;\n  border-radius: 0.75rem;'
+				'.ls-brand-lockup--exact_asset,\n.ls-brand-lockup--text_only,\n.ls-brand-verified-copy {\n  background: #FFFFFF;\n  padding: 0.5rem 0.75rem;\n  border-radius: 0.75rem;'
 			);
 			expect(result.tool.html).not.toContain("Graphik Web");
 			expect(result.tool.html).not.toContain("Iowan Old Style");

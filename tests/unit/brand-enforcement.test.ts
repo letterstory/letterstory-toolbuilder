@@ -90,7 +90,9 @@ describe("enforceBrandPresentation", () => {
 		const style = extractEnforcementStyle(finalHtml);
 		expect(finalHtml).toContain('class="ls-brand-lockup ls-brand-lockup--exact_asset"');
 		expect(finalHtml).toContain('src="data:image/png;base64,abc"');
-		expect(style).toContain(".ls-brand-lockup--exact_asset,\n.ls-brand-lockup--text_only {");
+		expect(style).toContain(
+			".ls-brand-lockup--exact_asset,\n.ls-brand-lockup--text_only,\n.ls-brand-verified-copy {"
+		);
 		expect(style).toContain("background: #FFFFFF;");
 		expect(finalHtml.indexOf('data-letterstory-brand-enforcement="true"')).toBeGreaterThan(
 			finalHtml.indexOf(".ls-brand-lockup--exact_asset { background: transparent;")
@@ -118,7 +120,7 @@ describe("enforceBrandPresentation", () => {
 
 		const style = extractEnforcementStyle(result.sanitized.html);
 		const sharedLockupBlock = style.match(
-			/\.ls-brand-lockup--exact_asset,\s*\.ls-brand-lockup--text_only\s*\{([\s\S]*?)\}/i
+			/\.ls-brand-lockup--exact_asset,\s*\.ls-brand-lockup--text_only,\s*\.ls-brand-verified-copy\s*\{([\s\S]*?)\}/i
 		)?.[1];
 		const surfaceColor = sharedLockupBlock?.match(/background:\s*([^;]+);/i)?.[1]?.trim() ?? null;
 		const wordmarkColor =
@@ -129,6 +131,47 @@ describe("enforceBrandPresentation", () => {
 		expect(wordmarkColor).not.toBeNull();
 		expect(contrastRatio(wordmarkColor!, surfaceColor!)).toBeGreaterThanOrEqual(4.5);
 		expect(normalizeHexColor(wordmarkColor!)).not.toBe("#ED943B");
+	});
+
+	it("gives verified tool titles a deterministic contrast-safe surface inside dark headers", async () => {
+		const html = [
+			"<!doctype html>",
+			"<html><head>",
+			"<style>",
+			"header { background: #000000; color: #FFFFFF; }",
+			"</style>",
+			"</head><body><header><h1>Original</h1></header><main></main></body></html>",
+		].join("");
+		const brandSnapshot = makeBrandSnapshot({
+			brandName: "Gymshark",
+			colors: {
+				primary: "#7A7A7A",
+				accent: "#4A4A4A",
+				background: "#FFFFFF",
+				text: "#000000",
+			},
+			logoPolicy: "text_only",
+		});
+
+		const result = await enforceBrandPresentation({
+			html,
+			projectName: "BMI Calculator Test",
+			brandSnapshot,
+		});
+
+		const style = extractEnforcementStyle(result.sanitized.html);
+		const verifiedCopyBlock = style.match(/\.ls-brand-verified-copy\s*\{([\s\S]*?)\}/i)?.[1] ?? "";
+		const titleColor =
+			style.match(/\.ls-brand-verified-copy h1\s*\{[\s\S]*?color:\s*([^;]+);/i)?.[1]?.trim() ?? null;
+		const surfaceColor = verifiedCopyBlock.match(/background:\s*([^;]+);/i)?.[1]?.trim() ?? null;
+
+		expect(result.sanitized.html).toContain('class="ls-brand-verified-copy"');
+		expect(result.sanitized.html).toContain("<h1>BMI Calculator Test</h1>");
+		expect(surfaceColor).toBe("#FFFFFF");
+		expect(titleColor).toBe("#000000");
+		expect(contrastRatio(titleColor!, surfaceColor!)).toBeGreaterThanOrEqual(4.5);
+		expect(verifiedCopyBlock).toContain("padding: 0.5rem 0.75rem;");
+		expect(verifiedCopyBlock).toContain("border-radius: 0.75rem;");
 	});
 
 	it("treats Robinhood's Martina Plantijn heading as serif when self-hosting is unavailable", async () => {
