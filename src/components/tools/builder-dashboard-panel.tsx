@@ -4,12 +4,10 @@ import type { RequestState, ToolHistoryEntry, ToolSummary } from "@/components/t
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
 
 interface BuilderDashboardPanelProps {
 	activeTool: ToolSummary | null;
 	toolHistory: ToolHistoryEntry[];
-	recentTools: ToolSummary[];
 	embedSnippet: string;
 	fullEmbedSnippet: string;
 	hostedUrl: string;
@@ -17,13 +15,11 @@ interface BuilderDashboardPanelProps {
 	requestState: RequestState;
 	onCopy: (target: "iframe" | "full" | "url", text: string) => void;
 	onRollback: (version: number) => void;
-	onReopenRecent: (tool: ToolSummary) => void;
 }
 
 export function BuilderDashboardPanel({
 	activeTool,
 	toolHistory,
-	recentTools,
 	embedSnippet,
 	fullEmbedSnippet,
 	hostedUrl,
@@ -31,7 +27,6 @@ export function BuilderDashboardPanel({
 	requestState,
 	onCopy,
 	onRollback,
-	onReopenRecent,
 }: BuilderDashboardPanelProps) {
 	return (
 		<div className="space-y-4 rounded-[32px] border border-brand/10 bg-[linear-gradient(180deg,_white_0%,_color-mix(in_oklab,var(--brand-light)_24%,white)_100%)] p-4">
@@ -39,7 +34,7 @@ export function BuilderDashboardPanel({
 				<p className="text-sm font-semibold text-foreground">Dashboard</p>
 				<p className="mt-1 text-sm text-muted-foreground">
 					{activeTool
-						? "Brand proof, hosted iframe delivery, version history, and warnings live here so the preview canvas can stay uncluttered."
+						? "Hosted delivery, embed code, brand details, version history, and warnings live here."
 						: "Generate or reopen a tool to inspect hosted embed code, brand details, and version history."}
 				</p>
 			</div>
@@ -94,7 +89,7 @@ export function BuilderDashboardPanel({
 										) : (
 											<Copy className="size-4" />
 										)}
-										{copiedTarget === "full" ? "Copied" : "Copy with copy"}
+										{copiedTarget === "full" ? "Copied" : "Copy full snippet"}
 									</Button>
 								) : null}
 							</div>
@@ -254,48 +249,6 @@ export function BuilderDashboardPanel({
 					) : null}
 				</>
 			) : null}
-
-			<section className="rounded-[28px] bg-white p-5 shadow-sm">
-				<p className="text-sm font-semibold text-foreground">Recent tools</p>
-				<p className="mt-1 text-sm text-muted-foreground">
-					Project switching also lives in the top-left pill; this is the full list view.
-				</p>
-				<div className="mt-4 space-y-3">
-					{recentTools.length ? (
-						recentTools.map((tool) => (
-							<button
-								key={tool.id}
-								type="button"
-								onClick={() => onReopenRecent(tool)}
-								className={cn(
-									"w-full rounded-2xl border px-4 py-3 text-left transition",
-									activeTool?.id === tool.id
-										? "border-brand/25 bg-brand-light/30"
-										: "border-brand/10 bg-brand-light/12 hover:bg-white"
-								)}
-							>
-								<div className="flex items-start justify-between gap-3">
-									<div className="min-w-0">
-										<p className="truncate text-sm font-medium text-foreground">
-											{tool.projectName}
-										</p>
-										<p className="truncate text-xs text-muted-foreground">
-											{tool.siteUrl ?? "No brand site"} · v{tool.version}
-										</p>
-									</div>
-									<span className="text-xs text-muted-foreground">
-										{formatTimestamp(tool.updatedAt)}
-									</span>
-								</div>
-							</button>
-						))
-					) : (
-						<p className="rounded-2xl bg-brand-light/12 px-4 py-6 text-sm text-muted-foreground">
-							No saved tools yet.
-						</p>
-					)}
-				</div>
-			</section>
 		</div>
 	);
 }

@@ -1,13 +1,4 @@
-import {
-	ChevronDown,
-	LayoutGrid,
-	MessageSquareText,
-	Monitor,
-	MoreHorizontal,
-	Pencil,
-	Plus,
-	Send,
-} from "lucide-react";
+import { ChevronDown, Pencil, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { BuilderView, RequestState, ToolSummary } from "@/components/tools/builder-types";
@@ -145,37 +136,9 @@ export function BuilderTopbar({
 						<Pencil className="size-4" />
 						Edit
 					</Button>
-					<Button
-						type="button"
-						variant="ghost"
-						size="icon"
-						onClick={onToggleRecent}
-						className="size-[30px] rounded-md text-brand-text hover:bg-brand-light/35 hover:text-brand-text"
-						aria-label="Open recent tools"
-					>
-						<LayoutGrid className="size-4" />
-					</Button>
-					<div className="inline-flex h-[30px] items-center gap-2 rounded-md border border-brand/15 bg-white px-3 text-sm text-brand-text/80">
-						<Monitor className="size-4" />
-						<span className="text-sm font-medium text-foreground">Home</span>
-						<Send className="size-4 text-brand-text/50" />
-					</div>
 				</div>
 
 				<div className="flex flex-wrap items-center gap-2 xl:justify-end">
-					<Button
-						type="button"
-						variant="ghost"
-						size="icon"
-						onClick={onFocusComposer}
-						className="size-[30px] rounded-md text-brand-text hover:bg-brand-light/35 hover:text-brand-text"
-						aria-label="Focus chat composer"
-					>
-						<MessageSquareText className="size-4" />
-					</Button>
-					<div className="flex size-[30px] items-center justify-center rounded-md bg-brand text-xs font-semibold text-brand-foreground">
-						M
-					</div>
 					<Button
 						type="button"
 						variant="ghost"
@@ -186,17 +149,6 @@ export function BuilderTopbar({
 						aria-label="Start new tool"
 					>
 						<Plus className="size-4" />
-					</Button>
-					<Button
-						type="button"
-						variant="ghost"
-						size="icon"
-						onClick={onRefreshRecent}
-						disabled={recentLoading}
-						className="size-[30px] rounded-md text-brand-text hover:bg-brand-light/35 hover:text-brand-text"
-						aria-label="Refresh recent tools"
-					>
-						<MoreHorizontal className="size-4" />
 					</Button>
 					<Button
 						type="button"

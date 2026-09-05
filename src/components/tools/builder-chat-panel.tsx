@@ -6,7 +6,6 @@ import {
 	ChevronDown,
 	ChevronRight,
 	LoaderCircle,
-	Mic,
 	Paperclip,
 	Target,
 } from "lucide-react";
@@ -274,6 +273,7 @@ export function BuilderChatPanel({
 								size="icon"
 								className="rounded-md text-brand-text hover:bg-brand-light/35 hover:text-brand-text"
 								onClick={onNormalizeSiteUrl}
+								aria-label="Normalize brand site URL"
 							>
 								<Paperclip className="size-4" />
 							</Button>
@@ -284,15 +284,6 @@ export function BuilderChatPanel({
 							<span className="text-xs font-medium uppercase tracking-[0.14em] text-brand-text/50">
 								Build
 							</span>
-							<Button
-								type="button"
-								variant="ghost"
-								size="icon"
-								className="rounded-md text-brand-text"
-								disabled
-							>
-								<Mic className="size-4" />
-							</Button>
 						</div>
 						<Button
 							type="submit"

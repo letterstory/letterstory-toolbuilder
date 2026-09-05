@@ -448,7 +448,6 @@ export function ToolBuilderWorkspace() {
 						<BuilderDashboardPanel
 							activeTool={activeTool}
 							toolHistory={toolHistory}
-							recentTools={recentTools}
 							embedSnippet={embedSnippet}
 							fullEmbedSnippet={fullEmbedSnippet}
 							hostedUrl={hostedUrl}
@@ -456,7 +455,6 @@ export function ToolBuilderWorkspace() {
 							requestState={requestState}
 							onCopy={(target, text) => void handleCopyEmbed(target, text)}
 							onRollback={(version) => void handleRollback(version)}
-							onReopenRecent={handleReopenRecent}
 						/>
 					)}
 				</div>
