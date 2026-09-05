@@ -32,10 +32,10 @@ export function BuilderDashboardPanel({
 	onReopenRecent,
 }: BuilderDashboardPanelProps) {
 	return (
-		<div className="space-y-4 rounded-[32px] border border-black/5 bg-[linear-gradient(180deg,_#f6f4ff_0%,_#fafaff_100%)] p-4">
+		<div className="space-y-4 rounded-[32px] border border-brand/10 bg-[linear-gradient(180deg,_white_0%,_color-mix(in_oklab,var(--brand-light)_24%,white)_100%)] p-4">
 			<div className="rounded-[28px] bg-white p-5 shadow-sm">
-				<p className="text-sm font-semibold text-slate-950">Dashboard</p>
-				<p className="mt-1 text-sm text-slate-500">
+				<p className="text-sm font-semibold text-foreground">Dashboard</p>
+				<p className="mt-1 text-sm text-muted-foreground">
 					{activeTool
 						? "Embed snippets, brand tokens, version history, and warnings live here so the preview canvas can stay uncluttered."
 						: "Generate or reopen a tool to inspect embed code, brand details, and version history."}
@@ -58,23 +58,23 @@ export function BuilderDashboardPanel({
 							) : null}
 						</div>
 						{activeTool.copy ? (
-							<div className="mt-4 rounded-3xl bg-slate-50 p-4">
-								<p className="text-sm font-semibold text-slate-950">{activeTool.copy.headline}</p>
-								<p className="mt-2 text-sm leading-6 text-slate-600">
+							<div className="mt-4 rounded-3xl bg-brand-light/12 p-4">
+								<p className="text-sm font-semibold text-foreground">{activeTool.copy.headline}</p>
+								<p className="mt-2 text-sm leading-6 text-brand-text">
 									{activeTool.copy.supportingCopy}
 								</p>
 							</div>
 						) : null}
 						{activeTool.brandFidelity?.notes ? (
-							<p className="mt-3 text-xs text-slate-500">{activeTool.brandFidelity.notes}</p>
+							<p className="mt-3 text-xs text-muted-foreground">{activeTool.brandFidelity.notes}</p>
 						) : null}
 					</section>
 
 					<section className="rounded-[28px] bg-white p-5 shadow-sm">
 						<div className="flex flex-wrap items-center justify-between gap-3">
 							<div>
-								<p className="text-sm font-semibold text-slate-950">Embed snippet</p>
-								<p className="text-sm text-slate-500">
+								<p className="text-sm font-semibold text-foreground">Embed snippet</p>
+								<p className="text-sm text-muted-foreground">
 									Copy the iframe snippet alone or include supporting copy above it.
 								</p>
 							</div>
@@ -109,7 +109,7 @@ export function BuilderDashboardPanel({
 								) : null}
 							</div>
 						</div>
-						<pre className="mt-4 min-w-0 overflow-x-auto rounded-[24px] border border-black/5 bg-slate-50 p-4 text-xs [overflow-wrap:anywhere] whitespace-pre-wrap">
+						<pre className="mt-4 min-w-0 overflow-x-auto rounded-[24px] border border-brand/10 bg-brand-light/12 p-4 text-xs [overflow-wrap:anywhere] whitespace-pre-wrap">
 							{fullEmbedSnippet || embedSnippet}
 						</pre>
 					</section>
@@ -117,33 +117,33 @@ export function BuilderDashboardPanel({
 					<section className="grid gap-4 xl:grid-cols-2">
 						<div className="rounded-[28px] bg-white p-5 shadow-sm">
 							<div className="flex items-center gap-2">
-								<Palette className="size-4 text-slate-500" />
-								<p className="text-sm font-semibold text-slate-950">Brand snapshot</p>
+								<Palette className="size-4 text-brand-text/70" />
+								<p className="text-sm font-semibold text-foreground">Brand snapshot</p>
 							</div>
 							<div className="mt-4 space-y-4">
 								<div>
-									<p className="text-xs uppercase tracking-[0.16em] text-slate-400">Colors</p>
+									<p className="text-xs uppercase tracking-[0.16em] text-brand-text/55">Colors</p>
 									<div className="mt-2 flex flex-wrap gap-2">
 										{Object.entries(activeTool.brandSnapshot?.colors ?? {}).length ? (
 											Object.entries(activeTool.brandSnapshot?.colors ?? {}).map(
 												([name, value]) => (
 													<div
 														key={name}
-														className="rounded-2xl border border-black/5 bg-slate-50 px-3 py-2 text-xs text-slate-600"
+														className="rounded-2xl border border-brand/10 bg-brand-light/12 px-3 py-2 text-xs text-brand-text"
 													>
 														<div className="mb-2 flex items-center gap-2">
 															<span
 																className="size-4 rounded-full border border-black/10"
 																style={{ backgroundColor: value }}
 															/>
-															<span className="font-medium text-slate-900">{name}</span>
+															<span className="font-medium text-foreground">{name}</span>
 														</div>
 														<span>{value}</span>
 													</div>
 												)
 											)
 										) : (
-											<p className="text-sm text-slate-500">
+											<p className="text-sm text-muted-foreground">
 												No brand colors captured for this run.
 											</p>
 										)}
@@ -151,8 +151,8 @@ export function BuilderDashboardPanel({
 								</div>
 								<div>
 									<div className="flex items-center gap-2">
-										<Type className="size-4 text-slate-500" />
-										<p className="text-xs uppercase tracking-[0.16em] text-slate-400">Fonts</p>
+										<Type className="size-4 text-brand-text/70" />
+										<p className="text-xs uppercase tracking-[0.16em] text-brand-text/55">Fonts</p>
 									</div>
 									<div className="mt-2 flex flex-wrap gap-2">
 										{activeTool.brandSnapshot?.fonts.length ? (
@@ -160,13 +160,13 @@ export function BuilderDashboardPanel({
 												<Badge
 													key={font}
 													variant="outline"
-													className="rounded-full border-black/10 bg-slate-50 text-slate-600"
+													className="rounded-full border-brand/10 bg-brand-light/12 text-brand-text"
 												>
 													{font}
 												</Badge>
 											))
 										) : (
-											<p className="text-sm text-slate-500">
+											<p className="text-sm text-muted-foreground">
 												No brand fonts captured for this run.
 											</p>
 										)}
@@ -177,21 +177,21 @@ export function BuilderDashboardPanel({
 
 						<div className="rounded-[28px] bg-white p-5 shadow-sm">
 							<div className="flex items-center gap-2">
-								<History className="size-4 text-slate-500" />
-								<p className="text-sm font-semibold text-slate-950">Version history</p>
+								<History className="size-4 text-brand-text/70" />
+								<p className="text-sm font-semibold text-foreground">Version history</p>
 							</div>
 							<div className="mt-4 space-y-3">
 								{toolHistory.length ? (
 									toolHistory.map((entry) => (
 										<div
 											key={entry.version}
-											className="flex items-center justify-between gap-3 rounded-2xl bg-slate-50 px-4 py-3"
+											className="flex items-center justify-between gap-3 rounded-2xl bg-brand-light/12 px-4 py-3"
 										>
 											<div className="min-w-0">
-												<p className="text-sm font-medium text-slate-950">
+												<p className="text-sm font-medium text-foreground">
 													Version {entry.version}
 												</p>
-												<p className="truncate text-xs text-slate-500">
+												<p className="truncate text-xs text-muted-foreground">
 													{formatTimestamp(entry.createdAt)} · {entry.prompt.slice(0, 72)}
 													{entry.prompt.length > 72 ? "…" : ""}
 												</p>
@@ -209,7 +209,7 @@ export function BuilderDashboardPanel({
 										</div>
 									))
 								) : (
-									<p className="rounded-2xl bg-slate-50 px-4 py-6 text-sm text-slate-500">
+									<p className="rounded-2xl bg-brand-light/12 px-4 py-6 text-sm text-muted-foreground">
 										No previous versions yet.
 									</p>
 								)}
@@ -234,8 +234,8 @@ export function BuilderDashboardPanel({
 			) : null}
 
 			<section className="rounded-[28px] bg-white p-5 shadow-sm">
-				<p className="text-sm font-semibold text-slate-950">Recent tools</p>
-				<p className="mt-1 text-sm text-slate-500">
+				<p className="text-sm font-semibold text-foreground">Recent tools</p>
+				<p className="mt-1 text-sm text-muted-foreground">
 					Project switching also lives in the top-left pill; this is the full list view.
 				</p>
 				<div className="mt-4 space-y-3">
@@ -248,25 +248,27 @@ export function BuilderDashboardPanel({
 								className={cn(
 									"w-full rounded-2xl border px-4 py-3 text-left transition",
 									activeTool?.id === tool.id
-										? "border-[#c6c0ff] bg-[#f4f1ff]"
-										: "border-black/5 bg-slate-50 hover:bg-white"
+										? "border-brand/25 bg-brand-light/30"
+										: "border-brand/10 bg-brand-light/12 hover:bg-white"
 								)}
 							>
 								<div className="flex items-start justify-between gap-3">
 									<div className="min-w-0">
-										<p className="truncate text-sm font-medium text-slate-950">
+										<p className="truncate text-sm font-medium text-foreground">
 											{tool.projectName}
 										</p>
-										<p className="truncate text-xs text-slate-500">
+										<p className="truncate text-xs text-muted-foreground">
 											{tool.siteUrl ?? "No brand site"} · v{tool.version}
 										</p>
 									</div>
-									<span className="text-xs text-slate-400">{formatTimestamp(tool.updatedAt)}</span>
+									<span className="text-xs text-muted-foreground">
+										{formatTimestamp(tool.updatedAt)}
+									</span>
 								</div>
 							</button>
 						))
 					) : (
-						<p className="rounded-2xl bg-slate-50 px-4 py-6 text-sm text-slate-500">
+						<p className="rounded-2xl bg-brand-light/12 px-4 py-6 text-sm text-muted-foreground">
 							No saved tools yet.
 						</p>
 					)}

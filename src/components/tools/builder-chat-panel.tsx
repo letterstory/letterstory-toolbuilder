@@ -78,12 +78,12 @@ export function BuilderChatPanel({
 			: "Start with a name, optional brand site, and your build prompt.";
 
 	return (
-		<div className="flex min-h-[72vh] flex-col bg-[#fbfbfe] lg:min-h-[calc(100vh-16rem)]">
-			<div className="border-b border-black/5 bg-white px-4 py-4 sm:px-5">
+		<div className="flex min-h-[72vh] flex-col bg-brand-light/8 lg:min-h-[calc(100vh-16rem)]">
+			<div className="border-b border-brand/10 bg-white px-4 py-4 sm:px-5">
 				<div className="grid gap-3">
 					<div className="grid gap-3 sm:grid-cols-2">
 						<label className="space-y-2">
-							<span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-500">
+							<span className="text-xs font-medium uppercase tracking-[0.16em] text-brand-text/70">
 								Tool name *
 							</span>
 							<Input
@@ -91,11 +91,11 @@ export function BuilderChatPanel({
 								onChange={(event) => onProjectNameChange(event.target.value)}
 								placeholder="Stripe pricing estimator"
 								required
-								className="h-11 rounded-2xl border-black/10 bg-slate-50 px-4 shadow-none"
+								className="h-11 rounded-2xl border-brand/10 bg-brand-light/12 px-4 shadow-none focus-visible:border-brand/30 focus-visible:ring-brand/20"
 							/>
 						</label>
 						<label className="space-y-2">
-							<span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-500">
+							<span className="text-xs font-medium uppercase tracking-[0.16em] text-brand-text/70">
 								Brand site
 							</span>
 							<Input
@@ -103,12 +103,15 @@ export function BuilderChatPanel({
 								onChange={(event) => onSiteUrlChange(event.target.value)}
 								onBlur={onNormalizeSiteUrl}
 								placeholder="https://stripe.com"
-								className="h-11 rounded-2xl border-black/10 bg-slate-50 px-4 shadow-none"
+								className="h-11 rounded-2xl border-brand/10 bg-brand-light/12 px-4 shadow-none focus-visible:border-brand/30 focus-visible:ring-brand/20"
 							/>
 						</label>
 					</div>
-					<div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
-						<Badge variant="secondary" className="rounded-full bg-[#f1efff] text-[#4839b3]">
+					<div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+						<Badge
+							variant="secondary"
+							className="rounded-full border border-brand/10 bg-brand-light/35 text-brand-text"
+						>
 							Live orchestration UI
 						</Badge>
 						<span>
@@ -122,7 +125,7 @@ export function BuilderChatPanel({
 
 			<div className="flex-1 space-y-6 overflow-y-auto px-4 py-5 sm:px-5">
 				{messages.length === 0 ? (
-					<div className="rounded-[28px] border border-dashed border-black/10 bg-white/70 px-5 py-6 text-sm text-slate-500">
+					<div className="rounded-[28px] border border-dashed border-brand/15 bg-white/80 px-5 py-6 text-sm text-muted-foreground">
 						Your first prompt becomes the opening chat message. After the first build, use this
 						thread to request revisions and the existing tool will update in place.
 					</div>
@@ -140,35 +143,35 @@ export function BuilderChatPanel({
 							)}
 						>
 							{message.role === "user" ? (
-								<div className="rounded-[24px] rounded-br-md bg-slate-200 px-4 py-3 text-sm text-slate-900 shadow-sm">
+								<div className="rounded-[24px] rounded-br-md bg-brand-light/40 px-4 py-3 text-sm text-foreground shadow-sm">
 									{message.content}
 								</div>
 							) : message.role === "assistant" ? (
-								<p className="text-sm leading-6 text-slate-700">{message.content}</p>
+								<p className="text-sm leading-6 text-brand-text">{message.content}</p>
 							) : (
-								<div className="rounded-2xl border border-black/5 bg-white px-4 py-3 text-xs text-slate-500">
+								<div className="rounded-2xl border border-brand/10 bg-white px-4 py-3 text-xs text-muted-foreground">
 									{message.content}
 								</div>
 							)}
 							{message.meta ? (
-								<p className="px-1 text-[11px] text-slate-400">{message.meta}</p>
+								<p className="px-1 text-[11px] text-brand-text/50">{message.meta}</p>
 							) : null}
 						</div>
 					</div>
 				))}
 
 				{activitySteps.length > 0 ? (
-					<details open className="rounded-[28px] border border-black/5 bg-white p-4 shadow-sm">
+					<details open className="rounded-[28px] border border-brand/10 bg-white p-4 shadow-sm">
 						<summary className="flex cursor-pointer list-none items-center justify-between gap-3">
 							<div>
-								<p className="text-sm font-semibold text-slate-950">
+								<p className="text-sm font-semibold text-foreground">
 									{isRunning
 										? requestState === "updating"
 											? "Updating tool…"
 											: "Building tool…"
 										: "Latest pipeline activity"}
 								</p>
-								<p className="text-xs text-slate-500">
+								<p className="text-xs text-muted-foreground">
 									{telemetry?.totalMs
 										? `Completed in ${formatDuration(telemetry.totalMs)}${telemetry.attemptsSummary ? ` · ${telemetry.attemptsSummary}` : ""}`
 										: activeRun
@@ -176,28 +179,35 @@ export function BuilderChatPanel({
 											: statusMessage.description}
 								</p>
 							</div>
-							<div className="flex items-center gap-2 text-xs text-slate-500">
+							<div className="flex items-center gap-2 text-xs text-muted-foreground">
 								{telemetry ? (
-									<Badge variant="outline">Observed</Badge>
+									<Badge variant="outline" className="border-brand/15 text-brand-text">
+										Observed
+									</Badge>
 								) : (
-									<Badge variant="secondary">Estimated live</Badge>
+									<Badge
+										variant="secondary"
+										className="border border-brand/10 bg-brand-light/35 text-brand-text"
+									>
+										Estimated live
+									</Badge>
 								)}
-								<ChevronDown className="size-4" />
+								<ChevronDown className="size-4 text-brand-text/60" />
 							</div>
 						</summary>
 						<div className="mt-4 space-y-3">
 							{activitySteps.map((step) => (
 								<div
 									key={step.key}
-									className="flex items-start gap-3 rounded-2xl bg-slate-50 px-3 py-3"
+									className="flex items-start gap-3 rounded-2xl bg-brand-light/12 px-3 py-3"
 								>
 									<StepIcon status={step.status} />
 									<div className="min-w-0 flex-1">
 										<div className="flex flex-wrap items-center gap-2">
-											<p className="text-sm font-medium text-slate-950">{step.title}</p>
+											<p className="text-sm font-medium text-foreground">{step.title}</p>
 											<Badge
 												variant="outline"
-												className="rounded-full border-black/10 bg-white text-slate-500"
+												className="rounded-full border-brand/10 bg-white text-muted-foreground"
 											>
 												{step.status === "complete"
 													? "Done"
@@ -206,9 +216,11 @@ export function BuilderChatPanel({
 														: "Queued"}
 											</Badge>
 										</div>
-										<p className="mt-1 text-xs leading-5 text-slate-500">{step.description}</p>
+										<p className="mt-1 text-xs leading-5 text-muted-foreground">
+											{step.description}
+										</p>
 										{step.detail ? (
-											<p className="mt-2 text-xs font-medium text-slate-600">{step.detail}</p>
+											<p className="mt-2 text-xs font-medium text-brand-text/80">{step.detail}</p>
 										) : null}
 									</div>
 								</div>
@@ -218,9 +230,9 @@ export function BuilderChatPanel({
 				) : null}
 			</div>
 
-			<div className="border-t border-black/5 bg-white px-4 py-4 sm:px-5">
+			<div className="border-t border-brand/10 bg-white px-4 py-4 sm:px-5">
 				<div className="mb-3 flex items-center justify-between gap-3">
-					<p className="text-sm font-medium text-slate-700">{statusLine}</p>
+					<p className="text-sm font-medium text-brand-text">{statusLine}</p>
 					<StatusChip requestState={requestState} statusMessage={statusMessage} />
 				</div>
 				<form
@@ -228,7 +240,7 @@ export function BuilderChatPanel({
 						event.preventDefault();
 						onSubmit();
 					}}
-					className="rounded-[28px] border border-black/10 bg-[#f8f8fc] p-3 shadow-sm"
+					className="rounded-[28px] border border-brand/15 bg-brand-light/12 p-3 shadow-sm"
 				>
 					<Textarea
 						ref={composerRef}
@@ -239,32 +251,38 @@ export function BuilderChatPanel({
 						disabled={isRunning}
 						className="min-h-[120px] resize-none rounded-2xl border-0 bg-transparent px-1 text-sm shadow-none focus-visible:ring-0"
 					/>
-					<div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-black/5 pt-3">
-						<div className="flex flex-wrap items-center gap-2 text-sm text-slate-500">
+					<div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-brand/10 pt-3">
+						<div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
 							<Button
 								type="button"
 								variant="ghost"
 								size="icon"
-								className="rounded-full"
+								className="rounded-full text-brand-text hover:bg-brand-light/35 hover:text-brand-text"
 								onClick={onNormalizeSiteUrl}
 							>
 								<Paperclip className="size-4" />
 							</Button>
-							<span className="inline-flex items-center gap-2 rounded-full bg-white px-3 py-1.5 text-xs font-medium text-slate-600 shadow-sm">
+							<span className="inline-flex items-center gap-2 rounded-full border border-brand/10 bg-white px-3 py-1.5 text-xs font-medium text-brand-text shadow-sm">
 								<Target className="size-3.5" />
 								Auto
 							</span>
-							<span className="text-xs font-medium uppercase tracking-[0.14em] text-slate-400">
+							<span className="text-xs font-medium uppercase tracking-[0.14em] text-brand-text/50">
 								Build
 							</span>
-							<Button type="button" variant="ghost" size="icon" className="rounded-full" disabled>
+							<Button
+								type="button"
+								variant="ghost"
+								size="icon"
+								className="rounded-full text-brand-text"
+								disabled
+							>
 								<Mic className="size-4" />
 							</Button>
 						</div>
 						<Button
 							type="submit"
 							disabled={isRunning}
-							className="size-11 rounded-2xl bg-slate-950 text-white hover:bg-slate-800"
+							className="size-11 rounded-2xl bg-primary text-primary-foreground hover:bg-primary/90"
 							aria-label={messages.length > 0 ? "Update tool" : "Build tool"}
 						>
 							{isRunning ? (
@@ -289,7 +307,7 @@ function StatusChip({
 }) {
 	if (requestState !== "idle") {
 		return (
-			<span className="inline-flex items-center gap-2 rounded-full bg-[#f4f0ff] px-3 py-1 text-xs font-medium text-[#4c35bb]">
+			<span className="inline-flex items-center gap-2 rounded-full bg-brand-light/45 px-3 py-1 text-xs font-medium text-brand-text">
 				<LoaderCircle className="size-3.5 animate-spin" />
 				Live
 			</span>
@@ -321,6 +339,6 @@ function StatusChip({
 function StepIcon({ status }: { status: BuilderActivityStep["status"] }) {
 	if (status === "complete") return <CheckCircle2 className="mt-0.5 size-4 text-emerald-600" />;
 	if (status === "active")
-		return <LoaderCircle className="mt-0.5 size-4 animate-spin text-[#4c35bb]" />;
-	return <div className="mt-1 size-3 rounded-full bg-slate-300" />;
+		return <LoaderCircle className="mt-0.5 size-4 animate-spin text-brand" />;
+	return <div className="mt-1 size-3 rounded-full bg-brand/25" />;
 }

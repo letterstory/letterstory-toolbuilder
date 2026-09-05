@@ -371,7 +371,7 @@ export function ToolBuilderWorkspace() {
 	}, [activeRun, activitySteps, telemetry]);
 
 	return (
-		<div className="overflow-hidden rounded-[34px] border border-black/5 bg-white shadow-[0_24px_80px_-40px_rgba(15,23,42,0.35)]">
+		<div className="overflow-hidden rounded-[34px] border border-brand/10 bg-white shadow-[0_24px_80px_-40px_rgba(15,23,42,0.35)]">
 			<div data-builder-topbar>
 				<BuilderTopbar
 					activeView={activeView}
@@ -408,7 +408,7 @@ export function ToolBuilderWorkspace() {
 					onSubmit={handleSubmit}
 					composerRef={composerRef}
 				/>
-				<div className="border-t border-black/5 bg-[#f7f5ff] p-4 lg:border-t-0 lg:border-l lg:p-5">
+				<div className="border-t border-brand/10 bg-brand-light/15 p-4 lg:border-t-0 lg:border-l lg:p-5">
 					{activeView === "preview" ? (
 						<BuilderPreviewCanvas
 							activeTool={activeTool}
