@@ -1,7 +1,7 @@
-// Resolves a brand's logo candidates (raw URLs pulled from Firecrawl) into a
+// Resolves a brand's logo candidates (raw URLs pulled from Context.dev) into a
 // single normalized, self-contained PNG data URI.
 //
-// Why: Firecrawl's logo pick is often an app-icon, a favicon ICO, a wide
+// Why: Context.dev's logo pick is often an app-icon, a favicon ICO, a wide
 // og:image banner, or an SVG that renders inconsistently depending on the
 // consumer. This mirrors the canonical-logo logic already proven out in the
 // main Letterstory app's rehost-logo.ts, minus the storage-bucket upload step
@@ -70,7 +70,7 @@ export async function resolveCanonicalLogo(
 	}
 
 	warnings.push(
-		"No logo candidate could be normalized into a canonical asset; falling back to the raw Firecrawl selection."
+		"No logo candidate could be normalized into a canonical asset; falling back to the raw Context.dev selection."
 	);
 	return { dataUri: null, sourceUrl: null, warnings };
 }
@@ -79,12 +79,18 @@ export async function resolveCanonicalLogo(
  * Download one candidate and normalize it to PNG bytes, or null if unusable.
  * Exported for unit testing; product code goes through resolveCanonicalLogo.
  */
-export async function downloadAsLogoPng(url: string, warnings: string[]): Promise<Uint8Array | null> {
+export async function downloadAsLogoPng(
+	url: string,
+	warnings: string[]
+): Promise<Uint8Array | null> {
 	const safety = await isSafeHttpsUrl(url);
 	if (!safety.ok) return null;
 
 	try {
-		const res = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS), redirect: "follow" });
+		const res = await fetch(url, {
+			signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+			redirect: "follow",
+		});
 		if (!res.ok) return null;
 		const mime = (res.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
 		const buffer = Buffer.from(await res.arrayBuffer());
@@ -101,8 +107,13 @@ export async function downloadAsLogoPng(url: string, warnings: string[]): Promis
 		// Favicon ICOs: sharp can't decode the container, but the frames inside
 		// are PNGs or plain 32bpp BMPs — pull the largest one so favicon-only
 		// sites still get a mark.
-		const isIco = mime === "image/x-icon" || mime === "image/vnd.microsoft.icon" || /\.ico(\?|$)/i.test(url);
-		const decodable = isIco ? await decodeIcoToPng(buffer) : RASTER_LOGO_MIMES.has(mime) ? buffer : null;
+		const isIco =
+			mime === "image/x-icon" || mime === "image/vnd.microsoft.icon" || /\.ico(\?|$)/i.test(url);
+		const decodable = isIco
+			? await decodeIcoToPng(buffer)
+			: RASTER_LOGO_MIMES.has(mime)
+				? buffer
+				: null;
 		if (!decodable) return null;
 
 		const image = sharp(decodable);
@@ -111,7 +122,9 @@ export async function downloadAsLogoPng(url: string, warnings: string[]): Promis
 		const height = meta.height ?? 0;
 		if (width < MIN_LOGO_EDGE_PX || height < MIN_LOGO_EDGE_PX) return null;
 		if (looksLikeBannerNotLogo(width, height)) {
-			warnings.push("A wide banner image was skipped as the logo: it looked like a social/og image.");
+			warnings.push(
+				"A wide banner image was skipped as the logo: it looked like a social/og image."
+			);
 			return null;
 		}
 
@@ -161,7 +174,11 @@ async function decodeIcoToPng(ico: Buffer): Promise<Buffer | null> {
 			if (frame.subarray(0, 4).equals(PNG_MAGIC)) return Buffer.from(frame);
 
 			// BMP frame: BITMAPINFOHEADER with doubled height (XOR pixels + AND mask).
-			if (frame.byteLength < BITMAPINFOHEADER_SIZE || frame.readUInt32LE(0) !== BITMAPINFOHEADER_SIZE) continue;
+			if (
+				frame.byteLength < BITMAPINFOHEADER_SIZE ||
+				frame.readUInt32LE(0) !== BITMAPINFOHEADER_SIZE
+			)
+				continue;
 			const width = frame.readInt32LE(4);
 			const height = frame.readInt32LE(8) / 2;
 			const bitCount = frame.readUInt16LE(14);

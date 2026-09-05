@@ -11,7 +11,7 @@ import {
 	compareBrandAgainstCompetitors,
 	isBrandIngestionConfigured,
 	normalizeBrandSiteUrl,
-	parseFirecrawlBranding,
+	parseContextDevBranding,
 	pullBrandProfile,
 	validateBrandFidelity,
 } from "../../src/lib/brand";
@@ -20,8 +20,8 @@ const originalFetch = global.fetch;
 const originalEnv = {
 	ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
 	ANTHROPIC_MODEL: process.env.ANTHROPIC_MODEL,
-	FIRECRAWL_API_KEY: process.env.FIRECRAWL_API_KEY,
-	FIRECRAWL_BASE_URL: process.env.FIRECRAWL_BASE_URL,
+	CONTEXT_DEV_API_KEY: process.env.CONTEXT_DEV_API_KEY,
+	CONTEXT_DEV_BASE_URL: process.env.CONTEXT_DEV_BASE_URL,
 };
 
 describe("brand service", () => {
@@ -50,97 +50,94 @@ describe("brand service", () => {
 		expect(normalizeBrandSiteUrl("not a url")).toBeNull();
 	});
 
-	it("parses branding payloads into a normalized schema with meaningful subfields", () => {
-		const parsed = parseFirecrawlBranding(
-			{
-				brandName: "Example",
-				colorScheme: "dark",
-				confidence: { overall: 0.91 },
-				logoUrl: "https://cdn.example.com/logo.svg",
-				logos: [
-					"https://cdn.example.com/logo.svg",
-					{ url: "https://cdn.example.com/logo-mark.svg" },
-				],
-				colors: {
-					primary: "#635BFF",
-					background: "#0A2540",
-					ignored: 42,
-				},
-				fonts: ["Inter", "Sohne", "Inter"],
-				typography: {
-					primaryFont: "Inter",
-					secondaryFont: "Sohne",
-					fontFamilies: {
-						body: "Inter",
-						headings: "Sohne",
-						heading: "Sohne",
-					},
-					fontStacks: {
-						heading: ["Sohne", "sans-serif"],
-						body: ["Inter", "sans-serif"],
-					},
-					fontSizes: {
-						h1: "48px",
-						body: "16px",
-					},
-				},
-				spacing: {
-					baseUnit: 8,
-					borderRadius: "12px",
-				},
-				components: {
-					buttonPrimary: {
-						background: "#635BFF",
-						textColor: "#FFFFFF",
-						borderRadius: "12px",
-					},
-					card: {
-						background: "#0A2540",
-						shadow: "0 1px 2px rgba(0,0,0,.1)",
-					},
-				},
-				images: {
-					favicon: "https://cdn.example.com/favicon.ico",
-					ogImage: "https://cdn.example.com/og.png",
-					logoAlt: "Example logo",
-					logoHref: "/",
-				},
-				personality: {
-					tone: "precise",
-					energy: "medium",
-					targetAudience: "engineering teams",
-				},
-				designSystem: {
-					framework: "custom",
-					componentLibrary: "",
-				},
-				__llm_logo_reasoning: {
-					reasoning: "Selected the header wordmark.",
-					confidence: 0.88,
+	it("parses Context.dev payloads into the existing BrandProfile shape", () => {
+		const parsed = parseContextDevBranding({
+			brandResponse: {
+				brand: {
+					title: "Example",
+					description: "Payments infrastructure for software companies.",
+					slogan: "Reliable, developer-first",
+					colors: [
+						{ hex: "#635BFF", source: "site" },
+						{ hex: "#0A2540", source: "site" },
+						{ hex: "#00D4FF", source: "logo" },
+					],
+					logos: [
+						{ url: "https://cdn.example.com/icon.svg", type: "icon" },
+						{ url: "https://cdn.example.com/logo.svg", type: "logo" },
+					],
 				},
 			},
-			{
-				title: "Example",
-				description: "A calm, highly technical product site.",
-				statusCode: 200,
-			}
-		);
+			styleguideResponse: {
+				styleguide: {
+					mode: "dark",
+					colors: {
+						accent: "#635BFF",
+						background: "#0A2540",
+						text: "#FFFFFF",
+					},
+					typography: {
+						headings: {
+							h1: { fontFamily: "__Sohne_123abc", fontSize: "48px", fontFallbacks: ["sans-serif"] },
+						},
+						p: { fontFamily: "__Inter_456def", fontSize: "16px", fontFallbacks: ["system-ui"] },
+					},
+					elementSpacing: {
+						stack: "8px",
+						section: "24px",
+					},
+					components: {
+						button: {
+							primary: {
+								backgroundColor: "#635BFF",
+								color: "#FFFFFF",
+								borderRadius: "12px",
+								boxShadow: "0 2px 8px rgba(0,0,0,.2)",
+							},
+							secondary: {
+								backgroundColor: "#00D4FF",
+								color: "#0A2540",
+								borderRadius: "999px",
+							},
+						},
+						card: {
+							backgroundColor: "#102A4C",
+							borderRadius: "16px",
+						},
+					},
+				},
+			},
+			fontsResponse: {
+				fonts: [
+					{ font: "__Inter_456def", percent_words: 0.82 },
+					{ font: "__Sohne_123abc", percent_words: 0.18 },
+				],
+			},
+			markdownResponse: {
+				url: "https://example.com",
+				metadata: {
+					title: "Example",
+					description: "A calm, highly technical product site.",
+				},
+			},
+		});
 
 		expect(parsed.brandName).toBe("Example");
-		expect(parsed.confidence).toBe(0.91);
+		expect(parsed.colorScheme).toBe("dark");
 		expect(parsed.primaryLogoUrl).toBe("https://cdn.example.com/logo.svg");
 		expect(parsed.logoUrls).toEqual([
+			"https://cdn.example.com/icon.svg",
 			"https://cdn.example.com/logo.svg",
-			"https://cdn.example.com/logo-mark.svg",
 		]);
-		expect(parsed.colors).toEqual({
+		expect(parsed.colors).toMatchObject({
 			primary: "#635BFF",
 			background: "#0A2540",
+			text: "#FFFFFF",
 		});
 		expect(parsed.fonts).toEqual(["Inter", "Sohne"]);
 		expect(parsed.typography).toMatchObject({
-			primaryFont: "Inter",
-			secondaryFont: "Sohne",
+			primaryFont: "Sohne",
+			secondaryFont: "Inter",
 			headingFont: "Sohne",
 			bodyFont: "Inter",
 			hierarchy: "display-led",
@@ -152,7 +149,7 @@ describe("brand service", () => {
 		expect(parsed.spacing).toEqual({
 			baseUnit: 8,
 			borderRadius: "12px",
-			radiusScale: ["12px"],
+			radiusScale: ["12px", "999px"],
 			rhythm: "balanced",
 		});
 		expect(parsed.components.primaryButton).toMatchObject({
@@ -161,40 +158,31 @@ describe("brand service", () => {
 			borderRadius: "12px",
 		});
 		expect(parsed.components.additional.card).toMatchObject({
-			background: "#0A2540",
-			shadow: "0 1px 2px rgba(0,0,0,.1)",
+			background: "#102A4C",
+			borderRadius: "16px",
 		});
-		expect(parsed.images).toMatchObject({
-			faviconUrl: "https://cdn.example.com/favicon.ico",
-			ogImageUrl: "https://cdn.example.com/og.png",
-			logo: {
-				alt: "Example logo",
-				href: "/",
-				selectionReasoning: "Selected the header wordmark.",
-				selectionConfidence: 0.88,
-			},
+		expect(parsed.images.logo).toMatchObject({
+			url: "https://cdn.example.com/logo.svg",
+			selectionReasoning: "Selected the first full logo asset returned by Context.dev.",
 		});
 		expect(parsed.personality).toMatchObject({
-			tone: "precise",
-			toneOfVoice: "precise",
-			energy: "medium",
-			targetAudience: "engineering teams",
-		});
-		expect(parsed.personality.descriptors).toContain("precise");
-		expect(parsed.designSystem).toMatchObject({
-			framework: "custom",
-			componentLibrary: null,
-			implementationStyle: "custom",
+			tone: "Reliable, developer-first",
+			toneOfVoice: "Reliable, developer-first",
 		});
 		expect(parsed.metadata).toEqual({
 			title: "Example",
 			description: "A calm, highly technical product site.",
-			statusCode: 200,
+		});
+		expect(parsed.raw).toMatchObject({
+			contextBrand: expect.any(Object),
+			contextStyleguide: expect.any(Object),
+			contextFonts: expect.any(Object),
+			contextMarkdown: expect.any(Object),
 		});
 	});
 
-	it("rejects unsafe urls before calling Firecrawl", async () => {
-		process.env.FIRECRAWL_API_KEY = "configured-key";
+	it("rejects unsafe urls before calling Context.dev", async () => {
+		process.env.CONTEXT_DEV_API_KEY = "configured-key";
 		isSafeHttpsUrlMock.mockResolvedValue({ ok: false, reason: "blocked ip" });
 		const fetchSpy = vi.fn();
 		global.fetch = fetchSpy as typeof fetch;
@@ -206,123 +194,152 @@ describe("brand service", () => {
 	});
 
 	it("gates live extraction on config presence", async () => {
-		delete process.env.FIRECRAWL_API_KEY;
+		delete process.env.CONTEXT_DEV_API_KEY;
 
 		expect(isBrandIngestionConfigured()).toBe(false);
 		await expect(pullBrandProfile("https://example.com")).rejects.toThrow(
-			"Brand extraction requires Firecrawl (FIRECRAWL_API_KEY is unset)"
+			"Brand extraction requires Context.dev (CONTEXT_DEV_API_KEY is unset)"
 		);
 	});
 
-	it("pulls and parses brand profiles from Firecrawl", async () => {
-		process.env.FIRECRAWL_API_KEY = "configured-key";
-		process.env.FIRECRAWL_BASE_URL = "https://api.firecrawl.dev";
-		global.fetch = vi.fn().mockResolvedValue({
-			ok: true,
-			status: 200,
-			json: async () => ({
-				success: true,
-				data: {
-					branding: {
-						brandName: "Stripe",
-						confidence: { overall: 0.93 },
-						logo: "https://cdn.stripe.com/logo.svg",
-						colors: {
-							primary: "#635BFF",
-							secondary: "#0A2540",
+	it("pulls and parses brand profiles from Context.dev", async () => {
+		process.env.CONTEXT_DEV_API_KEY = "configured-key";
+		process.env.CONTEXT_DEV_BASE_URL = "https://api.context.dev/v1";
+		global.fetch = vi
+			.fn()
+			.mockResolvedValueOnce(
+				new Response(
+					JSON.stringify({
+						brand: {
+							title: "Stripe",
+							description: "Financial infrastructure for the internet.",
+							colors: [
+								{ hex: "#635BFF", source: "site" },
+								{ hex: "#0A2540", source: "site" },
+							],
+							logos: [{ url: "https://cdn.stripe.com/logo.svg", type: "logo" }],
 						},
-						fonts: [{ family: "Inter", role: "body" }],
-						personality: {
-							tone: "precise",
-						},
-						designSystem: {
-							layout: "grid",
-							framework: "custom",
-						},
-						typography: {
-							fontSizes: {
-								body: "16px",
+					}),
+					{ status: 200 }
+				)
+			)
+			.mockResolvedValueOnce(
+				new Response(
+					JSON.stringify({
+						styleguide: {
+							mode: "light",
+							colors: { accent: "#635BFF", background: "#FFFFFF", text: "#0A2540" },
+							typography: {
+								headings: { h1: { fontFamily: "Sohne", fontSize: "48px" } },
+								p: { fontFamily: "Inter", fontSize: "16px" },
 							},
+							elementSpacing: { stack: "8px" },
 						},
-					},
-					metadata: {
-						title: "Stripe | Financial Infrastructure",
-						statusCode: 200,
-					},
-				},
-			}),
-		}) as typeof fetch;
+					}),
+					{ status: 200 }
+				)
+			)
+			.mockResolvedValueOnce(
+				new Response(JSON.stringify({ fonts: [{ font: "Inter", percent_words: 0.8 }] }), {
+					status: 200,
+				})
+			)
+			.mockResolvedValueOnce(
+				new Response(
+					JSON.stringify({
+						url: "https://stripe.com",
+						metadata: {
+							title: "Stripe | Financial Infrastructure",
+							description: "Financial infrastructure for the internet.",
+						},
+					}),
+					{ status: 200 }
+				)
+			)
+			.mockResolvedValueOnce(
+				new Response(
+					"<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'><rect width='10' height='10' fill='#635BFF'/></svg>",
+					{
+						status: 200,
+						headers: { "Content-Type": "image/svg+xml" },
+					}
+				)
+			) as typeof fetch;
 
 		const profile = await pullBrandProfile("stripe.com");
 
 		expect(isSafeHttpsUrlMock).toHaveBeenCalledWith("https://stripe.com");
-		const [requestUrl, requestOptions] = vi.mocked(global.fetch).mock.calls[0] ?? [];
-		expect(requestUrl).toBe("https://api.firecrawl.dev/v2/scrape");
-		expect(requestOptions?.method).toBe("POST");
-		expect(
-			(requestOptions as { headers?: Record<string, string> } | undefined)?.headers?.Authorization
-		).toContain("configured-key");
+		const calls = vi.mocked(global.fetch).mock.calls;
+		expect(String(calls[0]?.[0])).toBe("https://api.context.dev/v1/brand/retrieve");
+		expect(String(calls[1]?.[0])).toContain("/web/styleguide?domain=stripe.com");
+		expect(String(calls[2]?.[0])).toContain("/web/fonts?domain=stripe.com");
+		expect(String(calls[3]?.[0])).toContain("/web/scrape/markdown?url=https%3A%2F%2Fstripe.com");
 		expect(profile).toMatchObject({
 			url: "https://stripe.com",
-			source: "firecrawl",
+			source: "context.dev",
 			brandName: "Stripe",
-			confidence: 0.93,
 			primaryLogoUrl: "https://cdn.stripe.com/logo.svg",
 			colors: {
 				primary: "#635BFF",
-				secondary: "#0A2540",
+				background: "#FFFFFF",
+				text: "#0A2540",
 			},
-			fonts: ["Inter"],
-			personality: {
-				tone: "precise",
-				toneOfVoice: "precise",
-			},
-			designSystem: {
-				framework: "custom",
-			},
+			fonts: ["Inter", "Sohne"],
 			metadata: {
 				title: "Stripe | Financial Infrastructure",
-				statusCode: 200,
+				description: "Financial infrastructure for the internet.",
 			},
 		});
+		expect(profile.images.logo.canonicalDataUri).toMatch(/^data:image\/png;base64,/);
+		expect(profile.images.logo.canonicalSourceUrl).toBe("https://cdn.stripe.com/logo.svg");
 	});
 
-	it("resolves a canonical normalized logo alongside the raw Firecrawl pick", async () => {
-		process.env.FIRECRAWL_API_KEY = "configured-key";
-		process.env.FIRECRAWL_BASE_URL = "https://api.firecrawl.dev";
+	it("resolves a canonical normalized logo alongside the raw Context.dev pick", async () => {
+		process.env.CONTEXT_DEV_API_KEY = "configured-key";
+		process.env.CONTEXT_DEV_BASE_URL = "https://api.context.dev/v1";
 
 		const logoPng = await sharp({
-			create: { width: 256, height: 256, channels: 4, background: { r: 10, g: 20, b: 200, alpha: 1 } },
+			create: {
+				width: 256,
+				height: 256,
+				channels: 4,
+				background: { r: 10, g: 20, b: 200, alpha: 1 },
+			},
 		})
 			.png()
 			.toBuffer();
 
 		global.fetch = vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
 			const url = String(input);
-			if (url.includes("cdn.stripe.com/logo.png")) {
-				return {
-					ok: true,
-					headers: { get: (name: string) => (name.toLowerCase() === "content-type" ? "image/png" : null) },
-					arrayBuffer: async () => logoPng.buffer.slice(logoPng.byteOffset, logoPng.byteOffset + logoPng.byteLength),
-				};
+			if (url === "https://cdn.stripe.com/logo.png") {
+				return new Response(logoPng, {
+					status: 200,
+					headers: { "Content-Type": "image/png" },
+				});
 			}
-			return {
-				ok: true,
-				status: 200,
-				json: async () => ({
-					success: true,
-					data: {
-						branding: {
-							brandName: "Stripe",
-							confidence: { overall: 0.93 },
-							logo: "https://cdn.stripe.com/logo.png",
-							colors: { primary: "#635BFF" },
-							fonts: [{ family: "Inter", role: "body" }],
+			if (url.includes("/brand/retrieve")) {
+				return new Response(
+					JSON.stringify({
+						brand: {
+							title: "Stripe",
+							colors: [{ hex: "#635BFF", source: "site" }],
+							logos: [{ url: "https://cdn.stripe.com/logo.png", type: "logo" }],
 						},
-						metadata: { title: "Stripe", statusCode: 200 },
-					},
-				}),
-			};
+					}),
+					{ status: 200 }
+				);
+			}
+			if (url.includes("/web/styleguide")) {
+				return new Response(JSON.stringify({ styleguide: { colors: { accent: "#635BFF" } } }), {
+					status: 200,
+				});
+			}
+			if (url.includes("/web/fonts")) {
+				return new Response(JSON.stringify({ fonts: [{ font: "Inter", percent_words: 1 }] }), {
+					status: 200,
+				});
+			}
+			return new Response(JSON.stringify({ metadata: { title: "Stripe" } }), { status: 200 });
 		}) as typeof fetch;
 
 		const profile = await pullBrandProfile("stripe.com");
@@ -330,12 +347,11 @@ describe("brand service", () => {
 		expect(profile.images.logo.canonicalSourceUrl).toBe("https://cdn.stripe.com/logo.png");
 		expect(profile.images.logo.canonicalDataUri).toMatch(/^data:image\/png;base64,/);
 		expect(profile.images.logo.canonicalWarnings).toEqual([]);
-		// Raw Firecrawl selection stays untouched regardless of the canonical pass.
 		expect(profile.images.logo.url).toBe("https://cdn.stripe.com/logo.png");
 	});
 
-	it("validates brand fidelity with Firecrawl screenshots and Anthropic", async () => {
-		process.env.FIRECRAWL_API_KEY = "configured-key";
+	it("validates brand fidelity with Context.dev markdown and Anthropic", async () => {
+		process.env.CONTEXT_DEV_API_KEY = "configured-key";
 		process.env.ANTHROPIC_API_KEY = "configured-key";
 		process.env.ANTHROPIC_MODEL = "claude-sonnet-4-6";
 
@@ -345,58 +361,60 @@ describe("brand service", () => {
 		};
 		const fetchMock = vi
 			.fn()
-			.mockResolvedValueOnce({
-				ok: true,
-				status: 200,
-				json: async () => ({
-					success: true,
-					data: {
-						screenshot: "https://firecrawl.dev/screenshot.png",
+			.mockResolvedValueOnce(
+				new Response(
+					JSON.stringify({
+						url: "https://stripe.com",
 						markdown: "# Stripe\n\nPayments infrastructure for the internet.",
-					},
-				}),
-			})
-			.mockResolvedValueOnce({
-				ok: true,
-				status: 200,
-				json: async () => ({
-					content: [
-						{
-							type: "text",
-							text: JSON.stringify({
-								status: "warn",
-								similarityScore: 71,
-								confidence: "high",
-								summary:
-									"The extracted profile captures Stripe's palette and typography, but misses some hero gradients and the primary wordmark treatment.",
-								confirmedSignals: ["Sohne-led typography", "periwinkle primary CTA"],
-								gaps: [
-									{
-										field: "logo",
-										severity: "high",
-										issue: "Selected logo is a data URI rather than a durable wordmark asset.",
-										evidence: "Header screenshot shows a navy wordmark, but the extracted asset is inline SVG.",
-										recommendation: "Resolve and store a reusable canonical logo URL or vector asset.",
+					}),
+					{ status: 200 }
+				)
+			)
+			.mockResolvedValueOnce(
+				new Response(
+					JSON.stringify({
+						content: [
+							{
+								type: "text",
+								text: JSON.stringify({
+									status: "warn",
+									similarityScore: 71,
+									confidence: "high",
+									summary:
+										"The extracted profile captures Stripe's palette and typography, but misses some hero gradients and the primary wordmark treatment.",
+									confirmedSignals: ["Sohne-led typography", "periwinkle primary CTA"],
+									gaps: [
+										{
+											field: "logo",
+											severity: "high",
+											issue: "Selected logo is missing the primary wordmark treatment.",
+											evidence:
+												"Homepage copy references Stripe branding but the stored logo is too generic.",
+											recommendation:
+												"Prefer the full wordmark asset when multiple logos are available.",
+										},
+									],
+									derivedSignals: {
+										toneOfVoice: "confident, infrastructure-first",
+										imageryStyle: "soft product gradients with crisp dashboard illustrations",
+										typeHierarchy: "display-led",
+										spacingRhythm: "balanced",
+										distinctiveTraits: ["gradient hero backdrops", "navy-on-lilac contrast"],
 									},
-								],
-								derivedSignals: {
-									toneOfVoice: "confident, infrastructure-first",
-									imageryStyle: "soft product gradients with crisp dashboard illustrations",
-									typeHierarchy: "display-led",
-									spacingRhythm: "balanced",
-									distinctiveTraits: ["gradient hero backdrops", "navy-on-lilac contrast"],
-								},
-							}),
-						},
-					],
-				}),
-			});
+								}),
+							},
+						],
+					}),
+					{ status: 200 }
+				)
+			);
 		global.fetch = fetchMock as typeof fetch;
 
 		const result = await validateBrandFidelity(profile, "stripe.com");
 
 		expect(result.status).toBe("success");
 		if (result.status !== "success") return;
+		expect(result.referenceUrl).toBe("https://stripe.com");
 		expect(result.assessment).toMatchObject({
 			status: "warn",
 			similarityScore: 71,
@@ -406,9 +424,7 @@ describe("brand service", () => {
 				imageryStyle: "soft product gradients with crisp dashboard illustrations",
 			},
 		});
-		expect(result.enrichedProfile.personality.toneOfVoice).toBe(
-			"confident, infrastructure-first"
-		);
+		expect(result.enrichedProfile.personality.toneOfVoice).toBe("confident, infrastructure-first");
 		expect(result.enrichedProfile.images.imageryStyle).toBe(
 			"soft product gradients with crisp dashboard illustrations"
 		);
@@ -425,77 +441,125 @@ describe("brand service", () => {
 		);
 	});
 
-	it("returns a screenshot_unavailable error when Firecrawl has no visual output", async () => {
-		process.env.FIRECRAWL_API_KEY = "configured-key";
+	it("returns a reference_unavailable error when Context.dev has no usable page content", async () => {
+		process.env.CONTEXT_DEV_API_KEY = "configured-key";
 		process.env.ANTHROPIC_API_KEY = "configured-key";
-		global.fetch = vi.fn().mockResolvedValue({
-			ok: true,
-			status: 200,
-			json: async () => ({
-				success: true,
-				data: { markdown: "# Example" },
-			}),
-		}) as typeof fetch;
+		global.fetch = vi
+			.fn()
+			.mockResolvedValue(
+				new Response(JSON.stringify({ url: "https://example.com", metadata: {} }), { status: 200 })
+			) as typeof fetch;
 
-		const result = await validateBrandFidelity(await pullProfileFixture(), "https://example.com");
+		const result = await validateBrandFidelity(
+			{
+				...(await pullProfileFixture()),
+				metadata: {},
+			},
+			"https://example.com"
+		);
 
 		expect(result).toMatchObject({
 			status: "error",
-			code: "screenshot_unavailable",
+			code: "reference_unavailable",
 		});
 	});
 
 	it("compares a primary brand against explicit competitors", async () => {
-		process.env.FIRECRAWL_API_KEY = "configured-key";
-		const primaryProfile = parseFirecrawlBranding(
-			{
-				brandName: "Stripe",
-				colors: { primary: "#635BFF", background: "#FFFFFF", textPrimary: "#0A2540" },
-				fonts: ["Sohne"],
-				personality: { tone: "professional", targetAudience: "developers" },
-				typography: { fontSizes: { h1: "48px", body: "16px" } },
-				spacing: { baseUnit: 8 },
+		process.env.CONTEXT_DEV_API_KEY = "configured-key";
+		const primaryProfile = parseContextDevBranding({
+			brandResponse: {
+				brand: {
+					title: "Stripe",
+					colors: [
+						{ hex: "#635BFF", source: "site" },
+						{ hex: "#0A2540", source: "site" },
+					],
+				},
 			},
-			{}
-		);
+			styleguideResponse: {
+				styleguide: {
+					colors: { accent: "#635BFF", background: "#FFFFFF", text: "#0A2540" },
+					typography: {
+						headings: { h1: { fontFamily: "Sohne", fontSize: "48px" } },
+						p: { fontFamily: "Inter", fontSize: "16px" },
+					},
+					elementSpacing: { stack: "8px" },
+				},
+			},
+			fontsResponse: { fonts: [{ font: "Sohne", percent_words: 0.7 }] },
+		});
 		const fetchMock = vi
 			.fn()
-			.mockResolvedValueOnce({
-				ok: true,
-				status: 200,
-				json: async () => ({
-					success: true,
-					data: {
-						branding: {
-							brandName: "Adyen",
-							colors: { primary: "#0ABF53", background: "#FFFFFF", textPrimary: "#00112C" },
-							fonts: ["Inter"],
-							personality: { tone: "professional", targetAudience: "enterprises" },
-							typography: { fontSizes: { h1: "52px", body: "18px" } },
-							spacing: { baseUnit: 8 },
+			.mockResolvedValueOnce(
+				new Response(
+					JSON.stringify({
+						brand: {
+							title: "Adyen",
+							colors: [
+								{ hex: "#0ABF53", source: "site" },
+								{ hex: "#00112C", source: "site" },
+							],
 						},
-						metadata: {},
-					},
-				}),
-			})
-			.mockResolvedValueOnce({
-				ok: true,
-				status: 200,
-				json: async () => ({
-					success: true,
-					data: {
-						branding: {
-							brandName: "PayPal",
-							colors: { primary: "#003087", accent: "#009CDE", background: "#FFFFFF" },
-							fonts: ["PayPalOpen", "Helvetica Neue"],
-							personality: { tone: "trustworthy", targetAudience: "consumers and merchants" },
-							typography: { fontSizes: { h1: "44px", body: "16px" } },
-							spacing: { baseUnit: 6 },
+					}),
+					{ status: 200 }
+				)
+			)
+			.mockResolvedValueOnce(
+				new Response(
+					JSON.stringify({
+						styleguide: {
+							colors: { accent: "#0ABF53", background: "#FFFFFF", text: "#00112C" },
+							typography: {
+								headings: { h1: { fontFamily: "Inter", fontSize: "52px" } },
+								p: { fontFamily: "Inter", fontSize: "18px" },
+							},
+							elementSpacing: { stack: "8px" },
 						},
-						metadata: {},
-					},
-				}),
-			});
+					}),
+					{ status: 200 }
+				)
+			)
+			.mockResolvedValueOnce(
+				new Response(JSON.stringify({ fonts: [{ font: "Inter", percent_words: 1 }] }), {
+					status: 200,
+				})
+			)
+			.mockResolvedValueOnce(new Response(JSON.stringify({ metadata: {} }), { status: 200 }))
+			.mockResolvedValueOnce(
+				new Response(
+					JSON.stringify({
+						brand: {
+							title: "PayPal",
+							colors: [
+								{ hex: "#003087", source: "site" },
+								{ hex: "#009CDE", source: "site" },
+							],
+						},
+					}),
+					{ status: 200 }
+				)
+			)
+			.mockResolvedValueOnce(
+				new Response(
+					JSON.stringify({
+						styleguide: {
+							colors: { accent: "#003087", background: "#FFFFFF", text: "#1F2937" },
+							typography: {
+								headings: { h1: { fontFamily: "PayPalOpen", fontSize: "44px" } },
+								p: { fontFamily: "Helvetica Neue", fontSize: "16px" },
+							},
+							elementSpacing: { stack: "6px" },
+						},
+					}),
+					{ status: 200 }
+				)
+			)
+			.mockResolvedValueOnce(
+				new Response(JSON.stringify({ fonts: [{ font: "PayPalOpen", percent_words: 0.7 }] }), {
+					status: 200,
+				})
+			)
+			.mockResolvedValueOnce(new Response(JSON.stringify({ metadata: {} }), { status: 200 }));
 		global.fetch = fetchMock as typeof fetch;
 
 		const result = await compareBrandAgainstCompetitors({
@@ -503,7 +567,7 @@ describe("brand service", () => {
 			primaryProfile: {
 				...primaryProfile,
 				url: "https://stripe.com",
-				source: "firecrawl",
+				source: "context.dev",
 			},
 			competitorUrls: ["adyen.com", "paypal.com"],
 		});
@@ -517,106 +581,42 @@ describe("brand service", () => {
 		});
 		expect(result.overallDistinctiveness.score).toBeGreaterThanOrEqual(0);
 		expect(result.overallDistinctiveness.score).toBeLessThanOrEqual(100);
-	});
-
-	it("layers a Claude-vision visual similarity score onto competitor comparison when Anthropic is configured", async () => {
-		process.env.FIRECRAWL_API_KEY = "configured-key";
-		process.env.ANTHROPIC_API_KEY = "configured-key";
-		const primaryProfile = parseFirecrawlBranding(
-			{
-				brandName: "Stripe",
-				colors: { primary: "#635BFF", background: "#FFFFFF" },
-				fonts: ["Sohne"],
-			},
-			{}
-		);
-		const fetchMock = vi
-			.fn()
-			// 1. competitor brand scrape (pullBrandProfile)
-			.mockResolvedValueOnce({
-				ok: true,
-				status: 200,
-				json: async () => ({
-					success: true,
-					data: {
-						branding: {
-							brandName: "Adyen",
-							colors: { primary: "#0ABF53", background: "#FFFFFF" },
-							fonts: ["Inter"],
-						},
-						metadata: {},
-					},
-				}),
-			})
-			// 2. primary screenshot fetch (fetchSiteVisualReference)
-			.mockResolvedValueOnce({
-				ok: true,
-				status: 200,
-				json: async () => ({
-					success: true,
-					data: { screenshot: "https://firecrawl.dev/primary-screenshot.png", markdown: "# Stripe" },
-				}),
-			})
-			// 3. competitor screenshot fetch (fetchSiteVisualReference)
-			.mockResolvedValueOnce({
-				ok: true,
-				status: 200,
-				json: async () => ({
-					success: true,
-					data: { screenshot: "https://firecrawl.dev/adyen-screenshot.png", markdown: "# Adyen" },
-				}),
-			})
-			// 4. Anthropic visual similarity call
-			.mockResolvedValueOnce({
-				ok: true,
-				status: 200,
-				json: async () => ({
-					content: [
-						{
-							type: "text",
-							text: JSON.stringify({
-								score: 22,
-								rationale: "Different hero layout, palette, and imagery style.",
-							}),
-						},
-					],
-				}),
-			});
-		global.fetch = fetchMock as typeof fetch;
-
-		const result = await compareBrandAgainstCompetitors({
-			primarySiteUrl: "stripe.com",
-			primaryProfile: { ...primaryProfile, url: "https://stripe.com", source: "firecrawl" },
-			competitorUrls: ["adyen.com"],
-		});
-
-		expect(result.status).toBe("success");
-		if (result.status !== "success") return;
-		expect(result.competitors[0]?.comparison.visualSimilarity).toMatchObject({
-			score: 22,
-			rationale: "Different hero layout, palette, and imagery style.",
-		});
-		expect(result.overallVisualDistinctiveness).toMatchObject({
-			score: 78,
-		});
+		expect(result.overallVisualDistinctiveness).toBeNull();
 	});
 });
 
 async function pullProfileFixture() {
 	return {
 		url: "https://example.com",
-		source: "firecrawl" as const,
-		...parseFirecrawlBranding(
-			{
-				brandName: "Example",
-				logo: "data:image/svg+xml;base64,PHN2Zz4=",
-				colors: { primary: "#635BFF", background: "#FFFFFF", textPrimary: "#0A2540" },
-				fonts: ["Sohne"],
-				personality: { tone: "professional", energy: "medium", targetAudience: "developers" },
-				typography: { fontSizes: { h1: "48px", body: "16px" } },
-				spacing: { baseUnit: 8 },
+		source: "context.dev" as const,
+		...parseContextDevBranding({
+			brandResponse: {
+				brand: {
+					title: "Example",
+					description: "Payments infrastructure for software companies.",
+					slogan: "Professional",
+					colors: [
+						{ hex: "#635BFF", source: "site" },
+						{ hex: "#FFFFFF", source: "site" },
+						{ hex: "#0A2540", source: "site" },
+					],
+					logos: [{ url: "data:image/svg+xml;base64,PHN2Zz4=", type: "logo" }],
+				},
 			},
-			{ description: "Payments infrastructure for software companies." }
-		),
+			styleguideResponse: {
+				styleguide: {
+					colors: { accent: "#635BFF", background: "#FFFFFF", text: "#0A2540" },
+					typography: {
+						headings: { h1: { fontFamily: "Sohne", fontSize: "48px" } },
+						p: { fontFamily: "Inter", fontSize: "16px" },
+					},
+					elementSpacing: { stack: "8px" },
+				},
+			},
+			fontsResponse: { fonts: [{ font: "Sohne", percent_words: 0.7 }] },
+			markdownResponse: {
+				metadata: { description: "Payments infrastructure for software companies." },
+			},
+		}),
 	};
 }

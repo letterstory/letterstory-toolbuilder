@@ -19,7 +19,7 @@ export function getPlatformScaffoldStatus(): PlatformScaffoldStatus {
 				name: "Brand ingestion",
 				state: isBrandIngestionConfigured() ? "configured" : "pending-config",
 				summary:
-					"Firecrawl-backed brand extraction is live behind env gating, with URL safety checks and a probe script for real-site validation.",
+					"Context.dev-backed brand extraction is live behind env gating, with URL safety checks and a probe script for real-site validation.",
 				nextSteps: [
 					"Run the live ingestion probe against representative customer sites.",
 					"Add follow-up validation for tone, imagery, and layout fidelity.",

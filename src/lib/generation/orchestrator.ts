@@ -4,7 +4,7 @@
 // can be hosted and embedded as an iframe on the customer's own site.
 //
 // v1 scope, matching the current product stage:
-//   - brand context comes from the existing Firecrawl ingestion pipeline
+//   - brand context comes from the existing Context.dev ingestion pipeline
 //     (optional — a tool can still be generated without a site, just without
 //     brand styling);
 //   - the tool itself is a single self-contained HTML document (inline CSS +
@@ -17,7 +17,11 @@
 
 import { envServer } from "@/lib/config/env.server";
 import { isBrandIngestionConfigured, pullBrandProfile, type BrandProfile } from "@/lib/brand";
-import { looksLikeHtmlDocument, sanitizeGeneratedHtml, type SanitizedHtml } from "@/lib/generation/sanitize";
+import {
+	looksLikeHtmlDocument,
+	sanitizeGeneratedHtml,
+	type SanitizedHtml,
+} from "@/lib/generation/sanitize";
 import {
 	getGeneratedTool,
 	saveGeneratedTool,
@@ -101,7 +105,8 @@ export interface ToolGenerationDiagnostics {
 	}>;
 }
 
-type ToolGenerationStepErrorCode = "timeout" | "upstream_4xx" | "upstream_5xx" | "empty_response" | "network";
+type ToolGenerationStepErrorCode =
+	"timeout" | "upstream_4xx" | "upstream_5xx" | "empty_response" | "network";
 
 class ToolGenerationStepError extends Error {
 	readonly code: ToolGenerationStepErrorCode;
@@ -188,7 +193,11 @@ export async function generateTool(request: ToolGenerationRequest): Promise<Tool
  * quickly" requirement) doesn't force the customer to start over or re-embed
  * anything. The previous version is kept in `history` for rollback.
  */
-async function reviseTool(toolId: string, request: ToolGenerationRequest, startedAt: number): Promise<ToolGenerationResult> {
+async function reviseTool(
+	toolId: string,
+	request: ToolGenerationRequest,
+	startedAt: number
+): Promise<ToolGenerationResult> {
 	const existing = await getGeneratedTool(toolId);
 	if (!existing) {
 		return {
@@ -200,7 +209,7 @@ async function reviseTool(toolId: string, request: ToolGenerationRequest, starte
 
 	const normalizedSiteUrl = request.siteUrl.trim();
 	// Re-pulling brand context on every small wording tweak would mean an
-	// extra Firecrawl + Claude round trip per revision for no benefit — only
+	// extra Context.dev + Claude round trip per revision for no benefit — only
 	// re-resolve it when the customer actually points at a different site.
 	let brandSnapshot = existing.brandSnapshot;
 	let brandWarning: string | null = null;
@@ -293,7 +302,14 @@ async function buildToolContent(opts: {
 	brandWarning: string | null;
 	existingHtml?: string;
 	requestStartedAt: number;
-}): Promise<BuildToolContentResult | { status: "error"; message: string; diagnostics: Omit<ToolGenerationDiagnostics, "totalMs" | "brandContextMs"> }> {
+}): Promise<
+	| BuildToolContentResult
+	| {
+			status: "error";
+			message: string;
+			diagnostics: Omit<ToolGenerationDiagnostics, "totalMs" | "brandContextMs">;
+	  }
+> {
 	const buildStartedAt = Date.now();
 	const htmlAttempts: ToolGenerationDiagnostics["htmlAttempts"] = [];
 	logGenerationStep("build_started", {
@@ -444,7 +460,9 @@ async function buildToolContent(opts: {
 			ranBrandFidelity: Boolean(opts.brandSnapshot),
 		});
 		if (!copy) {
-			warnings.push("Could not generate supporting headline/copy for this tool — add your own before embedding.");
+			warnings.push(
+				"Could not generate supporting headline/copy for this tool — add your own before embedding."
+			);
 		}
 
 		if (opts.brandSnapshot) {
@@ -460,7 +478,9 @@ async function buildToolContent(opts: {
 		}
 	} else {
 		advisorySkipped = true;
-		warnings.push("Supporting copy and brand QA were skipped to return the generated tool within the live request budget.");
+		warnings.push(
+			"Supporting copy and brand QA were skipped to return the generated tool within the live request budget."
+		);
 		logGenerationStep("advisory_phase_skipped", {
 			remainingBudgetMs,
 			requiredBudgetMs: ADVISORY_TIMEOUT_MS + MIN_ADVISORY_BUDGET_MS,
@@ -506,7 +526,8 @@ async function resolveBrandContext(
 	if (!isBrandIngestionConfigured()) {
 		return {
 			brandProfile: null,
-			brandWarning: "Firecrawl isn't configured, so this tool was generated without brand context.",
+			brandWarning:
+				"Context.dev isn't configured, so this tool was generated without brand context.",
 		};
 	}
 
@@ -568,13 +589,23 @@ async function requestToolHtml(opts: {
 		"- If brand tokens are provided below, use them for the visual identity: primary/accent colors, font family names (assume standard web-safe fallbacks after the named font), and the logo image only if an inline logo asset is explicitly provided. Do not fabricate a different brand.",
 		"- Keep the whole document self-sufficient and safe: no forms that submit to external endpoints, no fetch()/XMLHttpRequest calls to external hosts.",
 		"- Include a small, unobtrusive 'Powered by Letterstory' text credit near the bottom.",
-		...(isRevision ? ["- Return the ENTIRE updated document (not a diff/patch), following all the requirements above."] : []),
+		...(isRevision
+			? [
+					"- Return the ENTIRE updated document (not a diff/patch), following all the requirements above.",
+				]
+			: []),
 	].join("\n");
 
 	const userContent = [
 		`Tool name: ${opts.projectName || "Untitled tool"}`,
 		...(isRevision
-			? ["", "Current tool HTML (this is what you are revising):", opts.existingHtml as string, "", `Revision instructions: ${opts.prompt}`]
+			? [
+					"",
+					"Current tool HTML (this is what you are revising):",
+					opts.existingHtml as string,
+					"",
+					`Revision instructions: ${opts.prompt}`,
+				]
 			: [`Tool request: ${opts.prompt}`]),
 		"",
 		"Brand context:",
@@ -638,7 +669,10 @@ async function requestToolHtml(opts: {
 		.trim();
 
 	if (!text) {
-		throw new ToolGenerationStepError("Anthropic generation returned no text response.", "empty_response");
+		throw new ToolGenerationStepError(
+			"Anthropic generation returned no text response.",
+			"empty_response"
+		);
 	}
 
 	return text;
@@ -712,9 +746,11 @@ async function requestSupportingCopy(opts: {
 		? `Brand: ${opts.brandSnapshot.brandName}. Match their tone — professional and on-brand, not generic.`
 		: "No specific brand — keep the tone clean and professional.";
 
-	const userContent = [`Tool name: ${opts.projectName || "Untitled tool"}`, `Tool description: ${opts.prompt}`, brandContext].join(
-		"\n"
-	);
+	const userContent = [
+		`Tool name: ${opts.projectName || "Untitled tool"}`,
+		`Tool description: ${opts.prompt}`,
+		brandContext,
+	].join("\n");
 
 	const text = await requestAdvisoryText({ system, userContent, maxTokens: 300 });
 	if (!text) return null;
@@ -771,7 +807,8 @@ async function requestBrandFidelityCheck(opts: {
 }
 
 function buildBrandPrompt(brandSnapshot: GeneratedToolBrandSnapshot | null): string {
-	if (!brandSnapshot) return "No brand context provided — use a clean, neutral, professional visual style.";
+	if (!brandSnapshot)
+		return "No brand context provided — use a clean, neutral, professional visual style.";
 
 	const colorLines = Object.entries(brandSnapshot.colors)
 		.slice(0, MAX_PROMPT_BRAND_COLORS)
@@ -794,7 +831,9 @@ function buildBrandPrompt(brandSnapshot: GeneratedToolBrandSnapshot | null): str
 function shouldRetryHtmlGeneration(error: unknown, attempt: number): boolean {
 	if (attempt >= MAX_GENERATION_ATTEMPTS) return false;
 	if (!(error instanceof ToolGenerationStepError)) return true;
-	return error.code === "empty_response" || error.code === "network" || error.code === "upstream_5xx";
+	return (
+		error.code === "empty_response" || error.code === "network" || error.code === "upstream_5xx"
+	);
 }
 
 function formatBuildFailureMessage(

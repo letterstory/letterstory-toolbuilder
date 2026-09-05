@@ -1,6 +1,18 @@
 import { envServer } from "@/lib/config/env.server";
-import { isSafeHttpsUrl } from "@/lib/net/ssrf";
 import { resolveCanonicalLogo, type CanonicalLogoResult } from "@/lib/brand/logo";
+import {
+	contextRetrieveBrand,
+	contextScrapeFonts,
+	contextScrapeMarkdown,
+	contextScrapeStyleguide,
+	type ContextBrandLogo,
+	type ContextBrandResponse,
+	type ContextComponentStyle as ContextDevComponentStyle,
+	type ContextFontsResponse,
+	type ContextMarkdownResponse,
+	type ContextStyleguideResponse,
+} from "@/lib/brand/context-dev-client";
+import { isSafeHttpsUrl } from "@/lib/net/ssrf";
 
 export interface BrandIngestionRequest {
 	siteUrl: string;
@@ -55,7 +67,7 @@ export interface BrandLogoAsset {
 	href: string | null;
 	selectionReasoning: string | null;
 	selectionConfidence: number | null;
-	/** Normalized PNG data URI resolved independently of Firecrawl's pick, or null. */
+	/** Normalized PNG data URI resolved independently of Context.dev's pick, or null. */
 	canonicalDataUri: string | null;
 	/** Which candidate URL the canonical asset was resolved from, or null. */
 	canonicalSourceUrl: string | null;
@@ -89,7 +101,7 @@ export interface BrandDesignSystemProfile {
 
 export interface BrandProfile {
 	url: string;
-	source: "firecrawl";
+	source: "context.dev";
 	brandName: string | null;
 	colorScheme: "light" | "dark" | null;
 	confidence: number | null;
@@ -119,9 +131,7 @@ export interface BrandIngestionFailureResult {
 	message: string;
 }
 
-export type BrandIngestionResult =
-	| BrandIngestionSuccessResult
-	| BrandIngestionFailureResult;
+export type BrandIngestionResult = BrandIngestionSuccessResult | BrandIngestionFailureResult;
 
 export interface BrandFidelityGap {
 	field:
@@ -161,7 +171,7 @@ export interface BrandFidelityValidationSuccessResult {
 	status: "success";
 	requestedUrl: string;
 	assessment: BrandFidelityAssessment;
-	screenshotUrl: string;
+	referenceUrl: string;
 	model: string;
 	enrichedProfile: BrandProfile;
 }
@@ -169,18 +179,17 @@ export interface BrandFidelityValidationSuccessResult {
 export interface BrandFidelityValidationFailureResult {
 	status: "not_configured" | "error";
 	code:
-		| "firecrawl_not_configured"
+		| "context_dev_not_configured"
 		| "anthropic_not_configured"
-		| "screenshot_unavailable"
-		| "firecrawl_error"
+		| "reference_unavailable"
+		| "context_dev_error"
 		| "anthropic_error";
 	requestedUrl: string;
 	message: string;
 }
 
 export type BrandFidelityValidationResult =
-	| BrandFidelityValidationSuccessResult
-	| BrandFidelityValidationFailureResult;
+	BrandFidelityValidationSuccessResult | BrandFidelityValidationFailureResult;
 
 export interface BrandCompetitorComparisonRequest {
 	primarySiteUrl: string;
@@ -231,25 +240,13 @@ export interface BrandCompetitorComparisonSuccessResult {
 
 export interface BrandCompetitorComparisonFailureResult {
 	status: "not_configured" | "error";
-	code: "firecrawl_not_configured" | "firecrawl_error" | "invalid_input";
+	code: "context_dev_not_configured" | "context_dev_error" | "invalid_input";
 	requestedUrl: string;
 	message: string;
 }
 
 export type BrandCompetitorComparisonResult =
-	| BrandCompetitorComparisonSuccessResult
-	| BrandCompetitorComparisonFailureResult;
-
-interface FirecrawlScrapeResponse {
-	success?: boolean;
-	error?: string;
-	data?: {
-		branding?: unknown;
-		metadata?: unknown;
-		markdown?: unknown;
-		screenshot?: unknown;
-	};
-}
+	BrandCompetitorComparisonSuccessResult | BrandCompetitorComparisonFailureResult;
 
 interface AnthropicMessageBlock {
 	type?: string;
@@ -264,17 +261,18 @@ interface AnthropicMessagesResponse {
 	};
 }
 
-const FIRECRAWL_TIMEOUT_MS = 45_000;
 const ANTHROPIC_TIMEOUT_MS = 45_000;
 const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-6";
 const MAX_MARKDOWN_CHARS_FOR_VALIDATION = 6_000;
+const MIN_BRAND_SATURATION = 0.15;
+const MIN_SWATCH_DISTANCE = 40;
 
 export function isBrandIngestionConfigured(): boolean {
-	return Boolean(envServer.FIRECRAWL_API_KEY);
+	return Boolean(envServer.CONTEXT_DEV_API_KEY);
 }
 
 export function isBrandValidationConfigured(): boolean {
-	return Boolean(envServer.FIRECRAWL_API_KEY && envServer.ANTHROPIC_API_KEY);
+	return Boolean(envServer.CONTEXT_DEV_API_KEY && envServer.ANTHROPIC_API_KEY);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -285,41 +283,8 @@ function readString(value: unknown): string | null {
 	return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
-function readStringList(value: unknown): string[] {
-	if (!Array.isArray(value)) return [];
-
-	return value
-		.map((entry) => readString(entry))
-		.filter((entry): entry is string => Boolean(entry));
-}
-
 function readNumber(value: unknown): number | null {
 	return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
-function readConfidence(value: unknown): number | null {
-	if (typeof value === "number") return value;
-	if (isRecord(value)) return readNumber(value.overall);
-	return null;
-}
-
-function readNestedLogoUrl(value: unknown): string | null {
-	if (!isRecord(value)) return null;
-
-	return (
-		readNestedLogoUrl(value.logo) ??
-		readString(value.logoUrl) ??
-		readString(value.url) ??
-		readString(value.src) ??
-		readString(value.href) ??
-		null
-	);
-}
-
-function readFontFamily(value: unknown): string | null {
-	if (typeof value === "string") return readString(value);
-	if (!isRecord(value)) return null;
-	return readString(value.family) ?? readString(value.name) ?? null;
 }
 
 function dedupeStrings(values: Array<string | null | undefined>): string[] {
@@ -342,24 +307,6 @@ function normalizeBrandMap(value: unknown): Record<string, string> {
 			return normalized ? [[key, normalized]] : [];
 		})
 	);
-}
-
-function normalizeFontStacks(
-	value: unknown
-): Partial<Record<"heading" | "body" | "paragraph", string[]>> {
-	if (!isRecord(value)) return {};
-
-	const normalized: Partial<Record<"heading" | "body" | "paragraph", string[]>> = {};
-	for (const key of ["heading", "body", "paragraph"] as const) {
-		const stack = Array.isArray(value[key])
-			? value[key]
-					.map((entry) => readString(entry))
-					.filter((entry): entry is string => Boolean(entry))
-			: [];
-		if (stack.length) normalized[key] = stack;
-	}
-
-	return normalized;
 }
 
 function normalizeTypeScale(
@@ -404,52 +351,11 @@ function deriveSpacingRhythm(baseUnit: number | null): BrandSpacingRhythm | null
 	return "balanced";
 }
 
-function normalizeComponentStyle(value: unknown): BrandComponentStyle | null {
-	if (!isRecord(value)) return null;
-
-	const style: BrandComponentStyle = {
-		background: readString(value.background) ?? readString(value.bgColor),
-		textColor: readString(value.textColor) ?? readString(value.color),
-		borderColor: readString(value.borderColor),
-		borderRadius: readString(value.borderRadius),
-		shadow: readString(value.shadow),
-	};
-
-	return Object.values(style).some(Boolean) ? style : null;
-}
-
 function inferLogoKind(url: string | null): BrandLogoAsset["kind"] {
 	if (!url) return null;
 	if (url.startsWith("data:")) return "data-uri";
 	if (url.startsWith("https://") || url.startsWith("http://")) return "url";
 	return "unknown";
-}
-
-function collectImageUrls(value: unknown): string[] {
-	if (!isRecord(value)) return [];
-
-	return dedupeStrings(
-		Object.entries(value).flatMap(([key, candidate]) => {
-			if (key === "logoAlt" || key === "logoHref") return [];
-			if (typeof candidate === "string") return [candidate];
-			return readNestedLogoUrl(candidate);
-		})
-	);
-}
-
-function deriveImageNotes(logo: BrandLogoAsset): string[] {
-	const notes: string[] = [];
-	if (logo.kind === "data-uri") {
-		notes.push("Firecrawl selected an inline data-URI logo, which may be less reusable than a durable asset URL.");
-	}
-	if (logo.url?.includes("apple-touch-icon") || logo.url?.includes("app-icon")) {
-		notes.push("Selected logo appears to be an app-icon-style asset rather than a primary wordmark.");
-	}
-	return notes;
-}
-
-function normalizeToneEnergy(value: unknown): BrandToneEnergy | null {
-	return value === "low" || value === "medium" || value === "high" ? value : null;
 }
 
 const MAX_DESCRIPTOR_LENGTH = 24;
@@ -550,15 +456,13 @@ function parseJsonObject<T>(text: string): T {
 function normalizeAssessment(value: unknown): BrandFidelityAssessment {
 	const raw = isRecord(value) ? value : {};
 	const gaps = Array.isArray(raw.gaps)
-		? raw.gaps
-				.filter(isRecord)
-				.map((gap) => ({
-					field: normalizeGapField(gap.field),
-					severity: normalizeGapSeverity(gap.severity),
-					issue: readString(gap.issue) ?? "Missing detail",
-					evidence: readString(gap.evidence) ?? "No evidence supplied.",
-					recommendation: readString(gap.recommendation) ?? "Review the source site manually.",
-				}))
+		? raw.gaps.filter(isRecord).map((gap) => ({
+				field: normalizeGapField(gap.field),
+				severity: normalizeGapSeverity(gap.severity),
+				issue: readString(gap.issue) ?? "Missing detail",
+				evidence: readString(gap.evidence) ?? "No evidence supplied.",
+				recommendation: readString(gap.recommendation) ?? "Review the source site manually.",
+			}))
 		: [];
 	const derivedSignals = isRecord(raw.derivedSignals) ? raw.derivedSignals : {};
 
@@ -597,7 +501,10 @@ function normalizeAssessment(value: unknown): BrandFidelityAssessment {
 	};
 }
 
-function mergeFidelitySignals(profile: BrandProfile, assessment: BrandFidelityAssessment): BrandProfile {
+function mergeFidelitySignals(
+	profile: BrandProfile,
+	assessment: BrandFidelityAssessment
+): BrandProfile {
 	// Distinctive traits from validation are often full-sentence descriptions
 	// (e.g. "Multicolor purple-pink-orange gradient wave as hero signature").
 	// Keep them out of `descriptors` (rendered as compact badge pills) and
@@ -610,8 +517,8 @@ function mergeFidelitySignals(profile: BrandProfile, assessment: BrandFidelityAs
 		...profile.designSystem.notes,
 		...(assessment.gaps.length
 			? [
-				`Validation status ${assessment.status} (${assessment.similarityScore}/100): ${assessment.summary}`,
-			]
+					`Validation status ${assessment.status} (${assessment.similarityScore}/100): ${assessment.summary}`,
+				]
 			: []),
 	]);
 	const imageNotes = dedupeStrings([
@@ -713,232 +620,406 @@ export function normalizeBrandSiteUrl(input: string): string | null {
 	}
 }
 
-export function parseFirecrawlBranding(
-	brandingPayload: unknown,
-	metadataPayload: unknown = {}
-): Omit<BrandProfile, "url" | "source"> {
-	const raw = isRecord(brandingPayload) ? brandingPayload : {};
-	const metadata = isRecord(metadataPayload) ? metadataPayload : {};
-	const rawTypography = isRecord(raw.typography) ? raw.typography : {};
-	const rawSpacing = isRecord(raw.spacing) ? raw.spacing : {};
-	const rawComponents = isRecord(raw.components) ? raw.components : {};
-	const rawImages = isRecord(raw.images) ? raw.images : {};
-	const rawPersonality = isRecord(raw.personality) ? raw.personality : {};
-	const rawDesignSystem = isRecord(raw.designSystem) ? raw.designSystem : {};
-	const rawLlmMetadata = isRecord(raw.__llm_metadata) ? raw.__llm_metadata : {};
-	const rawLlmLogoSelection = isRecord(rawLlmMetadata.logoSelection)
-		? rawLlmMetadata.logoSelection
-		: {};
-	const rawLlmButtonReasoning = isRecord(raw.__llm_button_reasoning)
-		? raw.__llm_button_reasoning
-		: {};
-	const rawLlmPrimaryButtonReasoning = isRecord(rawLlmButtonReasoning.primary)
-		? rawLlmButtonReasoning.primary
-		: {};
-	const colors = normalizeBrandMap(raw.colors);
-	const fontFamilies = isRecord(rawTypography.fontFamilies)
-		? Object.values(rawTypography.fontFamilies).map((candidate) => readString(candidate))
-		: [];
-	const directFontFamilies = Array.isArray(raw.fonts)
-		? raw.fonts.map((entry) => readFontFamily(entry))
-		: [];
-	const logoUrls = dedupeStrings([
-		readString(raw.logo),
-		readString(raw.logoUrl),
-		readNestedLogoUrl(rawImages.logo),
-		...readStringList(raw.logos),
-		...(Array.isArray(raw.logos)
-			? raw.logos.map((entry) => (typeof entry === "string" ? entry : readNestedLogoUrl(entry)))
-			: []),
-		readNestedLogoUrl(raw.assets),
+export function normalizeContextDevFontFamily(raw: string): string {
+	const generated = raw.trim().match(/^__(.+?)(?:_Fallback)?_[0-9a-f]{4,}$/);
+	if (!generated) return raw.trim();
+	return generated[1]
+		.replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+		.replace(/_+/g, " ")
+		.replace(/\s+/g, " ")
+		.trim();
+}
+
+function readContextFontFamily(value: unknown): string | null {
+	const raw = readString(value);
+	return raw ? normalizeContextDevFontFamily(raw) : null;
+}
+
+function toRgb(hex: string): { r: number; g: number; b: number } | null {
+	const normalized = normalizeColorHex(hex);
+	if (!normalized) return null;
+	return {
+		r: Number.parseInt(normalized.slice(1, 3), 16),
+		g: Number.parseInt(normalized.slice(3, 5), 16),
+		b: Number.parseInt(normalized.slice(5, 7), 16),
+	};
+}
+
+function colorDistance(left: string, right: string): number {
+	const a = toRgb(left);
+	const b = toRgb(right);
+	if (!a || !b) return Number.POSITIVE_INFINITY;
+	return Math.sqrt((a.r - b.r) ** 2 + (a.g - b.g) ** 2 + (a.b - b.b) ** 2);
+}
+
+function colorSaturation(hex: string): number {
+	const rgb = toRgb(hex);
+	if (!rgb) return 0;
+	const r = rgb.r / 255;
+	const g = rgb.g / 255;
+	const b = rgb.b / 255;
+	const max = Math.max(r, g, b);
+	const min = Math.min(r, g, b);
+	if (max === min) return 0;
+	const l = (max + min) / 2;
+	return (max - min) / (1 - Math.abs(2 * l - 1));
+}
+
+interface RankedColorCandidate {
+	hex: string;
+	weight: number;
+}
+
+function rankBrandColors(
+	candidates: RankedColorCandidate[],
+	background: string | null,
+	text: string | null
+): string[] {
+	const usable = candidates
+		.map((candidate) => ({
+			hex: normalizeColorHex(candidate.hex),
+			weight: candidate.weight,
+		}))
+		.filter((candidate): candidate is RankedColorCandidate => Boolean(candidate.hex))
+		.filter(
+			(candidate) => !background || colorDistance(candidate.hex, background) >= MIN_SWATCH_DISTANCE
+		)
+		.filter((candidate) => !text || colorDistance(candidate.hex, text) >= MIN_SWATCH_DISTANCE);
+
+	const clusters: Array<{ hex: string; weight: number; votes: number; saturation: number }> = [];
+	for (const candidate of usable) {
+		const hit = clusters.find(
+			(cluster) => colorDistance(cluster.hex, candidate.hex) < MIN_SWATCH_DISTANCE
+		);
+		if (hit) {
+			hit.votes += 1;
+			if (candidate.weight > hit.weight) {
+				hit.hex = candidate.hex;
+				hit.weight = candidate.weight;
+				hit.saturation = colorSaturation(candidate.hex);
+			}
+			continue;
+		}
+
+		clusters.push({
+			hex: candidate.hex,
+			weight: candidate.weight,
+			votes: 1,
+			saturation: colorSaturation(candidate.hex),
+		});
+	}
+
+	const sortByConfidence = (left: (typeof clusters)[number], right: (typeof clusters)[number]) =>
+		right.votes - left.votes || right.weight - left.weight || right.saturation - left.saturation;
+
+	const vivid = clusters
+		.filter((candidate) => candidate.saturation >= MIN_BRAND_SATURATION)
+		.sort(sortByConfidence);
+	const neutral = clusters
+		.filter((candidate) => candidate.saturation < MIN_BRAND_SATURATION)
+		.sort(sortByConfidence);
+
+	return [...vivid, ...neutral].slice(0, 3).map((candidate) => candidate.hex);
+}
+
+function mapContextComponentStyle(
+	value: ContextDevComponentStyle | undefined
+): BrandComponentStyle | null {
+	if (!value) return null;
+
+	const style: BrandComponentStyle = {
+		background: normalizeColorHex(value.backgroundColor ?? "") ?? readString(value.backgroundColor),
+		textColor: normalizeColorHex(value.color ?? "") ?? readString(value.color),
+		borderColor: normalizeColorHex(value.borderColor ?? "") ?? readString(value.borderColor),
+		borderRadius: readString(value.borderRadius),
+		shadow: readString(value.boxShadow),
+	};
+
+	return Object.values(style).some(Boolean) ? style : null;
+}
+
+function selectPreferredLogo(logos: ContextBrandLogo[]): ContextBrandLogo | null {
+	const usable = logos.filter((logo) => readString(logo.url));
+	if (!usable.length) return null;
+	usable.sort((left, right) => {
+		const leftScore = left.type === "logo" ? 0 : 1;
+		const rightScore = right.type === "logo" ? 0 : 1;
+		return leftScore - rightScore;
+	});
+	return usable[0] ?? null;
+}
+
+function buildContextImageNotes(logo: BrandLogoAsset): string[] {
+	const notes: string[] = [];
+	if (logo.kind === "data-uri") {
+		notes.push(
+			"Context.dev selected an inline data-URI logo, which may be less reusable than a durable asset URL."
+		);
+	}
+	if (logo.url?.includes("apple-touch-icon") || logo.url?.includes("app-icon")) {
+		notes.push(
+			"Selected logo appears to be an app-icon-style asset rather than a primary wordmark."
+		);
+	}
+	return notes;
+}
+
+function collectSpacingCandidates(values: Array<string | null | undefined>): number[] {
+	return values
+		.map((value) => parsePixelValue(value ?? null))
+		.filter((value): value is number => typeof value === "number" && value > 0);
+}
+
+function resolveBaseSpacingUnit(
+	elementSpacing: Record<string, string> | undefined,
+	components: BrandComponentsProfile
+): number | null {
+	const values = collectSpacingCandidates([
+		...Object.values(elementSpacing ?? {}),
+		components.primaryButton?.borderRadius,
+		components.secondaryButton?.borderRadius,
+		components.input?.borderRadius,
 	]);
-	const preferredLogoUrl =
-		logoUrls.find((candidate) => candidate.startsWith("https://")) ?? logoUrls[0] ?? null;
-	const fonts = dedupeStrings([
-		...directFontFamilies,
-		readString(rawTypography.primaryFont),
-		readString(rawTypography.secondaryFont),
-		readString(isRecord(rawTypography.fontFamilies) ? rawTypography.fontFamilies.primary : null),
-		readString(isRecord(rawTypography.fontFamilies) ? rawTypography.fontFamilies.heading : null),
-		...fontFamilies,
-	]);
-	const colorScheme = readString(raw.colorScheme);
-	const confidence = readConfidence(raw.confidence);
-	const brandName = readString(raw.brandName);
-	const typeScale = normalizeTypeScale(rawTypography.fontSizes);
-	const baseUnit = readNumber(rawSpacing.baseUnit);
-	const logoReasoning = isRecord(raw.__llm_logo_reasoning) ? raw.__llm_logo_reasoning : {};
-	const componentEntries = Object.entries(rawComponents)
-		.map(([key, candidate]) => [key, normalizeComponentStyle(candidate)] as const)
-		.filter((entry): entry is readonly [string, BrandComponentStyle] => Boolean(entry[1]));
-	const additionalComponents = Object.fromEntries(
-		componentEntries.filter(([key]) => !["buttonPrimary", "buttonSecondary", "input"].includes(key))
+	if (!values.length) return null;
+	return Math.min(...values);
+}
+
+function buildColorMap(
+	brand: NonNullable<ContextBrandResponse["brand"]>,
+	styleguide: ContextStyleguideResponse["styleguide"] | undefined
+): Record<string, string> {
+	const background = normalizeColorHex(styleguide?.colors?.background ?? "");
+	const text = normalizeColorHex(styleguide?.colors?.text ?? "");
+	const accent = normalizeColorHex(styleguide?.colors?.accent ?? "");
+	const primaryButton = normalizeColorHex(
+		styleguide?.components?.button?.primary?.backgroundColor ?? ""
 	);
+	const secondaryButton = normalizeColorHex(
+		styleguide?.components?.button?.secondary?.backgroundColor ?? ""
+	);
+	const ranked = rankBrandColors(
+		[
+			...(accent ? [{ hex: accent, weight: 5 }] : []),
+			...(primaryButton ? [{ hex: primaryButton, weight: 4 }] : []),
+			...(secondaryButton ? [{ hex: secondaryButton, weight: 4 }] : []),
+			...(brand.colors ?? []).flatMap((color) => {
+				const hex = normalizeColorHex(color.hex ?? "");
+				if (!hex) return [];
+				return [{ hex, weight: color.source === "logo" ? 2 : 4 }];
+			}),
+			...(brand.logos ?? []).flatMap((logo) =>
+				(logo.colors ?? []).flatMap((color) => {
+					const hex = normalizeColorHex(color.hex ?? "");
+					return hex ? [{ hex, weight: 2 }] : [];
+				})
+			),
+		],
+		background,
+		text
+	);
+
+	const cardBackground = normalizeColorHex(styleguide?.components?.card?.backgroundColor ?? "");
+	const colors: Record<string, string> = {};
+	if (ranked[0]) colors.primary = ranked[0];
+	if (ranked[1]) colors.secondary = ranked[1];
+	if (ranked[2]) colors.accent = ranked[2];
+	if (accent && !Object.values(colors).includes(accent)) colors.accent ??= accent;
+	if (background) colors.background = background;
+	if (text) colors.text = text;
+	if (cardBackground && !Object.values(colors).includes(cardBackground))
+		colors.surface = cardBackground;
+	return colors;
+}
+
+export function parseContextDevBranding(payload: {
+	brandResponse: ContextBrandResponse;
+	styleguideResponse?: ContextStyleguideResponse | null;
+	fontsResponse?: ContextFontsResponse | null;
+	markdownResponse?: ContextMarkdownResponse | null;
+}): Omit<BrandProfile, "url" | "source"> {
+	const brand = payload.brandResponse.brand ?? {};
+	const styleguide = payload.styleguideResponse?.styleguide;
+	const headings = styleguide?.typography?.headings ?? {};
+	const paragraph = styleguide?.typography?.p;
+	const rawLogos = Array.isArray(brand.logos) ? brand.logos : [];
+	const preferredLogo = selectPreferredLogo(rawLogos);
+	const logoUrls = dedupeStrings(rawLogos.map((logo) => readString(logo.url)));
+	const colors = buildColorMap(brand, styleguide);
+	const fontRanked = [...(payload.fontsResponse?.fonts ?? [])].sort(
+		(left, right) =>
+			(right.percent_words ?? right.percent_elements ?? 0) -
+			(left.percent_words ?? left.percent_elements ?? 0)
+	);
+	const headingFont =
+		readContextFontFamily(headings.h1?.fontFamily) ??
+		readContextFontFamily(headings.h2?.fontFamily) ??
+		readContextFontFamily(headings.h3?.fontFamily) ??
+		null;
+	const bodyFont = readContextFontFamily(paragraph?.fontFamily);
+	const rankedFonts = fontRanked
+		.map((font) => readContextFontFamily(font.font))
+		.filter((font): font is string => Boolean(font));
+	const fonts = dedupeStrings([...rankedFonts, headingFont, bodyFont]);
+	const secondaryFont =
+		fonts.find((font) => font !== (headingFont ?? bodyFont ?? fonts[0] ?? null)) ?? null;
+	const typeScale = normalizeTypeScale({
+		h1: readString(headings.h1?.fontSize),
+		h2: readString(headings.h2?.fontSize),
+		h3: readString(headings.h3?.fontSize),
+		body: readString(paragraph?.fontSize),
+		small: readString(headings.h6?.fontSize),
+	});
+	const components: BrandComponentsProfile = {
+		primaryButton: mapContextComponentStyle(styleguide?.components?.button?.primary),
+		secondaryButton: mapContextComponentStyle(styleguide?.components?.button?.secondary),
+		input: mapContextComponentStyle(styleguide?.components?.input),
+		additional: Object.fromEntries(
+			Object.entries({ card: mapContextComponentStyle(styleguide?.components?.card) }).filter(
+				([, value]) => Boolean(value)
+			)
+		) as Record<string, BrandComponentStyle>,
+	};
+	const logoUrl = readString(preferredLogo?.url) ?? null;
 	const logo: BrandLogoAsset = {
-		url: preferredLogoUrl,
-		kind: inferLogoKind(preferredLogoUrl),
-		alt: readString(rawImages.logoAlt),
-		href: readString(rawImages.logoHref),
-		selectionReasoning: readString(logoReasoning.reasoning),
-		selectionConfidence: readNumber(logoReasoning.confidence),
-		// Populated by a separate async pass in pullBrandProfile() — parsing
-		// stays synchronous/network-free so it remains cheaply unit-testable.
+		url: logoUrl,
+		kind: inferLogoKind(logoUrl),
+		alt: brand.title?.trim() ? `${brand.title.trim()} logo` : null,
+		href: null,
+		selectionReasoning: preferredLogo
+			? preferredLogo.type === "logo"
+				? "Selected the first full logo asset returned by Context.dev."
+				: "Context.dev only returned icon-style assets, so the first available logo candidate was used."
+			: null,
+		selectionConfidence: null,
 		canonicalDataUri: null,
 		canonicalSourceUrl: null,
 		canonicalWarnings: [],
 	};
-	const imageGallery = collectImageUrls(rawImages);
-	const tone = readString(rawPersonality.tone);
-	const toneOfVoice = readString(rawPersonality.toneOfVoice) ?? tone;
-	const descriptors = splitDescriptors(
-		tone,
-		toneOfVoice,
-		readString(rawPersonality.targetAudience)
-	);
-	const designSystemFramework = readString(rawDesignSystem.framework);
-	const designSystemLibrary = readString(rawDesignSystem.componentLibrary);
+	const baseUnit = resolveBaseSpacingUnit(styleguide?.elementSpacing, components);
+	const borderRadius =
+		readString(styleguide?.components?.button?.primary?.borderRadius) ??
+		readString(styleguide?.components?.button?.secondary?.borderRadius) ??
+		readString(styleguide?.components?.card?.borderRadius) ??
+		null;
+	const designSystemFramework = null;
 
 	return {
-		brandName,
-		colorScheme: colorScheme === "light" || colorScheme === "dark" ? colorScheme : null,
-		confidence,
-		primaryLogoUrl: preferredLogoUrl,
+		brandName: readString(brand.title),
+		colorScheme:
+			styleguide?.mode === "light" || styleguide?.mode === "dark" ? styleguide.mode : null,
+		confidence: null,
+		primaryLogoUrl: logoUrl,
 		logoUrls,
 		colors,
 		fonts,
 		typography: {
-			primaryFont:
-				readString(rawTypography.primaryFont) ??
-				readString(isRecord(rawTypography.fontFamilies) ? rawTypography.fontFamilies.primary : null) ??
-				fonts[0] ??
-				null,
-			secondaryFont: readString(rawTypography.secondaryFont),
-			headingFont:
-				readString(isRecord(rawTypography.fontFamilies) ? rawTypography.fontFamilies.heading : null) ??
-				fonts[0] ??
-				null,
-			bodyFont:
-				readString(isRecord(rawTypography.fontFamilies) ? rawTypography.fontFamilies.body : null) ??
-				readString(isRecord(rawTypography.fontFamilies) ? rawTypography.fontFamilies.primary : null) ??
-				fonts[0] ??
-				null,
+			primaryFont: headingFont ?? bodyFont ?? fonts[0] ?? null,
+			secondaryFont,
+			headingFont: headingFont ?? fonts[0] ?? null,
+			bodyFont: bodyFont ?? fonts[0] ?? null,
 			fontFamilies: fonts,
-			fontStacks: normalizeFontStacks(rawTypography.fontStacks),
+			fontStacks: {
+				heading: dedupeStrings([
+					headingFont,
+					...(headings.h1?.fontFallbacks ?? []).map((font) => readContextFontFamily(font)),
+				]),
+				body: dedupeStrings([
+					bodyFont,
+					...(paragraph?.fontFallbacks ?? []).map((font) => readContextFontFamily(font)),
+				]),
+				paragraph: dedupeStrings([
+					bodyFont,
+					...(paragraph?.fontFallbacks ?? []).map((font) => readContextFontFamily(font)),
+				]),
+			},
 			scale: typeScale,
 			hierarchy: deriveTypographyHierarchy(typeScale),
 		},
 		spacing: {
 			baseUnit,
-			borderRadius: readString(rawSpacing.borderRadius),
-			radiusScale: dedupeStrings(
-				componentEntries.map(([, component]) => component.borderRadius)
-			),
+			borderRadius,
+			radiusScale: dedupeStrings([
+				components.primaryButton?.borderRadius,
+				components.secondaryButton?.borderRadius,
+				components.input?.borderRadius,
+				borderRadius,
+			]),
 			rhythm: deriveSpacingRhythm(baseUnit),
 		},
-		components: {
-			primaryButton: normalizeComponentStyle(rawComponents.buttonPrimary),
-			secondaryButton: normalizeComponentStyle(rawComponents.buttonSecondary),
-			input: normalizeComponentStyle(rawComponents.input),
-			additional: additionalComponents,
-		},
+		components,
 		images: {
 			logo,
-			faviconUrl: readString(rawImages.favicon),
-			ogImageUrl: readString(rawImages.ogImage),
-			gallery: imageGallery,
-			imageryStyle: readString(rawImages.imageryStyle),
-			notes: deriveImageNotes(logo),
+			faviconUrl: null,
+			ogImageUrl: null,
+			gallery: logoUrls,
+			imageryStyle: null,
+			notes: buildContextImageNotes(logo),
 		},
 		personality: {
-			tone,
-			toneOfVoice,
-			energy: normalizeToneEnergy(rawPersonality.energy),
-			targetAudience: readString(rawPersonality.targetAudience),
-			descriptors,
+			tone: readString(brand.slogan),
+			toneOfVoice: readString(brand.slogan),
+			energy: null,
+			targetAudience: null,
+			descriptors: splitDescriptors(readString(brand.slogan), readString(brand.description)),
 			notableSignals: [],
 		},
 		designSystem: {
 			framework: designSystemFramework,
-			componentLibrary: designSystemLibrary,
-			implementationStyle: inferImplementationStyle(
-				designSystemFramework,
-				designSystemLibrary
-			),
+			componentLibrary: null,
+			implementationStyle: inferImplementationStyle(designSystemFramework, null),
 			notes: dedupeStrings([
-				readString(rawLlmLogoSelection.finalSource),
-				readString(rawLlmPrimaryButtonReasoning.reasoning),
+				styleguide?.mode ? `Context.dev detected ${styleguide.mode} mode.` : null,
+				payload.markdownResponse?.metadata?.title
+					? `Reference page: ${payload.markdownResponse.metadata.title}`
+					: null,
 			]),
 		},
-		metadata,
-		raw,
+		metadata: normalizeBrandMap({
+			title: readString(payload.markdownResponse?.metadata?.title) ?? readString(brand.title),
+			description:
+				readString(payload.markdownResponse?.metadata?.description) ??
+				readString(brand.description),
+		}),
+		raw: {
+			contextBrand: payload.brandResponse,
+			contextStyleguide: payload.styleguideResponse ?? null,
+			contextFonts: payload.fontsResponse ?? null,
+			contextMarkdown: payload.markdownResponse ?? null,
+		},
 	};
 }
 
-async function fetchFirecrawlScrape(
-	url: string,
-	formats: Array<string | Record<string, unknown>>
-): Promise<FirecrawlScrapeResponse> {
-	const apiKey = envServer.FIRECRAWL_API_KEY;
-	if (!apiKey) {
-		throw new Error("Brand extraction requires Firecrawl (FIRECRAWL_API_KEY is unset)");
-	}
-
-	const baseUrl = envServer.FIRECRAWL_BASE_URL.replace(/\/$/, "");
-	const response = await fetch(`${baseUrl}/v2/scrape`, {
-		method: "POST",
-		headers: {
-			Authorization: `Bearer ${apiKey}`,
-			"Content-Type": "application/json",
-		},
-		body: JSON.stringify({
-			url,
-			formats,
-			onlyMainContent: false,
-			timeout: FIRECRAWL_TIMEOUT_MS - 5_000,
-		}),
-		signal: AbortSignal.timeout(FIRECRAWL_TIMEOUT_MS),
-	});
-	const body = (await response.json().catch(() => ({}))) as FirecrawlScrapeResponse;
-
-	if (!response.ok || body.success === false) {
-		throw new Error(
-			`Firecrawl scrape failed (${response.status}): ${body.error ?? "unknown error"}`
-		);
-	}
-
-	return body;
-}
-
-async function fetchFirecrawlBranding(url: string): Promise<Omit<BrandProfile, "url" | "source">> {
-	const body = await fetchFirecrawlScrape(url, ["branding"]);
-	return parseFirecrawlBranding(body.data?.branding, body.data?.metadata);
-}
-
-async function fetchSiteVisualReference(url: string): Promise<{ screenshotUrl: string | null; markdown: string | null }> {
-	const body = await fetchFirecrawlScrape(url, [
-		"markdown",
-		{
-			type: "screenshot",
-			fullPage: false,
-			quality: 80,
-			viewport: {
-				width: 1440,
-				height: 1200,
-			},
-		},
+async function fetchContextDevBranding(url: string): Promise<Omit<BrandProfile, "url" | "source">> {
+	const domain = new URL(url).hostname;
+	const [brandResponse, styleguideResponse, fontsResponse, markdownResponse] = await Promise.all([
+		contextRetrieveBrand(domain),
+		contextScrapeStyleguide(domain).catch(() => null),
+		contextScrapeFonts(domain).catch(() => null),
+		contextScrapeMarkdown(url).catch(() => null),
 	]);
 
+	return parseContextDevBranding({
+		brandResponse,
+		styleguideResponse,
+		fontsResponse,
+		markdownResponse,
+	});
+}
+
+async function fetchSiteReference(
+	url: string
+): Promise<{ referenceUrl: string; markdown: string | null }> {
+	const body = await contextScrapeMarkdown(url);
 	return {
-		screenshotUrl: readString(body.data?.screenshot),
-		markdown: readString(body.data?.markdown),
+		referenceUrl: readString(body.url) ?? url,
+		markdown: readString(body.markdown),
 	};
 }
 
 async function requestAnthropicAssessment(
 	profile: BrandProfile,
 	siteUrl: string,
-	screenshotUrl: string,
-	markdown: string | null
+	referenceMarkdown: string
 ): Promise<BrandFidelityAssessment> {
 	const apiKey = envServer.ANTHROPIC_API_KEY;
 	if (!apiKey) {
@@ -947,7 +1028,7 @@ async function requestAnthropicAssessment(
 
 	const model = envServer.ANTHROPIC_MODEL || DEFAULT_ANTHROPIC_MODEL;
 	const instructions = [
-		"You are validating whether a structured brand profile actually captures what makes a website visually feel like itself.",
+		"You are validating whether a structured brand profile captures what makes a website visually feel like itself.",
 		"Return JSON only. No markdown fences.",
 		"Use this schema exactly:",
 		JSON.stringify(
@@ -959,7 +1040,8 @@ async function requestAnthropicAssessment(
 				confirmedSignals: ["array of strings"],
 				gaps: [
 					{
-						field: "logo | colors | typography | spacing | components | images | personality | designSystem",
+						field:
+							"logo | colors | typography | spacing | components | images | personality | designSystem",
 						severity: "low | medium | high",
 						issue: "string",
 						evidence: "string",
@@ -978,9 +1060,10 @@ async function requestAnthropicAssessment(
 			2
 		),
 		"Judge whether the extracted profile is good enough to guide a generated page so it would still feel like the same brand.",
-		"Call out missing visual signals like gradients, illustration style, logo variant problems, spacing rhythm, type hierarchy, or tone mismatches.",
+		"You are working from Context.dev extraction and rendered homepage markdown, not a screenshot, so call out missing cues conservatively.",
 		"Keep the response concise: no more than 4 gaps, short evidence strings, and short recommendations.",
 	].join("\n");
+
 	const response = await fetch("https://api.anthropic.com/v1/messages", {
 		method: "POST",
 		headers: {
@@ -996,26 +1079,10 @@ async function requestAnthropicAssessment(
 				{
 					role: "user",
 					content: [
-						{
-							type: "text",
-							text: [
-								`Site URL: ${siteUrl}`,
-								`Structured brand profile: ${JSON.stringify(createValidationPromptProfile(profile), null, 2)}`,
-								`Homepage markdown excerpt: ${
-									markdown
-										? markdown.slice(0, MAX_MARKDOWN_CHARS_FOR_VALIDATION)
-										: "Not available"
-								}`,
-							].join("\n\n"),
-						},
-						{
-							type: "image",
-							source: {
-								type: "url",
-								url: screenshotUrl,
-							},
-						},
-					],
+						`Site URL: ${siteUrl}`,
+						`Structured brand profile: ${JSON.stringify(createValidationPromptProfile(profile), null, 2)}`,
+						`Homepage markdown excerpt: ${referenceMarkdown.slice(0, MAX_MARKDOWN_CHARS_FOR_VALIDATION)}`,
+					].join("\n\n"),
 				},
 			],
 		}),
@@ -1039,79 +1106,6 @@ async function requestAnthropicAssessment(
 	}
 
 	return normalizeAssessment(parseJsonObject(text));
-}
-
-/**
- * Claude-vision comparison of two site screenshots for genuine visual
- * similarity — not just token overlap on extracted colors/fonts/tone. This is
- * the "does a generated page actually look like a different company"
- * check Mathew asked for; compareBrandProfiles alone can't answer that
- * because two sites can share zero color/font tokens yet still "feel" similar
- * (or vice versa). Returns null on any failure — visual similarity is an
- * enrichment, not a hard requirement for competitor comparison to succeed.
- */
-async function requestVisualSimilarityAssessment(
-	primaryUrl: string,
-	primaryScreenshotUrl: string,
-	competitorUrl: string,
-	competitorScreenshotUrl: string
-): Promise<BrandVisualSimilarity | null> {
-	const apiKey = envServer.ANTHROPIC_API_KEY;
-	if (!apiKey) return null;
-
-	const model = envServer.ANTHROPIC_MODEL || DEFAULT_ANTHROPIC_MODEL;
-	const instructions = [
-		"You are comparing two marketing homepage screenshots for overall visual similarity — the kind a human would notice at a glance (layout, color palette, imagery style, typography feel), not pixel-level differences.",
-		"Return JSON only. No markdown fences. Use this schema exactly:",
-		JSON.stringify({ score: 0, rationale: "short string" }, null, 2),
-		"score is 0-100: 0 means the two sites look nothing alike, 100 means a viewer could easily mistake one for the other.",
-		"Keep rationale to one or two sentences citing concrete visual cues (not just brand names).",
-	].join("\n");
-
-	try {
-		const response = await fetch("https://api.anthropic.com/v1/messages", {
-			method: "POST",
-			headers: {
-				"x-api-key": apiKey,
-				"anthropic-version": "2023-06-01",
-				"content-type": "application/json",
-			},
-			body: JSON.stringify({
-				model,
-				max_tokens: 400,
-				system: instructions,
-				messages: [
-					{
-						role: "user",
-						content: [
-							{ type: "text", text: `Site A: ${primaryUrl}` },
-							{ type: "image", source: { type: "url", url: primaryScreenshotUrl } },
-							{ type: "text", text: `Site B: ${competitorUrl}` },
-							{ type: "image", source: { type: "url", url: competitorScreenshotUrl } },
-						],
-					},
-				],
-			}),
-			signal: AbortSignal.timeout(ANTHROPIC_TIMEOUT_MS),
-		});
-		const body = (await response.json().catch(() => ({}))) as AnthropicMessagesResponse;
-		if (!response.ok) return null;
-
-		const text = body.content
-			?.filter((block) => block.type === "text")
-			.map((block) => block.text ?? "")
-			.join("\n")
-			.trim();
-		if (!text) return null;
-
-		const parsed = parseJsonObject(text) as { score?: unknown; rationale?: unknown };
-		const score = typeof parsed.score === "number" ? clampScore(parsed.score) : null;
-		const rationale = readString(parsed.rationale);
-		if (score === null || !rationale) return null;
-		return { score, rationale };
-	} catch {
-		return null;
-	}
 }
 
 function normalizeColorHex(value: string): string | null {
@@ -1213,7 +1207,10 @@ function collectToneDescriptors(profile: BrandProfile): Set<string> {
 	]);
 }
 
-function compareBrandProfiles(primary: BrandProfile, competitor: BrandProfile): BrandCompetitorDelta {
+function compareBrandProfiles(
+	primary: BrandProfile,
+	competitor: BrandProfile
+): BrandCompetitorDelta {
 	const primaryColorFamilies = collectColorFamilies(primary);
 	const competitorColorFamilies = collectColorFamilies(competitor);
 	const primaryFonts = tokenSet(primary.fonts.map(normalizeFontName));
@@ -1262,7 +1259,7 @@ function compareBrandProfiles(primary: BrandProfile, competitor: BrandProfile): 
 
 export async function pullBrandProfile(siteUrlOrDomain: string): Promise<BrandProfile> {
 	if (!isBrandIngestionConfigured()) {
-		throw new Error("Brand extraction requires Firecrawl (FIRECRAWL_API_KEY is unset)");
+		throw new Error("Brand extraction requires Context.dev (CONTEXT_DEV_API_KEY is unset)");
 	}
 
 	const url = normalizeBrandSiteUrl(siteUrlOrDomain);
@@ -1271,12 +1268,12 @@ export async function pullBrandProfile(siteUrlOrDomain: string): Promise<BrandPr
 	const safety = await isSafeHttpsUrl(url);
 	if (!safety.ok) throw new Error(`Refusing to pull an unsafe URL: ${safety.reason}`);
 
-	const branding = await fetchFirecrawlBranding(url);
+	const branding = await fetchContextDevBranding(url);
 	const canonicalLogo = await resolveCanonicalLogoForBranding(branding);
 
 	return {
 		url,
-		source: "firecrawl",
+		source: "context.dev",
 		...branding,
 		images: {
 			...branding.images,
@@ -1293,7 +1290,7 @@ export async function pullBrandProfile(siteUrlOrDomain: string): Promise<BrandPr
 /**
  * Resolve a canonical logo asset from every candidate URL we know about,
  * preferred pick first. Fail-soft: any error here must not fail ingestion —
- * the raw Firecrawl logo selection remains usable either way.
+ * the raw Context.dev logo selection remains usable either way.
  */
 async function resolveCanonicalLogoForBranding(
 	branding: Omit<BrandProfile, "url" | "source">
@@ -1308,7 +1305,9 @@ async function resolveCanonicalLogoForBranding(
 		return {
 			dataUri: null,
 			sourceUrl: null,
-			warnings: ["Canonical logo resolution failed unexpectedly; using the raw Firecrawl selection."],
+			warnings: [
+				"Canonical logo resolution failed unexpectedly; using the raw Context.dev selection.",
+			],
 		};
 	}
 }
@@ -1317,12 +1316,12 @@ export async function validateBrandFidelity(
 	profile: BrandProfile,
 	siteUrl: string
 ): Promise<BrandFidelityValidationResult> {
-	if (!envServer.FIRECRAWL_API_KEY) {
+	if (!envServer.CONTEXT_DEV_API_KEY) {
 		return {
 			status: "not_configured",
-			code: "firecrawl_not_configured",
+			code: "context_dev_not_configured",
 			requestedUrl: siteUrl,
-			message: "Set FIRECRAWL_API_KEY before running brand fidelity validation.",
+			message: "Set CONTEXT_DEV_API_KEY before running brand fidelity validation.",
 		};
 	}
 	if (!envServer.ANTHROPIC_API_KEY) {
@@ -1338,7 +1337,7 @@ export async function validateBrandFidelity(
 	if (!normalizedUrl) {
 		return {
 			status: "error",
-			code: "firecrawl_error",
+			code: "context_dev_error",
 			requestedUrl: siteUrl,
 			message: `Not a usable site URL: "${siteUrl}"`,
 		};
@@ -1349,33 +1348,33 @@ export async function validateBrandFidelity(
 		if (!safety.ok) {
 			return {
 				status: "error",
-				code: "firecrawl_error",
+				code: "context_dev_error",
 				requestedUrl: siteUrl,
 				message: `Refusing to validate an unsafe URL: ${safety.reason}`,
 			};
 		}
 
-		const visualReference = await fetchSiteVisualReference(normalizedUrl);
-		if (!visualReference.screenshotUrl) {
+		const reference = await fetchSiteReference(normalizedUrl);
+		const fallbackReferenceText = dedupeStrings([
+			readString(profile.metadata.title),
+			readString(profile.metadata.description),
+		]).join("\n\n");
+		const referenceMarkdown = reference.markdown ?? fallbackReferenceText;
+		if (!referenceMarkdown) {
 			return {
 				status: "error",
-				code: "screenshot_unavailable",
+				code: "reference_unavailable",
 				requestedUrl: siteUrl,
-				message: "Firecrawl did not return a screenshot for this site.",
+				message: "Context.dev did not return enough rendered page content for validation.",
 			};
 		}
 
-		const assessment = await requestAnthropicAssessment(
-			profile,
-			normalizedUrl,
-			visualReference.screenshotUrl,
-			visualReference.markdown
-		);
+		const assessment = await requestAnthropicAssessment(profile, normalizedUrl, referenceMarkdown);
 		return {
 			status: "success",
 			requestedUrl: siteUrl,
 			assessment,
-			screenshotUrl: visualReference.screenshotUrl,
+			referenceUrl: reference.referenceUrl,
 			model: envServer.ANTHROPIC_MODEL || DEFAULT_ANTHROPIC_MODEL,
 			enrichedProfile: mergeFidelitySignals(profile, assessment),
 		};
@@ -1383,7 +1382,7 @@ export async function validateBrandFidelity(
 		const message = error instanceof Error ? error.message : String(error);
 		return {
 			status: "error",
-			code: message.includes("Anthropic") ? "anthropic_error" : "firecrawl_error",
+			code: message.includes("Anthropic") ? "anthropic_error" : "context_dev_error",
 			requestedUrl: siteUrl,
 			message,
 		};
@@ -1396,9 +1395,9 @@ export async function compareBrandAgainstCompetitors(
 	if (!isBrandIngestionConfigured()) {
 		return {
 			status: "not_configured",
-			code: "firecrawl_not_configured",
+			code: "context_dev_not_configured",
 			requestedUrl: request.primarySiteUrl,
-			message: "Set FIRECRAWL_API_KEY before running competitor brand comparisons.",
+			message: "Set CONTEXT_DEV_API_KEY before running competitor brand comparisons.",
 		};
 	}
 
@@ -1415,70 +1414,21 @@ export async function compareBrandAgainstCompetitors(
 	}
 
 	try {
-		const primaryProfile = request.primaryProfile ?? (await pullBrandProfile(request.primarySiteUrl));
-		const competitorProfiles = await Promise.all(competitorUrls.map((url) => pullBrandProfile(url)));
+		const primaryProfile =
+			request.primaryProfile ?? (await pullBrandProfile(request.primarySiteUrl));
+		const competitorProfiles = await Promise.all(
+			competitorUrls.map((url) => pullBrandProfile(url))
+		);
 		const competitors = competitorProfiles.map((profile) => ({
 			profile,
 			comparison: compareBrandProfiles(primaryProfile, profile),
 		}));
-
-		// Visual similarity is an enrichment layered on top of the token-based
-		// comparison above, gated on Anthropic being configured. Failures per
-		// competitor are swallowed (visualSimilarity stays null) so one bad
-		// screenshot doesn't fail the whole comparison.
-		if (envServer.ANTHROPIC_API_KEY) {
-			try {
-				const primaryVisual = await fetchSiteVisualReference(primaryProfile.url);
-				if (primaryVisual.screenshotUrl) {
-					await Promise.all(
-						competitors.map(async (competitor) => {
-							try {
-								const competitorVisual = await fetchSiteVisualReference(competitor.profile.url);
-								if (!competitorVisual.screenshotUrl) return;
-								competitor.comparison.visualSimilarity = await requestVisualSimilarityAssessment(
-									primaryProfile.url,
-									primaryVisual.screenshotUrl!,
-									competitor.profile.url,
-									competitorVisual.screenshotUrl
-								);
-							} catch {
-								// leave visualSimilarity null for this competitor
-							}
-						})
-					);
-				}
-			} catch {
-				// leave visualSimilarity null for all competitors
-			}
-		}
 
 		const overallScore = Math.round(
 			competitors.reduce((sum, competitor) => sum + competitor.comparison.distinctivenessScore, 0) /
 				competitors.length
 		);
 		const overallStatus = normalizeDistinctivenessStatus(overallScore);
-		const visualScores = competitors
-			.map((competitor) => competitor.comparison.visualSimilarity?.score)
-			.filter((score): score is number => typeof score === "number");
-		const overallVisualDistinctiveness = visualScores.length
-			? (() => {
-					const avgSimilarity = Math.round(
-						visualScores.reduce((sum, score) => sum + score, 0) / visualScores.length
-					);
-					const visualDistinctivenessScore = clampScore(100 - avgSimilarity);
-					const visualStatus = normalizeDistinctivenessStatus(visualDistinctivenessScore);
-					return {
-						score: visualDistinctivenessScore,
-						status: visualStatus,
-						summary:
-							visualStatus === "distinct"
-								? "Screenshots look visually distinct from the supplied competitors, not just different on extracted tokens."
-								: visualStatus === "adjacent"
-									? "Screenshots share a noticeable visual resemblance with the supplied competitors despite differing tokens."
-									: "Screenshots look visually similar enough to the supplied competitors that a viewer could confuse them.",
-					};
-				})()
-			: null;
 		return {
 			status: "success",
 			requestedUrl: request.primarySiteUrl,
@@ -1489,17 +1439,17 @@ export async function compareBrandAgainstCompetitors(
 				status: overallStatus,
 				summary:
 					overallStatus === "distinct"
-						? "Primary brand remains visually distinct from the supplied competitors on extracted tokens."
+						? "Primary brand remains distinct from the supplied competitors on extracted colors, fonts, and tone signals."
 						: overallStatus === "adjacent"
-							? "Primary brand shares some palette/type/tone cues with the supplied competitors."
-							: "Primary brand overlaps heavily with the supplied competitors on extracted tokens.",
+							? "Primary brand shares some palette, type, or tone cues with the supplied competitors."
+							: "Primary brand overlaps heavily with the supplied competitors on extracted colors, fonts, and tone signals.",
 			},
-			overallVisualDistinctiveness,
+			overallVisualDistinctiveness: null,
 		};
 	} catch (error) {
 		return {
 			status: "error",
-			code: "firecrawl_error",
+			code: "context_dev_error",
 			requestedUrl: request.primarySiteUrl,
 			message: error instanceof Error ? error.message : String(error),
 		};
@@ -1513,8 +1463,7 @@ export async function ingestBrandContext(
 		return {
 			status: "not_configured",
 			requestedUrl: request.siteUrl,
-			message:
-				"Set FIRECRAWL_API_KEY before enabling brand ingestion for this repository.",
+			message: "Set CONTEXT_DEV_API_KEY before enabling brand ingestion for this repository.",
 		};
 	}
 

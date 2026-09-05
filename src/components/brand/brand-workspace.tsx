@@ -58,18 +58,24 @@ export function BrandWorkspace() {
 	const [siteUrl, setSiteUrl] = useState(INITIAL_URL);
 	const [requestState, setRequestState] = useState<RequestState>("idle");
 	const [ingestionResult, setIngestionResult] = useState<BrandIngestionResult | null>(null);
-	const [validationResult, setValidationResult] = useState<BrandFidelityValidationResult | null>(null);
+	const [validationResult, setValidationResult] = useState<BrandFidelityValidationResult | null>(
+		null
+	);
 	const [fixesApplied, setFixesApplied] = useState(false);
 	const [competitorUrlsInput, setCompetitorUrlsInput] = useState("");
 	const [compareResult, setCompareResult] = useState<BrandCompetitorComparisonResult | null>(null);
 	const [statusMessage, setStatusMessage] = useState<StatusMessage>({
 		title: "Ready to ingest",
-		description: "Enter a marketing site URL to extract real brand tokens and inspect the output before generation.",
+		description:
+			"Enter a marketing site URL to extract real brand tokens and inspect the output before generation.",
 		tone: "info",
 	});
 
 	const profile = ingestionResult?.status === "success" ? ingestionResult.profile : null;
-	const formattedProfile = useMemo(() => (profile ? JSON.stringify(profile, null, 2) : ""), [profile]);
+	const formattedProfile = useMemo(
+		() => (profile ? JSON.stringify(profile, null, 2) : ""),
+		[profile]
+	);
 
 	async function handleIngest(event: FormEvent<HTMLFormElement>) {
 		event.preventDefault();
@@ -79,7 +85,7 @@ export function BrandWorkspace() {
 		setValidationResult(null);
 		setFixesApplied(false);
 		setStatusMessage({
-			title: "Running Firecrawl ingestion",
+			title: "Running Context.dev ingestion",
 			description: "Pulling the site, normalizing the profile, and preparing the dashboard.",
 			tone: "info",
 		});
@@ -101,7 +107,8 @@ export function BrandWorkspace() {
 			});
 			setStatusMessage({
 				title: "Request failed",
-				description: "The dashboard could not reach the brand ingestion route. Check the dev server and try again.",
+				description:
+					"The dashboard could not reach the brand ingestion route. Check the dev server and try again.",
 				tone: "destructive",
 			});
 		} finally {
@@ -115,7 +122,8 @@ export function BrandWorkspace() {
 		setFixesApplied(false);
 		setStatusMessage({
 			title: "Running brand fidelity validation",
-			description: "Cross-checking the extracted profile against a fresh site screenshot and Claude assessment.",
+			description:
+				"Cross-checking the extracted profile against fresh rendered-page content and Claude assessment.",
 			tone: "info",
 		});
 
@@ -137,7 +145,8 @@ export function BrandWorkspace() {
 			});
 			setStatusMessage({
 				title: "Validation request failed",
-				description: "The dashboard could not reach the validation route. Check the dev server and try again.",
+				description:
+					"The dashboard could not reach the validation route. Check the dev server and try again.",
 				tone: "destructive",
 			});
 		} finally {
@@ -179,7 +188,8 @@ export function BrandWorkspace() {
 		setRequestState("submitting-compare");
 		setStatusMessage({
 			title: "Comparing against competitors",
-			description: "Scoring extracted-token distinctiveness, plus a Claude-vision visual similarity check when configured.",
+			description:
+				"Scoring extracted-token distinctiveness, plus a Claude-vision visual similarity check when configured.",
 			tone: "info",
 		});
 
@@ -195,13 +205,14 @@ export function BrandWorkspace() {
 		} catch {
 			setCompareResult({
 				status: "error",
-				code: "firecrawl_error",
+				code: "context_dev_error",
 				requestedUrl: siteUrl,
 				message: "The comparison request failed before Toolbuilder could read the response.",
 			});
 			setStatusMessage({
 				title: "Comparison request failed",
-				description: "The dashboard could not reach the competitor comparison route. Check the dev server and try again.",
+				description:
+					"The dashboard could not reach the competitor comparison route. Check the dev server and try again.",
 				tone: "destructive",
 			});
 		} finally {
@@ -218,11 +229,15 @@ export function BrandWorkspace() {
 						Ingest a brand site
 					</CardTitle>
 					<CardDescription>
-						This workspace calls the real server-side ingestion flow in <code>src/lib/brand/service.ts</code>.
+						This workspace calls the real server-side ingestion flow in{" "}
+						<code>src/lib/brand/service.ts</code>.
 					</CardDescription>
 				</CardHeader>
 				<CardContent>
-					<form className="grid gap-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-end" onSubmit={handleIngest}>
+					<form
+						className="grid gap-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-end"
+						onSubmit={handleIngest}
+					>
 						<div className="grid gap-2">
 							<Label htmlFor="brand-site-url">Site URL</Label>
 							<Input
@@ -263,7 +278,8 @@ export function BrandWorkspace() {
 				</CardContent>
 				<CardFooter>
 					<p className="text-sm text-muted-foreground">
-						Tip: try a public marketing homepage like Stripe, Ramp, or Basecamp to see richer brand cues.
+						Tip: try a public marketing homepage like Stripe, Ramp, or Basecamp to see richer brand
+						cues.
 					</p>
 				</CardFooter>
 			</Card>
@@ -308,11 +324,16 @@ export function BrandWorkspace() {
 							<CardHeader>
 								<CardTitle>Structured profile</CardTitle>
 								<CardDescription>
-									Useful for debugging the exact normalized object passed into generation and validation.
+									Useful for debugging the exact normalized object passed into generation and
+									validation.
 								</CardDescription>
 							</CardHeader>
 							<CardContent>
-								<Textarea value={formattedProfile} readOnly className="min-h-[28rem] font-mono text-xs" />
+								<Textarea
+									value={formattedProfile}
+									readOnly
+									className="min-h-[28rem] font-mono text-xs"
+								/>
 							</CardContent>
 						</Card>
 					</TabsContent>
@@ -342,16 +363,20 @@ function BrandOverview({ profile }: { profile: BrandProfile }) {
 						<div className="space-y-2">
 							<CardTitle className="text-2xl">{profile.brandName ?? profile.url}</CardTitle>
 							<CardDescription className="max-w-3xl">
-								{profile.metadata.description as string | undefined
+								{(profile.metadata.description as string | undefined)
 									? String(profile.metadata.description)
-									: "Firecrawl returned a brand profile without a page description."}
+									: "Context.dev returned a brand profile without a page description."}
 							</CardDescription>
 						</div>
 						<div className="flex flex-wrap gap-2">
 							<Badge variant="outline">{profile.source}</Badge>
-							{profile.colorScheme ? <Badge variant="secondary">{profile.colorScheme}</Badge> : null}
+							{profile.colorScheme ? (
+								<Badge variant="secondary">{profile.colorScheme}</Badge>
+							) : null}
 							{typeof profile.confidence === "number" ? (
-								<Badge className="bg-brand-light text-brand-text">{Math.round(profile.confidence * 100)}% confidence</Badge>
+								<Badge className="bg-brand-light text-brand-text">
+									{Math.round(profile.confidence * 100)}% confidence
+								</Badge>
 							) : null}
 						</div>
 					</div>
@@ -361,13 +386,16 @@ function BrandOverview({ profile }: { profile: BrandProfile }) {
 						<SectionCard
 							icon={Palette}
 							title="Palette"
-							description="Visual swatches from the normalized Firecrawl response."
+							description="Visual swatches from the normalized Context.dev response."
 						>
 							{colorEntries.length ? (
 								<div className="grid gap-3 sm:grid-cols-2">
 									{colorEntries.map(([name, value]) => (
 										<div key={`${name}-${value}`} className="rounded-lg border p-3">
-											<div className="mb-3 h-16 rounded-md border" style={{ backgroundColor: value }} />
+											<div
+												className="mb-3 h-16 rounded-md border"
+												style={{ backgroundColor: value }}
+											/>
 											<p className="text-sm font-medium capitalize">{formatKey(name)}</p>
 											<p className="text-xs text-muted-foreground">{value}</p>
 										</div>
@@ -384,7 +412,10 @@ function BrandOverview({ profile }: { profile: BrandProfile }) {
 							description="Primary fonts, hierarchy, and scale cues."
 						>
 							<div className="space-y-4">
-								<Definition label="Detected fonts" value={profile.fonts.join(", ") || "No fonts returned"} />
+								<Definition
+									label="Detected fonts"
+									value={profile.fonts.join(", ") || "No fonts returned"}
+								/>
 								<Definition label="Primary font" value={profile.typography.primaryFont ?? "—"} />
 								<Definition label="Heading font" value={profile.typography.headingFont ?? "—"} />
 								<Definition label="Body font" value={profile.typography.bodyFont ?? "—"} />
@@ -443,9 +474,18 @@ function BrandOverview({ profile }: { profile: BrandProfile }) {
 						>
 							<div className="space-y-4">
 								<Definition label="Framework" value={profile.designSystem.framework ?? "—"} />
-								<Definition label="Component library" value={profile.designSystem.componentLibrary ?? "—"} />
-								<Definition label="Implementation style" value={profile.designSystem.implementationStyle ?? "—"} />
-								<Definition label="Base spacing" value={profile.spacing.baseUnit ? `${profile.spacing.baseUnit}px` : "—"} />
+								<Definition
+									label="Component library"
+									value={profile.designSystem.componentLibrary ?? "—"}
+								/>
+								<Definition
+									label="Implementation style"
+									value={profile.designSystem.implementationStyle ?? "—"}
+								/>
+								<Definition
+									label="Base spacing"
+									value={profile.spacing.baseUnit ? `${profile.spacing.baseUnit}px` : "—"}
+								/>
 								<Definition label="Spacing rhythm" value={profile.spacing.rhythm ?? "—"} />
 								<Definition label="Border radius" value={profile.spacing.borderRadius ?? "—"} />
 								{profile.designSystem.notes.length ? (
@@ -463,18 +503,22 @@ function BrandOverview({ profile }: { profile: BrandProfile }) {
 						<SectionCard
 							icon={ImageIcon}
 							title="Imagery & logo"
-							description="Preview the actual asset Firecrawl selected, plus other linked image metadata."
+							description="Preview the actual asset Context.dev selected, plus other linked image metadata."
 						>
 							<div className="space-y-4">
 								<div className="grid gap-3 sm:grid-cols-2">
 									<div className="space-y-2">
-										<p className="text-xs font-medium text-muted-foreground">Raw Firecrawl selection</p>
+										<p className="text-xs font-medium text-muted-foreground">
+											Raw Context.dev selection
+										</p>
 										<div className="flex min-h-40 items-center justify-center rounded-xl border bg-muted/40 p-6">
 											{hasLogo && logoUrl ? (
 												// eslint-disable-next-line @next/next/no-img-element
 												<img
 													src={logoUrl}
-													alt={profile.images.logo.alt ?? `${profile.brandName ?? profile.url} logo`}
+													alt={
+														profile.images.logo.alt ?? `${profile.brandName ?? profile.url} logo`
+													}
 													className="max-h-28 max-w-full object-contain"
 												/>
 											) : (
@@ -483,7 +527,9 @@ function BrandOverview({ profile }: { profile: BrandProfile }) {
 										</div>
 									</div>
 									<div className="space-y-2">
-										<p className="text-xs font-medium text-muted-foreground">Canonical (normalized) logo</p>
+										<p className="text-xs font-medium text-muted-foreground">
+											Canonical (normalized) logo
+										</p>
 										<div className="flex min-h-40 items-center justify-center rounded-xl border bg-muted/40 p-6">
 											{canonicalLogoUri ? (
 												// eslint-disable-next-line @next/next/no-img-element
@@ -501,7 +547,10 @@ function BrandOverview({ profile }: { profile: BrandProfile }) {
 								<div className="space-y-3 text-sm">
 									<Definition label="Primary logo URL" value={profile.primaryLogoUrl ?? "—"} />
 									<Definition label="Logo kind" value={profile.images.logo.kind ?? "—"} />
-									<Definition label="Canonical logo source" value={profile.images.logo.canonicalSourceUrl ?? "—"} />
+									<Definition
+										label="Canonical logo source"
+										value={profile.images.logo.canonicalSourceUrl ?? "—"}
+									/>
 									<Definition label="Imagery style" value={profile.images.imageryStyle ?? "—"} />
 									<Definition label="Favicon" value={profile.images.faviconUrl ?? "—"} />
 									<Definition label="OG image" value={profile.images.ogImageUrl ?? "—"} />
@@ -543,7 +592,10 @@ function BrandOverview({ profile }: { profile: BrandProfile }) {
 							<div className="space-y-4 text-sm">
 								<Definition label="Normalized URL" value={profile.url} />
 								<Definition label="Page title" value={readMetadataString(profile.metadata.title)} />
-								<Definition label="Status code" value={readMetadataString(profile.metadata.statusCode)} />
+								<Definition
+									label="Status code"
+									value={readMetadataString(profile.metadata.statusCode)}
+								/>
 								<Separator />
 								<div>
 									<p className="mb-2 text-sm font-medium">Additional logo candidates</p>
@@ -551,11 +603,16 @@ function BrandOverview({ profile }: { profile: BrandProfile }) {
 										<ul className="min-w-0 space-y-2 text-xs text-muted-foreground">
 											{profile.logoUrls.map((url) => {
 												const isDataUri = url.startsWith("data:");
-												const display = isDataUri || url.length > MAX_INLINE_VALUE_LENGTH
-													? `${url.slice(0, MAX_INLINE_VALUE_LENGTH)}…`
-													: url;
+												const display =
+													isDataUri || url.length > MAX_INLINE_VALUE_LENGTH
+														? `${url.slice(0, MAX_INLINE_VALUE_LENGTH)}…`
+														: url;
 												return (
-													<li key={url} className="min-w-0 [overflow-wrap:anywhere]" title={display === url ? undefined : url}>
+													<li
+														key={url}
+														className="min-w-0 [overflow-wrap:anywhere]"
+														title={display === url ? undefined : url}
+													>
 														{display}
 													</li>
 												);
@@ -593,7 +650,10 @@ function BrandValidationPanel({
 		return (
 			<Card className="border-dashed">
 				<CardContent className="flex flex-col items-center gap-4 py-12 text-center text-sm text-muted-foreground">
-					<p>Run the validation step to cross-check the extracted profile against a fresh screenshot and Claude review.</p>
+					<p>
+						Run the validation step to cross-check the extracted profile against fresh rendered-page
+						content and Claude review.
+					</p>
 					<Button type="button" onClick={onValidate} disabled={disabled}>
 						{isValidating ? <LoaderCircle className="animate-spin" /> : <Sparkles />}
 						Validate fidelity
@@ -609,10 +669,20 @@ function BrandValidationPanel({
 				<CardContent className="flex flex-col gap-4 pt-6">
 					<Alert variant="destructive">
 						<ShieldX className="size-4" />
-						<AlertTitle>{validationResult.status === "not_configured" ? "Validation not configured" : "Validation failed"}</AlertTitle>
+						<AlertTitle>
+							{validationResult.status === "not_configured"
+								? "Validation not configured"
+								: "Validation failed"}
+						</AlertTitle>
 						<AlertDescription>{validationResult.message}</AlertDescription>
 					</Alert>
-					<Button type="button" variant="outline" className="self-start" onClick={onValidate} disabled={disabled}>
+					<Button
+						type="button"
+						variant="outline"
+						className="self-start"
+						onClick={onValidate}
+						disabled={disabled}
+					>
 						{isValidating ? <LoaderCircle className="animate-spin" /> : <Sparkles />}
 						Retry validation
 					</Button>
@@ -627,7 +697,12 @@ function BrandValidationPanel({
 		warn: "border-amber-200 bg-amber-50 text-amber-700",
 		fail: "border-rose-200 bg-rose-50 text-rose-700",
 	};
-	const Icon = assessment.status === "pass" ? ShieldCheck : assessment.status === "warn" ? ShieldAlert : ShieldX;
+	const Icon =
+		assessment.status === "pass"
+			? ShieldCheck
+			: assessment.status === "warn"
+				? ShieldAlert
+				: ShieldX;
 
 	return (
 		<Card>
@@ -642,9 +717,16 @@ function BrandValidationPanel({
 					</div>
 					<div className="flex flex-wrap items-center gap-3">
 						<Badge variant="outline" className={cn("capitalize", statusStyles[assessment.status])}>
-							{assessment.status} · {assessment.similarityScore}/100 · {assessment.confidence} confidence
+							{assessment.status} · {assessment.similarityScore}/100 · {assessment.confidence}{" "}
+							confidence
 						</Badge>
-						<Button type="button" variant="outline" size="sm" onClick={onValidate} disabled={disabled}>
+						<Button
+							type="button"
+							variant="outline"
+							size="sm"
+							onClick={onValidate}
+							disabled={disabled}
+						>
 							{isValidating ? <LoaderCircle className="animate-spin" /> : <Sparkles />}
 							Re-run validation
 						</Button>
@@ -666,15 +748,9 @@ function BrandValidationPanel({
 			<CardContent className="grid min-w-0 gap-6 lg:grid-cols-[0.95fr_1.05fr]">
 				<div className="space-y-4">
 					<Definition label="Model" value={validationResult.model} />
-					<Definition label="Screenshot URL" value={validationResult.screenshotUrl} />
-					<Definition
-						label="Derived tone"
-						value={assessment.derivedSignals.toneOfVoice ?? "—"}
-					/>
-					<Definition
-						label="Imagery style"
-						value={assessment.derivedSignals.imageryStyle ?? "—"}
-					/>
+					<Definition label="Reference URL" value={validationResult.referenceUrl} />
+					<Definition label="Derived tone" value={assessment.derivedSignals.toneOfVoice ?? "—"} />
+					<Definition label="Imagery style" value={assessment.derivedSignals.imageryStyle ?? "—"} />
 					<Definition
 						label="Type hierarchy"
 						value={assessment.derivedSignals.typeHierarchy ?? "—"}
@@ -712,7 +788,9 @@ function BrandValidationPanel({
 									</div>
 									<p className="text-sm">{gap.issue}</p>
 									<p className="mt-2 text-xs text-muted-foreground">Evidence: {gap.evidence}</p>
-									<p className="mt-2 text-xs text-muted-foreground">Recommendation: {gap.recommendation}</p>
+									<p className="mt-2 text-xs text-muted-foreground">
+										Recommendation: {gap.recommendation}
+									</p>
 								</div>
 							))}
 						</div>
@@ -765,8 +843,9 @@ function BrandCompetitorPanel({
 			<Card className="border-dashed">
 				<CardContent className="flex flex-col gap-4 py-8">
 					<p className="text-center text-sm text-muted-foreground">
-						Compare this brand against named competitors: token-level distinctiveness (palette families, fonts,
-						tone descriptors) plus a Claude-vision visual-similarity score when ANTHROPIC_API_KEY is configured.
+						Compare this brand against named competitors on extracted palette families, fonts, and
+						tone descriptors. Visual-similarity scoring is unavailable in the current Context.dev
+						cutover because the ingestion flow no longer fetches screenshots.
 					</p>
 					{inputRow}
 				</CardContent>
@@ -781,7 +860,9 @@ function BrandCompetitorPanel({
 					<Alert variant="destructive">
 						<ShieldX className="size-4" />
 						<AlertTitle>
-							{compareResult.status === "not_configured" ? "Comparison not configured" : "Comparison failed"}
+							{compareResult.status === "not_configured"
+								? "Comparison not configured"
+								: "Comparison failed"}
 						</AlertTitle>
 						<AlertDescription>{compareResult.message}</AlertDescription>
 					</Alert>
@@ -810,8 +891,12 @@ function BrandCompetitorPanel({
 				</CardHeader>
 				<CardContent className="flex flex-col gap-4">
 					<div className="flex flex-wrap items-center gap-2">
-						<Badge variant="outline" className={cn("capitalize", statusStyles[overallDistinctiveness.status])}>
-							Token distinctiveness · {overallDistinctiveness.score}/100 · {overallDistinctiveness.status}
+						<Badge
+							variant="outline"
+							className={cn("capitalize", statusStyles[overallDistinctiveness.status])}
+						>
+							Token distinctiveness · {overallDistinctiveness.score}/100 ·{" "}
+							{overallDistinctiveness.status}
 						</Badge>
 						{overallVisualDistinctiveness ? (
 							<Badge
@@ -822,7 +907,9 @@ function BrandCompetitorPanel({
 								{overallVisualDistinctiveness.status}
 							</Badge>
 						) : (
-							<Badge variant="outline">Visual check unavailable — set ANTHROPIC_API_KEY</Badge>
+							<Badge variant="outline">
+								Visual check unavailable in the current Context.dev cutover
+							</Badge>
 						)}
 					</div>
 					{inputRow}
@@ -837,7 +924,10 @@ function BrandCompetitorPanel({
 								<CardTitle className="text-base">
 									{comparison.competitorBrandName ?? competitorProfile.url}
 								</CardTitle>
-								<Badge variant="outline" className={cn("capitalize", statusStyles[comparison.status])}>
+								<Badge
+									variant="outline"
+									className={cn("capitalize", statusStyles[comparison.status])}
+								>
 									{comparison.distinctivenessScore}/100 · {comparison.status}
 								</Badge>
 							</div>
@@ -845,7 +935,10 @@ function BrandCompetitorPanel({
 						</CardHeader>
 						<CardContent className="space-y-3 text-sm">
 							{comparison.sharedColorFamilies.length ? (
-								<Definition label="Shared color families" value={comparison.sharedColorFamilies.join(", ")} />
+								<Definition
+									label="Shared color families"
+									value={comparison.sharedColorFamilies.join(", ")}
+								/>
 							) : null}
 							{comparison.sharedFonts.length ? (
 								<Definition label="Shared fonts" value={comparison.sharedFonts.join(", ")} />
@@ -858,10 +951,15 @@ function BrandCompetitorPanel({
 								{comparison.visualSimilarity ? (
 									<>
 										<p className="text-sm font-semibold">{comparison.visualSimilarity.score}/100</p>
-										<p className="text-xs text-muted-foreground">{comparison.visualSimilarity.rationale}</p>
+										<p className="text-xs text-muted-foreground">
+											{comparison.visualSimilarity.rationale}
+										</p>
 									</>
 								) : (
-									<EmptyCopy>Not available for this competitor (screenshot unavailable or Anthropic not configured).</EmptyCopy>
+									<EmptyCopy>
+										Not available in the current Context.dev cutover because screenshots are no
+										longer fetched.
+									</EmptyCopy>
 								)}
 							</div>
 						</CardContent>
@@ -881,7 +979,9 @@ function Definition({ label, value }: { label: string; value: string }) {
 
 	return (
 		<div className="min-w-0 space-y-1">
-			<p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">{label}</p>
+			<p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
+				{label}
+			</p>
 			<p
 				className="min-w-0 text-sm text-foreground [overflow-wrap:anywhere]"
 				title={displayValue === value ? undefined : value}
@@ -953,7 +1053,10 @@ function StatusAlert({ message }: { message: StatusMessage }) {
 	};
 
 	return (
-		<Alert variant={message.tone === "destructive" ? "destructive" : "default"} className={styles[message.tone]}>
+		<Alert
+			variant={message.tone === "destructive" ? "destructive" : "default"}
+			className={styles[message.tone]}
+		>
 			<AlertCircle className="size-4" />
 			<AlertTitle>{message.title}</AlertTitle>
 			<AlertDescription>{message.description}</AlertDescription>
@@ -972,7 +1075,7 @@ function toIngestionStatusMessage(result: BrandIngestionResult): StatusMessage {
 
 	if (result.status === "not_configured") {
 		return {
-			title: "Firecrawl not configured",
+			title: "Context.dev not configured",
 			description: result.message,
 			tone: "warning",
 		};
@@ -990,7 +1093,12 @@ function toValidationStatusMessage(result: BrandFidelityValidationResult): Statu
 		return {
 			title: `Validation complete: ${result.assessment.status}`,
 			description: `${result.assessment.similarityScore}/100 similarity. ${result.assessment.summary}`,
-			tone: result.assessment.status === "pass" ? "success" : result.assessment.status === "warn" ? "warning" : "destructive",
+			tone:
+				result.assessment.status === "pass"
+					? "success"
+					: result.assessment.status === "warn"
+						? "warning"
+						: "destructive",
 		};
 	}
 
@@ -1016,7 +1124,7 @@ function toCompareStatusMessage(result: BrandCompetitorComparisonResult): Status
 			title: `Comparison complete: ${overallDistinctiveness.status}`,
 			description: overallVisualDistinctiveness
 				? `${overallDistinctiveness.score}/100 token distinctiveness, ${overallVisualDistinctiveness.score}/100 visual distinctiveness.`
-				: `${overallDistinctiveness.score}/100 token distinctiveness. Set ANTHROPIC_API_KEY to add a visual-similarity check.`,
+				: `${overallDistinctiveness.score}/100 token distinctiveness. Visual-similarity scoring is unavailable in the current Context.dev cutover.`,
 			tone:
 				overallDistinctiveness.status === "distinct"
 					? "success"

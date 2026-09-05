@@ -16,9 +16,7 @@ function describeMap(values: Record<string, string>): string {
 	const entries = Object.entries(values);
 	if (!entries.length) return "none";
 
-	return entries
-		.map(([key, value]) => `${key}=${value}`)
-		.join(", ");
+	return entries.map(([key, value]) => `${key}=${value}`).join(", ");
 }
 
 function summarizeValue(value: string | null): string {
@@ -37,7 +35,7 @@ async function main() {
 			: DEFAULT_TARGETS;
 
 	console.log(
-		`Running Firecrawl brand-ingestion probe for ${argTargets.length} site${argTargets.length === 1 ? "" : "s"}.\n`
+		`Running Context.dev brand-ingestion probe for ${argTargets.length} site${argTargets.length === 1 ? "" : "s"}.\n`
 	);
 
 	for (const target of argTargets) {
@@ -57,10 +55,14 @@ async function main() {
 				}`
 			);
 			console.log(`colors (${Object.keys(profile.colors).length}): ${describeMap(profile.colors)}`);
-			console.log(`fonts (${profile.fonts.length}): ${profile.fonts.length ? profile.fonts.join(", ") : "none"}`);
+			console.log(
+				`fonts (${profile.fonts.length}): ${profile.fonts.length ? profile.fonts.join(", ") : "none"}`
+			);
 			console.log(
 				`typography keys: ${
-					Object.keys(profile.typography).length ? Object.keys(profile.typography).join(", ") : "none"
+					Object.keys(profile.typography).length
+						? Object.keys(profile.typography).join(", ")
+						: "none"
 				}`
 			);
 			console.log(
@@ -68,7 +70,9 @@ async function main() {
 			);
 			console.log(
 				`component keys: ${
-					Object.keys(profile.components).length ? Object.keys(profile.components).join(", ") : "none"
+					Object.keys(profile.components).length
+						? Object.keys(profile.components).join(", ")
+						: "none"
 				}`
 			);
 			console.log(
@@ -76,18 +80,24 @@ async function main() {
 			);
 			console.log(
 				`personality keys: ${
-					Object.keys(profile.personality).length ? Object.keys(profile.personality).join(", ") : "none"
+					Object.keys(profile.personality).length
+						? Object.keys(profile.personality).join(", ")
+						: "none"
 				}`
 			);
 			console.log(
 				`design-system keys: ${
-					Object.keys(profile.designSystem).length ? Object.keys(profile.designSystem).join(", ") : "none"
+					Object.keys(profile.designSystem).length
+						? Object.keys(profile.designSystem).join(", ")
+						: "none"
 				}`
 			);
 			if (Object.keys(profile.metadata).length) {
 				const title = typeof profile.metadata.title === "string" ? profile.metadata.title : "n/a";
 				const statusCode =
-					typeof profile.metadata.statusCode === "number" ? String(profile.metadata.statusCode) : "n/a";
+					typeof profile.metadata.statusCode === "number"
+						? String(profile.metadata.statusCode)
+						: "n/a";
 				console.log(`page metadata: title="${title}", statusCode=${statusCode}`);
 			}
 		} catch (error) {

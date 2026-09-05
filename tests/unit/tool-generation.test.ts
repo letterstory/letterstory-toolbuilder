@@ -33,28 +33,42 @@ const originalEnv = {
 
 function mockAnthropicSuccess(mainText: string) {
 	global.fetch = vi.fn().mockImplementation(async (_url, init) => {
-		const parsedBody = JSON.parse(String((init as RequestInit | undefined)?.body ?? "{}")) as { system?: string };
+		const parsedBody = JSON.parse(String((init as RequestInit | undefined)?.body ?? "{}")) as {
+			system?: string;
+		};
 		const system = parsedBody.system ?? "";
 		if (system.includes("VERDICT:")) {
-			return new Response(JSON.stringify({ content: [{ type: "text", text: "VERDICT: pass\nNOTES:" }] }), {
-				status: 200,
-			});
+			return new Response(
+				JSON.stringify({ content: [{ type: "text", text: "VERDICT: pass\nNOTES:" }] }),
+				{
+					status: 200,
+				}
+			);
 		}
 		if (system.includes("HEADLINE:")) {
 			return new Response(
-				JSON.stringify({ content: [{ type: "text", text: "HEADLINE: Test headline\nCOPY: Test copy." }] }),
+				JSON.stringify({
+					content: [{ type: "text", text: "HEADLINE: Test headline\nCOPY: Test copy." }],
+				}),
 				{ status: 200 }
 			);
 		}
-		return new Response(JSON.stringify({ content: [{ type: "text", text: mainText }] }), { status: 200 });
+		return new Response(JSON.stringify({ content: [{ type: "text", text: mainText }] }), {
+			status: 200,
+		});
 	}) as unknown as typeof fetch;
 }
 
 /** Fallback response used for the advisory (copy/fidelity) calls in tests that hand-sequence the main generation call(s). */
 const advisoryFallbackResponse = () =>
-	new Response(JSON.stringify({ content: [{ type: "text", text: "HEADLINE: Test headline\nCOPY: Test copy." }] }), {
-		status: 200,
-	});
+	new Response(
+		JSON.stringify({
+			content: [{ type: "text", text: "HEADLINE: Test headline\nCOPY: Test copy." }],
+		}),
+		{
+			status: 200,
+		}
+	);
 
 describe("generateTool", () => {
 	beforeEach(() => {
@@ -93,7 +107,9 @@ describe("generateTool", () => {
 	});
 
 	it("keeps the Anthropic pipeline budget under both the target and nginx caps", () => {
-		expect(MAX_ANTHROPIC_PIPELINE_WORST_CASE_MS).toBeLessThanOrEqual(TOOL_GENERATION_TARGET_BUDGET_MS);
+		expect(MAX_ANTHROPIC_PIPELINE_WORST_CASE_MS).toBeLessThanOrEqual(
+			TOOL_GENERATION_TARGET_BUDGET_MS
+		);
 		expect(MAX_ANTHROPIC_PIPELINE_WORST_CASE_MS).toBeLessThan(NGINX_GENERATION_ROUTE_BUDGET_MS);
 	});
 
@@ -176,14 +192,22 @@ describe("generateTool", () => {
 
 		expect(result.status).toBe("success");
 		const htmlCall = (global.fetch as ReturnType<typeof vi.fn>).mock.calls.find(([, init]) => {
-			const parsed = JSON.parse(String((init as RequestInit | undefined)?.body ?? "{}")) as { system?: string };
-			return !(parsed.system ?? "").includes("VERDICT:") && !(parsed.system ?? "").includes("HEADLINE:");
+			const parsed = JSON.parse(String((init as RequestInit | undefined)?.body ?? "{}")) as {
+				system?: string;
+			};
+			return (
+				!(parsed.system ?? "").includes("VERDICT:") && !(parsed.system ?? "").includes("HEADLINE:")
+			);
 		});
-		const htmlCallBody = JSON.parse(String((htmlCall?.[1] as RequestInit | undefined)?.body ?? "{}")) as {
+		const htmlCallBody = JSON.parse(
+			String((htmlCall?.[1] as RequestInit | undefined)?.body ?? "{}")
+		) as {
 			messages?: Array<{ content: string }>;
 		};
 		expect(htmlCallBody.messages?.[0]?.content).toContain("Logo asset omitted from the prompt");
-		expect(htmlCallBody.messages?.[0]?.content).not.toContain(`data:image/png;base64,${"a".repeat(5000)}`);
+		expect(htmlCallBody.messages?.[0]?.content).not.toContain(
+			`data:image/png;base64,${"a".repeat(5000)}`
+		);
 	});
 
 	it("generates supporting headline/copy alongside the tool", async () => {
@@ -200,14 +224,21 @@ describe("generateTool", () => {
 
 	it("adds a warning but still succeeds when supporting-copy generation is unparseable", async () => {
 		global.fetch = vi.fn().mockImplementation(async (_url, init) => {
-			const parsedBody = JSON.parse(String((init as RequestInit | undefined)?.body ?? "{}")) as { system?: string };
+			const parsedBody = JSON.parse(String((init as RequestInit | undefined)?.body ?? "{}")) as {
+				system?: string;
+			};
 			if ((parsedBody.system ?? "").includes("HEADLINE:")) {
-				return new Response(JSON.stringify({ content: [{ type: "text", text: "I refuse to answer." }] }), {
-					status: 200,
-				});
+				return new Response(
+					JSON.stringify({ content: [{ type: "text", text: "I refuse to answer." }] }),
+					{
+						status: 200,
+					}
+				);
 			}
 			return new Response(
-				JSON.stringify({ content: [{ type: "text", text: "<!doctype html><html><body>hi</body></html>" }] }),
+				JSON.stringify({
+					content: [{ type: "text", text: "<!doctype html><html><body>hi</body></html>" }],
+				}),
 				{ status: 200 }
 			);
 		}) as unknown as typeof fetch;
@@ -230,22 +261,32 @@ describe("generateTool", () => {
 			images: { logo: { canonicalDataUri: null } },
 		});
 		global.fetch = vi.fn().mockImplementation(async (_url, init) => {
-			const parsedBody = JSON.parse(String((init as RequestInit | undefined)?.body ?? "{}")) as { system?: string };
+			const parsedBody = JSON.parse(String((init as RequestInit | undefined)?.body ?? "{}")) as {
+				system?: string;
+			};
 			const system = parsedBody.system ?? "";
 			if (system.includes("VERDICT:")) {
 				return new Response(
-					JSON.stringify({ content: [{ type: "text", text: "VERDICT: fail\nNOTES: uses a different color palette" }] }),
+					JSON.stringify({
+						content: [
+							{ type: "text", text: "VERDICT: fail\nNOTES: uses a different color palette" },
+						],
+					}),
 					{ status: 200 }
 				);
 			}
 			if (system.includes("HEADLINE:")) {
 				return new Response(
-					JSON.stringify({ content: [{ type: "text", text: "HEADLINE: Test headline\nCOPY: Test copy." }] }),
+					JSON.stringify({
+						content: [{ type: "text", text: "HEADLINE: Test headline\nCOPY: Test copy." }],
+					}),
 					{ status: 200 }
 				);
 			}
 			return new Response(
-				JSON.stringify({ content: [{ type: "text", text: "<!doctype html><html><body>hi</body></html>" }] }),
+				JSON.stringify({
+					content: [{ type: "text", text: "<!doctype html><html><body>hi</body></html>" }],
+				}),
 				{ status: 200 }
 			);
 		}) as unknown as typeof fetch;
@@ -258,12 +299,17 @@ describe("generateTool", () => {
 
 		expect(result.status).toBe("success");
 		if (result.status === "success") {
-			expect(result.tool.brandFidelity).toEqual({ verdict: "fail", notes: "uses a different color palette" });
-			expect(result.tool.warnings.some((w) => w.includes("Brand fidelity check (fail)"))).toBe(true);
+			expect(result.tool.brandFidelity).toEqual({
+				verdict: "fail",
+				notes: "uses a different color palette",
+			});
+			expect(result.tool.warnings.some((w) => w.includes("Brand fidelity check (fail)"))).toBe(
+				true
+			);
 		}
 	});
 
-	it("continues without brand context (with a warning) when Firecrawl isn't configured", async () => {
+	it("continues without brand context (with a warning) when Context.dev isn't configured", async () => {
 		isBrandIngestionConfiguredMock.mockReturnValue(false);
 		mockAnthropicSuccess("<!doctype html><html><body>hi</body></html>");
 
@@ -277,7 +323,9 @@ describe("generateTool", () => {
 		expect(result.status).toBe("success");
 		if (result.status === "success") {
 			expect(result.tool.brandSnapshot).toBeNull();
-			expect(result.tool.warnings.some((w) => w.includes("Firecrawl isn't configured"))).toBe(true);
+			expect(result.tool.warnings.some((w) => w.includes("Context.dev isn't configured"))).toBe(
+				true
+			);
 		}
 	});
 
@@ -302,7 +350,8 @@ describe("generateTool", () => {
 		global.fetch = vi
 			.fn()
 			.mockImplementation(
-				async () => new Response(JSON.stringify({ error: { message: "rate limited" } }), { status: 429 })
+				async () =>
+					new Response(JSON.stringify({ error: { message: "rate limited" } }), { status: 429 })
 			) as unknown as typeof fetch;
 
 		const result = await generateTool({ projectName: "Calc", siteUrl: "", prompt: "a calculator" });
@@ -332,7 +381,9 @@ describe("generateTool", () => {
 	it("retries once and succeeds when the first Anthropic call gets a transient 5xx", async () => {
 		const fetchMock = vi
 			.fn()
-			.mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: "overloaded" } }), { status: 529 }))
+			.mockResolvedValueOnce(
+				new Response(JSON.stringify({ error: { message: "overloaded" } }), { status: 529 })
+			)
 			.mockResolvedValueOnce(
 				new Response(
 					JSON.stringify({
@@ -351,9 +402,12 @@ describe("generateTool", () => {
 	});
 
 	it("uses the expected timeout budgets for the main and advisory Claude calls", async () => {
-		const timeoutSpy = vi.spyOn(AbortSignal, "timeout").mockImplementation(
-			((ms: number) => ({ timeoutMs: ms }) as unknown as AbortSignal) as typeof AbortSignal.timeout
-		);
+		const timeoutSpy = vi
+			.spyOn(AbortSignal, "timeout")
+			.mockImplementation(
+				((ms: number) =>
+					({ timeoutMs: ms }) as unknown as AbortSignal) as typeof AbortSignal.timeout
+			);
 		mockAnthropicSuccess("<!doctype html><html><body>hi</body></html>");
 
 		const result = await generateTool({ projectName: "Calc", siteUrl: "", prompt: "a calculator" });
@@ -408,9 +462,12 @@ describe("generateTool", () => {
 	it("gives up and returns an error after the retry also produces invalid HTML", async () => {
 		const fetchMock = vi.fn().mockImplementation(
 			async () =>
-				new Response(JSON.stringify({ content: [{ type: "text", text: "Sorry, I can't help with that." }] }), {
-					status: 200,
-				})
+				new Response(
+					JSON.stringify({ content: [{ type: "text", text: "Sorry, I can't help with that." }] }),
+					{
+						status: 200,
+					}
+				)
 		);
 		global.fetch = fetchMock as unknown as typeof fetch;
 
@@ -500,10 +557,16 @@ describe("generateTool — revisions (toolId set)", () => {
 		// The main-HTML call should have included the existing document + the
 		// new prompt as revision instructions, not a from-scratch brief.
 		const htmlCall = (global.fetch as ReturnType<typeof vi.fn>).mock.calls.find(([, init]) => {
-			const parsed = JSON.parse(String((init as RequestInit | undefined)?.body ?? "{}")) as { system?: string };
-			return !(parsed.system ?? "").includes("VERDICT:") && !(parsed.system ?? "").includes("HEADLINE:");
+			const parsed = JSON.parse(String((init as RequestInit | undefined)?.body ?? "{}")) as {
+				system?: string;
+			};
+			return (
+				!(parsed.system ?? "").includes("VERDICT:") && !(parsed.system ?? "").includes("HEADLINE:")
+			);
 		});
-		const htmlCallBody = JSON.parse(String((htmlCall?.[1] as RequestInit | undefined)?.body ?? "{}")) as {
+		const htmlCallBody = JSON.parse(
+			String((htmlCall?.[1] as RequestInit | undefined)?.body ?? "{}")
+		) as {
 			system?: string;
 			messages?: Array<{ content: string }>;
 		};
@@ -521,7 +584,12 @@ describe("generateTool — revisions (toolId set)", () => {
 		getGeneratedToolMock.mockResolvedValue({
 			...existingTool,
 			siteUrl: "https://stripe.com",
-			brandSnapshot: { brandName: "Stripe", colors: { primary: "#635bff" }, fonts: ["Inter"], logoDataUri: null },
+			brandSnapshot: {
+				brandName: "Stripe",
+				colors: { primary: "#635bff" },
+				fonts: ["Inter"],
+				logoDataUri: null,
+			},
 		});
 		mockAnthropicSuccess("<!doctype html><html><body>revised</body></html>");
 
@@ -561,12 +629,18 @@ describe("generateTool — revisions (toolId set)", () => {
 	it("keeps the previous copy when the revision's copy generation is unparseable", async () => {
 		getGeneratedToolMock.mockResolvedValue(existingTool);
 		global.fetch = vi.fn().mockImplementation(async (_url, init) => {
-			const parsedBody = JSON.parse(String((init as RequestInit | undefined)?.body ?? "{}")) as { system?: string };
+			const parsedBody = JSON.parse(String((init as RequestInit | undefined)?.body ?? "{}")) as {
+				system?: string;
+			};
 			if ((parsedBody.system ?? "").includes("HEADLINE:")) {
-				return new Response(JSON.stringify({ content: [{ type: "text", text: "nope" }] }), { status: 200 });
+				return new Response(JSON.stringify({ content: [{ type: "text", text: "nope" }] }), {
+					status: 200,
+				});
 			}
 			return new Response(
-				JSON.stringify({ content: [{ type: "text", text: "<!doctype html><html><body>revised</body></html>" }] }),
+				JSON.stringify({
+					content: [{ type: "text", text: "<!doctype html><html><body>revised</body></html>" }],
+				}),
 				{ status: 200 }
 			);
 		}) as unknown as typeof fetch;

@@ -1,5 +1,5 @@
 // Fixed-window rate limiter for expensive/paid-API-backed routes
-// (Anthropic tool generation, Firecrawl brand ingestion/compare/validate).
+// (Anthropic tool generation, Context.dev brand ingestion/compare/validate).
 //
 // Backed by Supabase (rate_limit_counters table + rate_limit_check RPC, see
 // supabase/migrations/0001_init.sql) when configured, so limits hold across
@@ -81,7 +81,10 @@ async function checkInSupabase(key: string, rule: RateLimitRule): Promise<RateLi
  * identifier (typically a client IP). Call this before doing the expensive
  * work, not after — the counter is incremented as part of the check.
  */
-export async function checkRateLimit(identifier: string, rule: RateLimitRule): Promise<RateLimitResult> {
+export async function checkRateLimit(
+	identifier: string,
+	rule: RateLimitRule
+): Promise<RateLimitResult> {
 	const key = `${rule.bucket}:${identifier}`;
 	if (isSupabaseConfigured()) {
 		return checkInSupabase(key, rule);

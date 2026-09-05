@@ -76,7 +76,7 @@ describe("brand API routes", () => {
 			status: "success",
 			requestedUrl: "https://stripe.com",
 			assessment: { status: "warn", similarityScore: 72, confidence: "high" },
-			screenshotUrl: "https://example.com/screenshot.png",
+			referenceUrl: "https://stripe.com",
 			model: "claude-sonnet-4-6",
 			enrichedProfile: profile,
 		});

@@ -17,12 +17,12 @@ build:
 
 env:
   # Plain, non-secret defaults only. The real secrets (ANTHROPIC_API_KEY,
-  # FIRECRAWL_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY) come from the
+  # CONTEXT_DEV_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY) come from the
   # `letterstory-toolbuilder-secrets` env group attached to this app
   # (see `porter app update --attach-env-groups` / the Porter dashboard) —
   # never written here in plaintext.
   ANTHROPIC_MODEL: claude-sonnet-4-6
-  FIRECRAWL_BASE_URL: https://api.firecrawl.dev
+  CONTEXT_DEV_BASE_URL: https://api.context.dev/v1
   PORTER_ENVIRONMENT: staging
 
 services:

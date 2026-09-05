@@ -3,21 +3,21 @@ import { ingestBrandContext, isBrandIngestionConfigured } from "../../src/lib/br
 import { requestPorterDeployment, isPorterConfigured } from "../../src/lib/deploy/porter";
 
 const originalEnv = {
-	FIRECRAWL_API_KEY: process.env.FIRECRAWL_API_KEY,
+	CONTEXT_DEV_API_KEY: process.env.CONTEXT_DEV_API_KEY,
 	PORTER_API_TOKEN: process.env.PORTER_API_TOKEN,
 };
 
 describe("platform scaffold gates", () => {
 	beforeEach(() => {
-		if (originalEnv.FIRECRAWL_API_KEY === undefined) delete process.env.FIRECRAWL_API_KEY;
-		else process.env.FIRECRAWL_API_KEY = originalEnv.FIRECRAWL_API_KEY;
+		if (originalEnv.CONTEXT_DEV_API_KEY === undefined) delete process.env.CONTEXT_DEV_API_KEY;
+		else process.env.CONTEXT_DEV_API_KEY = originalEnv.CONTEXT_DEV_API_KEY;
 
 		if (originalEnv.PORTER_API_TOKEN === undefined) delete process.env.PORTER_API_TOKEN;
 		else process.env.PORTER_API_TOKEN = originalEnv.PORTER_API_TOKEN;
 	});
 
-	it("reports brand ingestion as not configured without a Firecrawl key", async () => {
-		delete process.env.FIRECRAWL_API_KEY;
+	it("reports brand ingestion as not configured without a Context.dev key", async () => {
+		delete process.env.CONTEXT_DEV_API_KEY;
 
 		expect(isBrandIngestionConfigured()).toBe(false);
 		await expect(ingestBrandContext({ siteUrl: "https://example.com" })).resolves.toMatchObject({

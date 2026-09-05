@@ -5,11 +5,11 @@ export const envServer = {
 	get ANTHROPIC_MODEL() {
 		return process.env.ANTHROPIC_MODEL?.trim() || "claude-sonnet-4-6";
 	},
-	get FIRECRAWL_API_KEY() {
-		return process.env.FIRECRAWL_API_KEY?.trim() ?? "";
+	get CONTEXT_DEV_API_KEY() {
+		return process.env.CONTEXT_DEV_API_KEY?.trim() ?? "";
 	},
-	get FIRECRAWL_BASE_URL() {
-		return process.env.FIRECRAWL_BASE_URL?.trim() || "https://api.firecrawl.dev";
+	get CONTEXT_DEV_BASE_URL() {
+		return process.env.CONTEXT_DEV_BASE_URL?.trim() || "https://api.context.dev/v1";
 	},
 	get PORTER_API_TOKEN() {
 		return process.env.PORTER_API_TOKEN?.trim() ?? "";
