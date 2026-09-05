@@ -716,6 +716,123 @@ function buildFallbackFontFace(family: string, fontLinks: ContextFontLinks): Bra
 	};
 }
 
+const GENERIC_FONT_FAMILIES = new Set([
+	"arial",
+	"blinkmacsystemfont",
+	"courier",
+	"courier new",
+	"georgia",
+	"helvetica",
+	"helvetica neue",
+	"monospace",
+	"sans-serif",
+	"serif",
+	"system-ui",
+	"times",
+	"times new roman",
+	"verdana",
+]);
+
+function normalizeFontFamilyKey(family: string): string {
+	return family
+		.trim()
+		.replace(/^['"]+|['"]+$/g, "")
+		.replace(/\s+/g, " ")
+		.toLowerCase();
+}
+
+function isGenericFontFamily(family: string | null | undefined): boolean {
+	if (!family) return false;
+	return GENERIC_FONT_FAMILIES.has(normalizeFontFamilyKey(family));
+}
+
+type BodyFontCandidateSource =
+	| "paragraph"
+	| "input"
+	| "primaryButton"
+	| "secondaryButton"
+	| "card"
+	| "ranked";
+
+interface BodyFontCandidate {
+	face: BrandFontFace;
+	source: BodyFontCandidateSource;
+	rankedIndex?: number;
+}
+
+function scoreBodyFontCandidate(candidate: BodyFontCandidate): number {
+	const { face, source, rankedIndex = 99 } = candidate;
+	const hasFiles = Object.keys(face.files).length > 0;
+	const generic = isGenericFontFamily(face.family);
+	const serifish =
+		face.category === "serif" ||
+		face.fallbacks.some((fallback) => normalizeFontFamilyKey(fallback) === "serif");
+
+	let score = 0;
+	switch (source) {
+		case "paragraph":
+			score += 7;
+			break;
+		case "input":
+		case "primaryButton":
+			score += 4;
+			break;
+		case "secondaryButton":
+			score += 2;
+			break;
+		case "card":
+			score += 1;
+			break;
+		case "ranked":
+			score += Math.max(0, 6 - rankedIndex);
+			break;
+	}
+
+	if (hasFiles) score += 6;
+	if (!generic) score += 4;
+	else score -= 6;
+	if (face.google) score += 1;
+	if (serifish && generic) score -= 1;
+
+	return score;
+}
+
+function selectPreferredBodyFontFace(candidates: BodyFontCandidate[]): BrandFontFace | null {
+	const scored = new Map<
+		string,
+		{
+			face: BrandFontFace;
+			score: number;
+			fileCount: number;
+		}
+	>();
+
+	for (const candidate of candidates) {
+		const familyKey = normalizeFontFamilyKey(candidate.face.family);
+		const entry = {
+			face: candidate.face,
+			score: scoreBodyFontCandidate(candidate),
+			fileCount: Object.keys(candidate.face.files).length,
+		};
+		const existing = scored.get(familyKey);
+		if (
+			!existing ||
+			entry.score > existing.score ||
+			(entry.score === existing.score && entry.fileCount > existing.fileCount)
+		) {
+			scored.set(familyKey, entry);
+		}
+	}
+
+	return [...scored.values()]
+		.sort(
+			(left, right) =>
+				right.score - left.score ||
+				right.fileCount - left.fileCount ||
+				left.face.family.localeCompare(right.face.family)
+		)[0]?.face ?? null;
+}
+
 type ContextStyleguideComponents = NonNullable<
 	NonNullable<ContextStyleguideResponse["styleguide"]>["components"]
 >;
@@ -1027,18 +1144,59 @@ export function parseContextDevBranding(payload: {
 			(right.percent_words ?? right.percent_elements ?? 0) -
 			(left.percent_words ?? left.percent_elements ?? 0)
 	);
-	const bodyFontFace =
-		resolveContextFontFace(paragraph?.fontFamily, paragraph?.fontFallbacks, fontLinks) ??
-		resolveContextFontFace(
-			styleguide?.components?.input?.fontFamily,
-			undefined,
-			fontLinks
-		) ??
-		resolveContextFontFace(
-			styleguide?.components?.button?.primary?.fontFamily,
-			undefined,
-			fontLinks
-		);
+	const rankedFontFaces = dedupeStrings(
+		fontRanked.map((font) => readContextFontFamily(font.font))
+	).map((font, index) => ({
+		face:
+			resolveContextFontFace(
+				font,
+				fontRanked.find((candidate) => readContextFontFamily(candidate.font) === font)?.fallbacks,
+				fontLinks
+			) ?? buildFallbackFontFace(font, fontLinks),
+		source: "ranked" as const,
+		rankedIndex: index,
+	}));
+	const bodyFontFace = selectPreferredBodyFontFace(
+		[
+			{
+				face: resolveContextFontFace(paragraph?.fontFamily, paragraph?.fontFallbacks, fontLinks),
+				source: "paragraph" as const,
+			},
+			{
+				face: resolveContextFontFace(
+					styleguide?.components?.input?.fontFamily,
+					styleguide?.components?.input?.fontFallbacks,
+					fontLinks
+				),
+				source: "input" as const,
+			},
+			{
+				face: resolveContextFontFace(
+					styleguide?.components?.button?.primary?.fontFamily,
+					styleguide?.components?.button?.primary?.fontFallbacks,
+					fontLinks
+				),
+				source: "primaryButton" as const,
+			},
+			{
+				face: resolveContextFontFace(
+					styleguide?.components?.button?.secondary?.fontFamily,
+					styleguide?.components?.button?.secondary?.fontFallbacks,
+					fontLinks
+				),
+				source: "secondaryButton" as const,
+			},
+			{
+				face: resolveContextFontFace(
+					styleguide?.components?.card?.fontFamily,
+					styleguide?.components?.card?.fontFallbacks,
+					fontLinks
+				),
+				source: "card" as const,
+			},
+			...rankedFontFaces,
+		].flatMap((candidate) => (candidate.face ? [candidate as BodyFontCandidate] : []))
+	);
 	const headingFontFace =
 		resolveContextFontFace(headings.h1?.fontFamily, headings.h1?.fontFallbacks, fontLinks) ??
 		resolveContextFontFace(headings.h2?.fontFamily, headings.h2?.fontFallbacks, fontLinks) ??
@@ -1046,23 +1204,22 @@ export function parseContextDevBranding(payload: {
 	const bodyFont =
 		bodyFontFace?.family ??
 		componentFonts[0] ??
+		rankedFontFaces[0]?.face.family ??
 		null;
 	const headingFont =
 		headingFontFace?.family ??
 		componentFonts.find((font) => font !== bodyFont) ??
+		rankedFontFaces.find((font) => font.face.family !== bodyFont)?.face.family ??
 		componentFonts[0] ??
 		null;
 	const rankedFonts = fontRanked
 		.map((font) => readContextFontFamily(font.font))
 		.filter((font): font is string => Boolean(font));
-	const fonts = dedupeStrings([...rankedFonts, headingFont, bodyFont, ...componentFonts]);
-	const rankedFontFaces = dedupeStrings(
-		fontRanked.map((font) => readContextFontFamily(font.font))
-	).map((font) => resolveContextFontFace(font, undefined, fontLinks) ?? buildFallbackFontFace(font, fontLinks));
+	const fonts = dedupeStrings([bodyFont, headingFont, ...componentFonts, ...rankedFonts]);
 	const fontFaces = dedupeFontFaces([
 		headingFontFace,
 		bodyFontFace,
-		...rankedFontFaces,
+		...rankedFontFaces.map((entry) => entry.face),
 		...fonts.map((font) => resolveContextFontFace(font, undefined, fontLinks) ?? buildFallbackFontFace(font, fontLinks)),
 	]);
 	const secondaryFont =
@@ -1140,18 +1297,9 @@ export function parseContextDevBranding(payload: {
 			headingFontFace,
 			bodyFontFace,
 			fontStacks: {
-				heading: dedupeStrings([
-					headingFont,
-					...(headings.h1?.fontFallbacks ?? []).map((font) => readContextFontFamily(font)),
-				]),
-				body: dedupeStrings([
-					bodyFont,
-					...(paragraph?.fontFallbacks ?? []).map((font) => readContextFontFamily(font)),
-				]),
-				paragraph: dedupeStrings([
-					bodyFont,
-					...(paragraph?.fontFallbacks ?? []).map((font) => readContextFontFamily(font)),
-				]),
+				heading: dedupeStrings([headingFontFace?.family ?? headingFont, ...(headingFontFace?.fallbacks ?? [])]),
+				body: dedupeStrings([bodyFontFace?.family ?? bodyFont, ...(bodyFontFace?.fallbacks ?? [])]),
+				paragraph: dedupeStrings([bodyFontFace?.family ?? bodyFont, ...(bodyFontFace?.fallbacks ?? [])]),
 			},
 			scale: typeScale,
 			hierarchy: deriveTypographyHierarchy(typeScale),

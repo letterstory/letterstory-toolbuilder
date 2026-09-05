@@ -171,6 +171,7 @@ describe("generateTool", () => {
 				fonts: ["Inter"],
 				headingFont: "Inter",
 				bodyFont: "Inter",
+				logoPolicy: "exact_asset",
 				logoDataUri: "data:image/png;base64,abc",
 			});
 			expect(result.tool.brandFidelity).toEqual({ verdict: "pass", notes: "" });
@@ -334,13 +335,137 @@ describe("generateTool", () => {
 		) as {
 			messages?: Array<{ content: string }>;
 		};
-		expect(htmlCallBody.messages?.[0]?.content).toContain("No inline logo asset is available.");
+		expect(htmlCallBody.messages?.[0]?.content).toContain("No trustworthy full-logo image is available.");
 		expect(htmlCallBody.messages?.[0]?.content).not.toContain(
 			`data:image/png;base64,${"a".repeat(50000)}`
 		);
-		expect(htmlCallBody.messages?.[0]?.content).toContain(
-			"Do not invent an icon, mascot, sparkle, silhouette, monogram, or abstract badge."
-		);
+		expect(htmlCallBody.messages?.[0]?.content).toContain("Do not invent an icon");
+	});
+
+	it("falls back to text-only branding when only icon assets are available", async () => {
+		isBrandIngestionConfiguredMock.mockReturnValue(true);
+		pullBrandProfileMock.mockResolvedValue({
+			brandName: "DoorDash",
+			colors: { primary: "#EB1700", text: "#000000" },
+			fonts: ["DD Norms", "TTNormsProCond-Blk"],
+			typography: { headingFont: "TTNormsProCond-Blk", bodyFont: "DD Norms" },
+			images: {
+				logo: {
+					type: "icon",
+					canonicalDataUri: "data:image/png;base64,icon-asset",
+					url: null,
+				},
+				logoVariants: [],
+			},
+		});
+		mockAnthropicSuccess("<!doctype html><html><body>hi</body></html>");
+
+		const result = await generateTool({
+			projectName: "Delivery Fee Calculator",
+			siteUrl: "https://doordash.com",
+			prompt: "a calculator",
+		});
+
+		expect(result.status).toBe("success");
+		if (result.status === "success") {
+			expect(result.tool.brandSnapshot).toMatchObject({
+				logoPolicy: "text_only",
+				logoDataUri: null,
+			});
+		}
+
+		const htmlCall = (global.fetch as ReturnType<typeof vi.fn>).mock.calls.find(([, init]) => {
+			const parsed = JSON.parse(String((init as RequestInit | undefined)?.body ?? "{}")) as {
+				system?: string;
+			};
+			return (
+				!(parsed.system ?? "").includes("VERDICT:") && !(parsed.system ?? "").includes("HEADLINE:")
+			);
+		});
+		const htmlCallBody = JSON.parse(
+			String((htmlCall?.[1] as RequestInit | undefined)?.body ?? "{}")
+		) as {
+			messages?: Array<{ content: string }>;
+		};
+		expect(htmlCallBody.messages?.[0]?.content).not.toContain("icon-asset");
+		expect(htmlCallBody.messages?.[0]?.content).toContain("clean text-only brand-name treatment");
+	});
+
+	it("repairs invented branding when a supplied logo asset is ignored", async () => {
+		isBrandIngestionConfiguredMock.mockReturnValue(true);
+		pullBrandProfileMock.mockResolvedValue({
+			brandName: "Mailchimp",
+			colors: { primary: "#FFE01B", text: "#000000" },
+			fonts: ["Graphik Web", "Means Web"],
+			typography: { headingFont: "Means Web", bodyFont: "Graphik Web" },
+			images: {
+				logo: {
+					type: "logo",
+					canonicalDataUri: "data:image/png;base64,abc",
+					url: null,
+				},
+				logoVariants: [],
+			},
+		});
+		global.fetch = vi.fn().mockImplementation(async (_url, init) => {
+			const parsedBody = JSON.parse(String((init as RequestInit | undefined)?.body ?? "{}")) as {
+				system?: string;
+				messages?: Array<{ content: string }>;
+			};
+			const system = parsedBody.system ?? "";
+			const content = parsedBody.messages?.[0]?.content ?? "";
+			if (system.includes("VERDICT:")) {
+				return new Response(
+					JSON.stringify({ content: [{ type: "text", text: "VERDICT: pass\nNOTES:" }] }),
+					{ status: 200 }
+				);
+			}
+			if (system.includes("HEADLINE:")) {
+				return new Response(
+					JSON.stringify({
+						content: [{ type: "text", text: "HEADLINE: Test headline\nCOPY: Test copy." }],
+					}),
+					{ status: 200 }
+				);
+			}
+			if (content.includes("Brand fidelity correction only.")) {
+				return new Response(
+					JSON.stringify({
+						content: [
+							{
+								type: "text",
+								text: '<!doctype html><html><head><style>body{font-family:"Graphik Web",Arial,sans-serif;}</style></head><body><header><img alt="Mailchimp logo" src="data:image/png;base64,abc"></header></body></html>',
+							},
+						],
+					}),
+					{ status: 200 }
+				);
+			}
+			return new Response(
+				JSON.stringify({
+					content: [
+						{
+							type: "text",
+							text: '<!doctype html><html><body><header><div class="brand-mark"><svg></svg></div><div>Mailchimp</div></header></body></html>',
+						},
+					],
+				}),
+				{ status: 200 }
+			);
+		}) as unknown as typeof fetch;
+
+		const result = await generateTool({
+			projectName: "Email Open Rate Calculator",
+			siteUrl: "https://mailchimp.com",
+			prompt: "a calculator",
+		});
+
+		expect(result.status).toBe("success");
+		if (result.status === "success") {
+			expect(result.tool.html).toContain('src="data:image/png;base64,abc"');
+			expect(result.tool.warnings).toEqual([]);
+		}
+		expect((global.fetch as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(4);
 	});
 
 	it("generates supporting headline/copy alongside the tool", async () => {

@@ -72,6 +72,7 @@ const MAX_GENERATION_ATTEMPTS = 2;
 const MAX_PROMPT_BRAND_COLORS = 4;
 const MAX_PROMPT_BRAND_FONTS = 2;
 const MAX_PROMPT_LOGO_DATA_URI_CHARS = 32_000;
+const BRAND_REPAIR_TIMEOUT_MS = 15_000;
 const MIN_ADVISORY_BUDGET_MS = 5_000;
 // Worst-case request-budget math for one /api/tools/generate request:
 // - primary HTML generation attempt: 210s
@@ -423,7 +424,18 @@ async function buildToolContent(opts: {
 		};
 	}
 
-	const warnings = [...(opts.brandWarning ? [opts.brandWarning] : []), ...sanitized.warnings];
+	const repaired = await maybeRepairBrandPresentation({
+		projectName: opts.projectName,
+		brandSnapshot: opts.brandSnapshot,
+		sanitized,
+		requestStartedAt: opts.requestStartedAt,
+	});
+	sanitized = repaired.sanitized;
+	const warnings = [
+		...(opts.brandWarning ? [opts.brandWarning] : []),
+		...sanitized.warnings,
+		...repaired.warnings,
+	];
 
 	// Both of these are advisory, fail-soft enrichments — Mathew's brief
 	// explicitly calls for (a) supporting headline/copy around the embedded
@@ -545,13 +557,17 @@ async function resolveBrandContext(
 
 function toBrandSnapshot(profile: BrandProfile | null): GeneratedToolBrandSnapshot | null {
 	if (!profile) return null;
+	const logoDataUri = resolveGenerationLogoDataUri(profile);
+	const logoPolicy =
+		logoDataUri && shouldRequireExactLogoAsset(profile) ? "exact_asset" : "text_only";
 	return {
 		brandName: profile.brandName,
 		colors: profile.colors,
 		fonts: profile.fonts,
 		headingFont: profile.typography.headingFont,
 		bodyFont: profile.typography.bodyFont,
-		logoDataUri: resolveGenerationLogoDataUri(profile),
+		logoPolicy,
+		logoDataUri: logoPolicy === "exact_asset" ? logoDataUri : null,
 	};
 }
 
@@ -560,6 +576,13 @@ function resolveGenerationLogoDataUri(profile: BrandProfile): string | null {
 		profile.images.logo.canonicalDataUri ??
 		(profile.images.logo.url?.startsWith("data:") ? profile.images.logo.url : null)
 	);
+}
+
+function shouldRequireExactLogoAsset(profile: BrandProfile): boolean {
+	if (profile.images.logo.type === "icon") {
+		return (profile.images.logoVariants ?? []).some((variant) => variant.type === "logo");
+	}
+	return true;
 }
 
 async function requestToolHtml(opts: {
@@ -817,6 +840,176 @@ async function requestBrandFidelityCheck(opts: {
 	return { verdict: verdictRaw, notes };
 }
 
+function escapeRegex(value: string): string {
+	return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function firstBrandAssetPrefix(logoDataUri: string): string {
+	return logoDataUri.slice(0, Math.min(160, logoDataUri.length));
+}
+
+function htmlMentionsFontFamily(html: string, family: string | null | undefined): boolean {
+	if (!family) return false;
+	return new RegExp(escapeRegex(family), "i").test(html);
+}
+
+function extractHeaderHtml(html: string): string {
+	const mainStart = html.search(/<main\b/i);
+	if (mainStart >= 0) return html.slice(0, mainStart);
+	return html.slice(0, 5_000);
+}
+
+function collectBrandRepairReasons(
+	html: string,
+	brandSnapshot: GeneratedToolBrandSnapshot
+): string[] {
+	const reasons: string[] = [];
+	const headerHtml = extractHeaderHtml(html);
+
+	if (
+		brandSnapshot.logoPolicy === "exact_asset" &&
+		brandSnapshot.logoDataUri &&
+		!html.includes(firstBrandAssetPrefix(brandSnapshot.logoDataUri))
+	) {
+		reasons.push(
+			"The supplied real logo asset was not rendered. Replace any drawn badge, SVG, monogram, or typed logo substitute with an <img> that uses the exact provided logo data URI."
+		);
+	}
+
+	if (
+		brandSnapshot.logoPolicy === "text_only" &&
+		/(brand|logo)[-_a-z"'\s=]*<[^>]*?(svg|canvas)\b|<(svg|canvas)\b/i.test(
+			headerHtml.replace(/\n/g, " ")
+		)
+	) {
+		reasons.push(
+			"No trustworthy full-logo image is available for this brand. Remove the invented graphical mark from the header and use a clean text-only brand-name treatment instead."
+		);
+	}
+
+	if (brandSnapshot.bodyFont && !htmlMentionsFontFamily(html, brandSnapshot.bodyFont)) {
+		reasons.push(
+			`Use "${brandSnapshot.bodyFont}" in the CSS font-family declarations for the main UI/body text instead of defaulting to an unrelated fallback face.`
+		);
+	}
+
+	return reasons;
+}
+
+function buildBrandRepairPrompt(
+	brandSnapshot: GeneratedToolBrandSnapshot,
+	reasons: string[]
+): string {
+	return [
+		"Brand fidelity correction only.",
+		"Keep the existing calculator logic, input/output behavior, copy, spacing, and overall layout unless a small targeted edit is required for the brand corrections below.",
+		brandSnapshot.bodyFont
+			? `Primary UI/body font to use: ${brandSnapshot.bodyFont}.`
+			: "Primary UI/body font: none detected.",
+		brandSnapshot.headingFont && brandSnapshot.headingFont !== brandSnapshot.bodyFont
+			? `Optional display font: ${brandSnapshot.headingFont}.`
+			: "Optional display font: none detected beyond the main UI font.",
+		brandSnapshot.logoPolicy === "exact_asset" && brandSnapshot.logoDataUri
+			? `Use this exact logo asset in the header if visible branding is present: ${brandSnapshot.logoDataUri}`
+			: `Do not draw or invent any icon for the header. If branding is visible, use the exact brand name text only: ${brandSnapshot.brandName ?? "Unknown"}.`,
+		"Required fixes:",
+		...reasons.map((reason) => `- ${reason}`),
+	].join("\n");
+}
+
+async function maybeRepairBrandPresentation(opts: {
+	projectName: string;
+	brandSnapshot: GeneratedToolBrandSnapshot | null;
+	sanitized: SanitizedHtml;
+	requestStartedAt: number;
+}): Promise<{
+	sanitized: SanitizedHtml;
+	warnings: string[];
+}> {
+	if (!opts.brandSnapshot) {
+		return { sanitized: opts.sanitized, warnings: [] };
+	}
+
+	const reasons = collectBrandRepairReasons(opts.sanitized.html, opts.brandSnapshot);
+	if (!reasons.length) {
+		logGenerationStep("brand_repair_skipped", { reason: "not_needed" });
+		return { sanitized: opts.sanitized, warnings: [] };
+	}
+
+	const remainingBudgetMs = TOOL_GENERATION_TARGET_BUDGET_MS - (Date.now() - opts.requestStartedAt);
+	const availableRepairBudgetMs = remainingBudgetMs - ADVISORY_TIMEOUT_MS;
+	if (availableRepairBudgetMs < MIN_ADVISORY_BUDGET_MS) {
+		logGenerationStep("brand_repair_skipped", {
+			reason: "insufficient_budget",
+			reasonCount: reasons.length,
+			remainingBudgetMs,
+		});
+		return {
+			sanitized: opts.sanitized,
+			warnings: [
+				"Brand repair was skipped due to request-budget limits; review logo and font fidelity manually.",
+			],
+		};
+	}
+	const timeoutMs = Math.min(BRAND_REPAIR_TIMEOUT_MS, availableRepairBudgetMs);
+
+	logGenerationStep("brand_repair_started", {
+		timeoutMs,
+		reasonCount: reasons.length,
+		logoPolicy: opts.brandSnapshot.logoPolicy,
+	});
+
+	try {
+		const repairedRawHtml = await requestToolHtml({
+			projectName: opts.projectName,
+			prompt: buildBrandRepairPrompt(opts.brandSnapshot, reasons),
+			brandSnapshot: opts.brandSnapshot,
+			existingHtml: opts.sanitized.html,
+			timeoutMs,
+		});
+		const repaired = sanitizeGeneratedHtml(repairedRawHtml);
+		if (!looksLikeHtmlDocument(repaired.html)) {
+			logGenerationStep("brand_repair_failed", {
+				reason: "invalid_html",
+				timeoutMs,
+			});
+			return {
+				sanitized: opts.sanitized,
+				warnings: [
+					"Brand repair returned invalid HTML; keeping the original generated tool and flagging it for review.",
+				],
+			};
+		}
+
+		const remainingReasons = collectBrandRepairReasons(repaired.html, opts.brandSnapshot);
+		logGenerationStep("brand_repair_finished", {
+			timeoutMs,
+			initialReasonCount: reasons.length,
+			remainingReasonCount: remainingReasons.length,
+		});
+
+		return {
+			sanitized: repaired,
+			warnings: remainingReasons.length
+				? [
+						"Brand repair improved the output but could not fully confirm the supplied logo/font guidance; review the header fidelity manually.",
+					]
+				: [],
+		};
+	} catch (error) {
+		logGenerationStep("brand_repair_failed", {
+			reason: error instanceof Error ? error.message : String(error),
+			timeoutMs,
+		});
+		return {
+			sanitized: opts.sanitized,
+			warnings: [
+				"Brand repair failed unexpectedly; keeping the original generated tool and flagging it for review.",
+			],
+		};
+	}
+}
+
 function buildBrandPrompt(brandSnapshot: GeneratedToolBrandSnapshot | null): string {
 	if (!brandSnapshot)
 		return "No brand context provided — use a clean, neutral, professional visual style.";
@@ -843,8 +1036,8 @@ function buildBrandPrompt(brandSnapshot: GeneratedToolBrandSnapshot | null): str
 			: "Optional display font: none detected beyond the main UI font.",
 		"Use the supplied colors as the header, CTA, and highlight anchors. Ignore any conflicting legacy palette.",
 		includeLogo
-			? `Logo data URI: ${brandSnapshot.logoDataUri}`
-			: "No inline logo asset is available. If you need visible branding, use plain text brand-name treatment only. Do not invent an icon, mascot, sparkle, silhouette, monogram, or abstract badge.",
+			? `Logo data URI: ${brandSnapshot.logoDataUri}\nLogo usage: Render this exact asset in the header (prefer an <img> element). Do not redraw it, trace it, simplify it, or swap it for a typed/logo-like substitute.`
+			: `No trustworthy full-logo image is available. If you need visible branding, use a clean text-only brand-name treatment with the exact brand name "${brandSnapshot.brandName ?? "Unknown"}". Do not invent an icon, mascot, sparkle, silhouette, monogram, badge, or faux app-icon.`,
 	].join("\n");
 }
 

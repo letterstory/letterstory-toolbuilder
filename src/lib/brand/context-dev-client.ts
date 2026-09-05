@@ -135,6 +135,7 @@ export interface ContextComponentStyle {
 	borderWidth?: string;
 	padding?: string;
 	fontFamily?: string;
+	fontFallbacks?: string[];
 	fontSize?: string;
 	fontWeight?: number;
 	boxShadow?: string;

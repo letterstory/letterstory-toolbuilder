@@ -297,7 +297,7 @@ describe("brand service", () => {
 			markdownResponse: null,
 		});
 
-		expect(parsed.fonts).toEqual(["Means Web", "Graphik Web"]);
+		expect(parsed.fonts).toEqual(["Graphik Web", "Means Web"]);
 		expect(parsed.typography.headingFont).toBe("Means Web");
 		expect(parsed.typography.bodyFont).toBe("Graphik Web");
 		expect(parsed.typography.fontFaces).toEqual(
@@ -308,6 +308,77 @@ describe("brand service", () => {
 		);
 		expect(parsed.images.faviconUrl).toBe("https://mailchimp.com/favicon.ico");
 		expect(parsed.images.ogImageUrl).toBe("https://mailchimp.com/og.png");
+	});
+
+	it("prefers a branded custom UI font over a generic paragraph fallback", () => {
+		const parsed = parseContextDevBranding({
+			brandResponse: {
+				brand: {
+					title: "DoorDash",
+					colors: [{ hex: "#EB1700", source: "site" }],
+				},
+			},
+			styleguideResponse: {
+				styleguide: {
+					typography: {
+						headings: {
+							h1: {
+								fontFamily: "TTNormsProCond-Blk",
+								fontFallbacks: ["Arial", "sans-serif"],
+							},
+						},
+						p: {
+							fontFamily: "Times New Roman",
+							fontFallbacks: ["Times New Roman"],
+						},
+					},
+					components: {
+						button: {
+							primary: {
+								fontFamily: "DD Norms",
+								fontFallbacks: ["Arial", "sans-serif"],
+							},
+						},
+					},
+					fontLinks: {
+						"DD Norms": {
+							type: "custom",
+							files: { "400": "https://cdn.example.com/dd-norms.woff2" },
+						},
+						"TTNormsProCond-Blk": {
+							type: "custom",
+							files: { "900": "https://cdn.example.com/ttnorms.woff2" },
+						},
+					},
+				},
+			},
+			fontsResponse: {
+				fonts: [
+					{
+						font: "Times New Roman",
+						fallbacks: ["Times New Roman"],
+						percent_words: 99,
+						percent_elements: 35,
+					},
+					{
+						font: "DD Norms",
+						fallbacks: ["Arial", "sans-serif"],
+						percent_words: 1,
+						percent_elements: 62,
+					},
+				],
+			},
+			markdownResponse: null,
+		});
+
+		expect(parsed.typography.bodyFont).toBe("DD Norms");
+		expect(parsed.typography.bodyFontFace).toMatchObject({
+			family: "DD Norms",
+			files: { "400": "https://cdn.example.com/dd-norms.woff2" },
+			fallbacks: ["Arial", "sans-serif"],
+		});
+		expect(parsed.fonts.slice(0, 2)).toEqual(["DD Norms", "TTNormsProCond-Blk"]);
+		expect(parsed.typography.fontStacks.body).toEqual(["DD Norms", "Arial", "sans-serif"]);
 	});
 
 	it("prefers mode-matched transparent logos before opaque-background fallbacks", () => {

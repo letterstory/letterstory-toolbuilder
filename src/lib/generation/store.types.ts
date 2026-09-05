@@ -9,6 +9,12 @@ export interface GeneratedToolBrandSnapshot {
 	fonts: string[];
 	headingFont?: string | null;
 	bodyFont?: string | null;
+	/**
+	 * `exact_asset`: a real full-logo asset exists and the generator should
+	 * render that exact image. `text_only`: no trustworthy full-logo asset is
+	 * available, so the header should use brand-name text treatment only.
+	 */
+	logoPolicy?: "exact_asset" | "text_only";
 	logoDataUri: string | null;
 }
 
