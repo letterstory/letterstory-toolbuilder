@@ -33,7 +33,7 @@ export function looksLikeBannerNotLogo(width: number, height: number): boolean {
 export interface CanonicalLogoResult {
 	/** data:image/png;base64,... — or null if no candidate could be normalized. */
 	dataUri: string | null;
-	/** Which candidate URL produced the result, or null. */
+	/** Which candidate source produced the result, or null. */
 	sourceUrl: string | null;
 	warnings: string[];
 }
@@ -54,17 +54,12 @@ export async function resolveCanonicalLogo(
 		if (!candidate || seen.has(candidate)) continue;
 		seen.add(candidate);
 
-		// Data URIs are already self-contained — nothing to fetch/rehost, but
-		// they also aren't a "canonical" asset in the sense we care about here
-		// (durable, cacheable, re-fetchable), so skip and keep looking.
-		if (candidate.startsWith("data:")) continue;
-
 		const png = await downloadAsLogoPng(candidate, warnings);
 		if (!png) continue;
 
 		return {
 			dataUri: `data:image/png;base64,${Buffer.from(png).toString("base64")}`,
-			sourceUrl: candidate,
+			sourceUrl: summarizeLogoCandidateSource(candidate),
 			warnings,
 		};
 	}
@@ -83,17 +78,12 @@ export async function downloadAsLogoPng(
 	url: string,
 	warnings: string[]
 ): Promise<Uint8Array | null> {
-	const safety = await isSafeHttpsUrl(url);
-	if (!safety.ok) return null;
-
 	try {
-		const res = await fetch(url, {
-			signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-			redirect: "follow",
-		});
-		if (!res.ok) return null;
-		const mime = (res.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
-		const buffer = Buffer.from(await res.arrayBuffer());
+		const resolved = url.startsWith("data:")
+			? decodeLogoDataUri(url)
+			: await fetchLogoBytes(url);
+		if (!resolved) return null;
+		const { mime, buffer } = resolved;
 		if (buffer.byteLength === 0 || buffer.byteLength > MAX_LOGO_BYTES) return null;
 
 		if (mime === "image/svg+xml" || /\.svg(\?|$)/i.test(url)) {
@@ -142,6 +132,44 @@ export async function downloadAsLogoPng(
 	} catch {
 		return null;
 	}
+}
+
+function summarizeLogoCandidateSource(candidate: string): string {
+	if (!candidate.startsWith("data:")) return candidate;
+	const match = candidate.match(/^data:([^;,]+)[;,]/i);
+	return match?.[1] ? `inline:${match[1].toLowerCase()}` : "inline:data-uri";
+}
+
+function decodeLogoDataUri(candidate: string): { mime: string; buffer: Buffer } | null {
+	const match = candidate.match(/^data:([^;,]+)((?:;[^,]+)*?),(.*)$/i);
+	if (!match) return null;
+	const [, rawMime, rawParams, rawPayload] = match;
+	const mime = rawMime.trim().toLowerCase();
+	const isBase64 = /;base64/i.test(rawParams);
+	const payload = rawPayload.trim();
+
+	try {
+		const buffer = isBase64
+			? Buffer.from(payload, "base64")
+			: Buffer.from(decodeURIComponent(payload), "utf8");
+		return { mime, buffer };
+	} catch {
+		return null;
+	}
+}
+
+async function fetchLogoBytes(url: string): Promise<{ mime: string; buffer: Buffer } | null> {
+	const safety = await isSafeHttpsUrl(url);
+	if (!safety.ok) return null;
+
+	const res = await fetch(url, {
+		signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+		redirect: "follow",
+	});
+	if (!res.ok) return null;
+	const mime = (res.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
+	const buffer = Buffer.from(await res.arrayBuffer());
+	return { mime, buffer };
 }
 
 const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47]);

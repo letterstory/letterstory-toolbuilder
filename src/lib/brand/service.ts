@@ -298,6 +298,29 @@ function dedupeStrings(values: Array<string | null | undefined>): string[] {
 	return [...seen];
 }
 
+function pickFirstRecordString(
+	record: Record<string, string | null> | undefined,
+	keys: string[]
+): string | null {
+	if (!record) return null;
+
+	for (const key of keys) {
+		const value = readString(record[key]);
+		if (value) return value;
+	}
+
+	const lowered = Object.fromEntries(
+		Object.entries(record).map(([key, value]) => [key.toLowerCase(), value])
+	) as Record<string, string | null>;
+
+	for (const key of keys) {
+		const value = readString(lowered[key.toLowerCase()]);
+		if (value) return value;
+	}
+
+	return null;
+}
+
 function normalizeBrandMap(value: unknown): Record<string, string> {
 	if (!isRecord(value)) return {};
 
@@ -635,6 +658,21 @@ function readContextFontFamily(value: unknown): string | null {
 	return raw ? normalizeContextDevFontFamily(raw) : null;
 }
 
+type ContextStyleguideComponents = NonNullable<
+	NonNullable<ContextStyleguideResponse["styleguide"]>["components"]
+>;
+
+function collectComponentFontFamilies(components: ContextStyleguideComponents | undefined): string[] {
+	if (!components) return [];
+
+	return dedupeStrings([
+		readContextFontFamily(components.button?.primary?.fontFamily),
+		readContextFontFamily(components.button?.secondary?.fontFamily),
+		readContextFontFamily(components.card?.fontFamily),
+		readContextFontFamily(components.input?.fontFamily),
+	]);
+}
+
 function toRgb(hex: string): { r: number; g: number; b: number } | null {
 	const normalized = normalizeColorHex(hex);
 	if (!normalized) return null;
@@ -841,6 +879,7 @@ export function parseContextDevBranding(payload: {
 	const styleguide = payload.styleguideResponse?.styleguide;
 	const headings = styleguide?.typography?.headings ?? {};
 	const paragraph = styleguide?.typography?.p;
+	const componentFonts = collectComponentFontFamilies(styleguide?.components);
 	const rawLogos = Array.isArray(brand.logos) ? brand.logos : [];
 	const preferredLogo = selectPreferredLogo(rawLogos);
 	const logoUrls = dedupeStrings(rawLogos.map((logo) => readString(logo.url)));
@@ -850,16 +889,23 @@ export function parseContextDevBranding(payload: {
 			(right.percent_words ?? right.percent_elements ?? 0) -
 			(left.percent_words ?? left.percent_elements ?? 0)
 	);
+	const bodyFont =
+		readContextFontFamily(paragraph?.fontFamily) ??
+		readContextFontFamily(styleguide?.components?.input?.fontFamily) ??
+		readContextFontFamily(styleguide?.components?.button?.primary?.fontFamily) ??
+		componentFonts[0] ??
+		null;
 	const headingFont =
 		readContextFontFamily(headings.h1?.fontFamily) ??
 		readContextFontFamily(headings.h2?.fontFamily) ??
 		readContextFontFamily(headings.h3?.fontFamily) ??
+		componentFonts.find((font) => font !== bodyFont) ??
+		componentFonts[0] ??
 		null;
-	const bodyFont = readContextFontFamily(paragraph?.fontFamily);
 	const rankedFonts = fontRanked
 		.map((font) => readContextFontFamily(font.font))
 		.filter((font): font is string => Boolean(font));
-	const fonts = dedupeStrings([...rankedFonts, headingFont, bodyFont]);
+	const fonts = dedupeStrings([...rankedFonts, headingFont, bodyFont, ...componentFonts]);
 	const secondaryFont =
 		fonts.find((font) => font !== (headingFont ?? bodyFont ?? fonts[0] ?? null)) ?? null;
 	const typeScale = normalizeTypeScale({
@@ -880,6 +926,19 @@ export function parseContextDevBranding(payload: {
 		) as Record<string, BrandComponentStyle>,
 	};
 	const logoUrl = readString(preferredLogo?.url) ?? null;
+	const faviconUrl = pickFirstRecordString(brand.links, [
+		"favicon",
+		"icon",
+		"shortcut icon",
+		"apple-touch-icon",
+		"apple-touch-icon-precomposed",
+	]);
+	const ogImageUrl = pickFirstRecordString(brand.links, [
+		"og:image",
+		"ogImage",
+		"image_src",
+		"image",
+	]);
 	const logo: BrandLogoAsset = {
 		url: logoUrl,
 		kind: inferLogoKind(logoUrl),
@@ -949,8 +1008,8 @@ export function parseContextDevBranding(payload: {
 		components,
 		images: {
 			logo,
-			faviconUrl: null,
-			ogImageUrl: null,
+			faviconUrl,
+			ogImageUrl,
 			gallery: logoUrls,
 			imageryStyle: null,
 			notes: buildContextImageNotes(logo),

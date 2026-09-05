@@ -71,7 +71,7 @@ const MAX_TOKENS = 8_000;
 const MAX_GENERATION_ATTEMPTS = 2;
 const MAX_PROMPT_BRAND_COLORS = 4;
 const MAX_PROMPT_BRAND_FONTS = 2;
-const MAX_PROMPT_LOGO_DATA_URI_CHARS = 18_000;
+const MAX_PROMPT_LOGO_DATA_URI_CHARS = 32_000;
 const MIN_ADVISORY_BUDGET_MS = 5_000;
 // Worst-case request-budget math for one /api/tools/generate request:
 // - primary HTML generation attempt: 210s
@@ -549,8 +549,17 @@ function toBrandSnapshot(profile: BrandProfile | null): GeneratedToolBrandSnapsh
 		brandName: profile.brandName,
 		colors: profile.colors,
 		fonts: profile.fonts,
-		logoDataUri: profile.images.logo.canonicalDataUri,
+		headingFont: profile.typography.headingFont,
+		bodyFont: profile.typography.bodyFont,
+		logoDataUri: resolveGenerationLogoDataUri(profile),
 	};
+}
+
+function resolveGenerationLogoDataUri(profile: BrandProfile): string | null {
+	return (
+		profile.images.logo.canonicalDataUri ??
+		(profile.images.logo.url?.startsWith("data:") ? profile.images.logo.url : null)
+	);
 }
 
 async function requestToolHtml(opts: {
@@ -587,7 +596,7 @@ async function requestToolHtml(opts: {
 		"- Design must be clean, modern, accessible (labeled inputs, sufficient color contrast, keyboard-usable), and responsive so it looks correct at both narrow (embedded iframe) and wide layouts.",
 		"- Keep the implementation compact: no comments, no placeholder sections, no unnecessary copy, and only as much CSS/JS as the tool actually needs.",
 		"- If brand tokens are provided below, treat them as authoritative. Use those exact colors for the visible identity, even if they conflict with prior knowledge or an older palette you associate with the brand.",
-		"- If an inline logo asset is provided, render that asset instead of typing a substitute wordmark. If no logo asset is provided, do not invent a logo treatment or fall back to a different historical brand palette.",
+		"- If an inline logo asset is provided, render that asset instead of typing a substitute wordmark. If no logo asset is provided, use plain text brand-name treatment or omit the logo area entirely — never invent an icon, mascot, monogram, sparkle, silhouette, or abstract badge, and never fall back to a different historical brand palette.",
 		"- Use the provided primary/accent colors, font family names (assume standard web-safe fallbacks after the named font), and optional inline logo asset. Do not fabricate a different brand.",
 		"- Keep the whole document self-sufficient and safe: no forms that submit to external endpoints, no fetch()/XMLHttpRequest calls to external hosts.",
 		"- Include a small, unobtrusive 'Powered by Letterstory' text credit near the bottom.",
@@ -816,6 +825,8 @@ function buildBrandPrompt(brandSnapshot: GeneratedToolBrandSnapshot | null): str
 		.slice(0, MAX_PROMPT_BRAND_COLORS)
 		.map(([name, value]) => `${name}: ${value}`);
 	const fontList = brandSnapshot.fonts.slice(0, MAX_PROMPT_BRAND_FONTS);
+	const bodyFont = brandSnapshot.bodyFont ?? fontList[0] ?? null;
+	const headingFont = brandSnapshot.headingFont ?? bodyFont;
 	const includeLogo =
 		Boolean(brandSnapshot.logoDataUri) &&
 		(brandSnapshot.logoDataUri?.length ?? 0) <= MAX_PROMPT_LOGO_DATA_URI_CHARS;
@@ -824,10 +835,16 @@ function buildBrandPrompt(brandSnapshot: GeneratedToolBrandSnapshot | null): str
 		`Brand name: ${brandSnapshot.brandName ?? "Unknown"}`,
 		`Colors: ${colorLines.length ? colorLines.join(", ") : "none detected"}`,
 		`Fonts: ${fontList.join(", ") || "none detected"}`,
+		bodyFont
+			? `Typography usage: Use ${bodyFont} for the brand name text treatment, labels, inputs, buttons, and the main product UI.`
+			: "Typography usage: No authoritative body/UI font was detected.",
+		headingFont && headingFont !== bodyFont
+			? `Optional display font: ${headingFont}. Use it sparingly for large editorial-style headings only; do not use it for badges, icons, faux logos, labels, or compact tool chrome.`
+			: "Optional display font: none detected beyond the main UI font.",
 		"Use the supplied colors as the header, CTA, and highlight anchors. Ignore any conflicting legacy palette.",
 		includeLogo
 			? `Logo data URI: ${brandSnapshot.logoDataUri}`
-			: "Logo asset omitted from the prompt to keep generation fast; if no inline logo asset is provided, rely on color, typography, and brand name treatment instead.",
+			: "No inline logo asset is available. If you need visible branding, use plain text brand-name treatment only. Do not invent an icon, mascot, sparkle, silhouette, monogram, or abstract badge.",
 	].join("\n");
 }
 

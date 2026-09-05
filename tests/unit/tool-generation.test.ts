@@ -151,6 +151,7 @@ describe("generateTool", () => {
 			brandName: "Stripe",
 			colors: { primary: "#635bff" },
 			fonts: ["Inter"],
+			typography: { headingFont: "Inter", bodyFont: "Inter" },
 			images: { logo: { canonicalDataUri: "data:image/png;base64,abc" } },
 		});
 		mockAnthropicSuccess("<!doctype html><html><body>hi</body></html>");
@@ -168,6 +169,8 @@ describe("generateTool", () => {
 				brandName: "Stripe",
 				colors: { primary: "#635bff" },
 				fonts: ["Inter"],
+				headingFont: "Inter",
+				bodyFont: "Inter",
 				logoDataUri: "data:image/png;base64,abc",
 			});
 			expect(result.tool.brandFidelity).toEqual({ verdict: "pass", notes: "" });
@@ -180,6 +183,7 @@ describe("generateTool", () => {
 			brandName: "Airbnb",
 			colors: { primary: "#008489", accent: "#914669" },
 			fonts: ["Airbnb Cereal VF", "Circular"],
+			typography: { headingFont: "Circular", bodyFont: "Airbnb Cereal VF" },
 			images: { logo: { canonicalDataUri: "data:image/png;base64,abc" } },
 		});
 		mockAnthropicSuccess("<!doctype html><html><body>hi</body></html>");
@@ -210,7 +214,93 @@ describe("generateTool", () => {
 		expect(htmlCallBody.messages?.[0]?.content).toContain(
 			"Use the supplied colors as the header, CTA, and highlight anchors. Ignore any conflicting legacy palette."
 		);
+		expect(htmlCallBody.messages?.[0]?.content).toContain(
+			"Typography usage: Use Airbnb Cereal VF for the brand name text treatment, labels, inputs, buttons, and the main product UI."
+		);
+		expect(htmlCallBody.messages?.[0]?.content).toContain(
+			"Optional display font: Circular. Use it sparingly for large editorial-style headings only"
+		);
 		expect(htmlCallBody.messages?.[0]?.content).toContain("Logo data URI: data:image/png;base64,abc");
+	});
+
+	it("falls back to an inline raw logo data URI when canonical normalization is unavailable", async () => {
+		isBrandIngestionConfiguredMock.mockReturnValue(true);
+		pullBrandProfileMock.mockResolvedValue({
+			brandName: "Mailchimp",
+			colors: { primary: "#FFE01B", accent: "#692340" },
+			fonts: ["Graphik Web", "Means Web"],
+			typography: { headingFont: "Means Web", bodyFont: "Graphik Web" },
+			images: {
+				logo: {
+					canonicalDataUri: null,
+					url: "data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http://www.w3.org/2000/svg%22%3E%3C/svg%3E",
+				},
+			},
+		});
+		mockAnthropicSuccess("<!doctype html><html><body>hi</body></html>");
+
+		const result = await generateTool({
+			projectName: "Email Open Rate Calculator",
+			siteUrl: "https://mailchimp.com",
+			prompt: "an email open rate calculator",
+		});
+
+		expect(result.status).toBe("success");
+		const htmlCall = (global.fetch as ReturnType<typeof vi.fn>).mock.calls.find(([, init]) => {
+			const parsed = JSON.parse(String((init as RequestInit | undefined)?.body ?? "{}")) as {
+				system?: string;
+			};
+			return (
+				!(parsed.system ?? "").includes("VERDICT:") && !(parsed.system ?? "").includes("HEADLINE:")
+			);
+		});
+		const htmlCallBody = JSON.parse(
+			String((htmlCall?.[1] as RequestInit | undefined)?.body ?? "{}")
+		) as {
+			messages?: Array<{ content: string }>;
+		};
+		expect(htmlCallBody.messages?.[0]?.content).toContain("Logo data URI: data:image/svg+xml;utf8,");
+	});
+
+	it("includes moderately large canonical logos when they stay within the prompt budget", async () => {
+		isBrandIngestionConfiguredMock.mockReturnValue(true);
+		pullBrandProfileMock.mockResolvedValue({
+			brandName: "Mailchimp",
+			colors: { primary: "#FFE01B", accent: "#692340" },
+			fonts: ["Graphik Web", "Means Web"],
+			typography: { headingFont: "Means Web", bodyFont: "Graphik Web" },
+			images: {
+				logo: {
+					canonicalDataUri: `data:image/png;base64,${"a".repeat(25000)}`,
+					url: null,
+				},
+			},
+		});
+		mockAnthropicSuccess("<!doctype html><html><body>hi</body></html>");
+
+		const result = await generateTool({
+			projectName: "Email Open Rate Calculator",
+			siteUrl: "https://mailchimp.com",
+			prompt: "an email open rate calculator",
+		});
+
+		expect(result.status).toBe("success");
+		const htmlCall = (global.fetch as ReturnType<typeof vi.fn>).mock.calls.find(([, init]) => {
+			const parsed = JSON.parse(String((init as RequestInit | undefined)?.body ?? "{}")) as {
+				system?: string;
+			};
+			return (
+				!(parsed.system ?? "").includes("VERDICT:") && !(parsed.system ?? "").includes("HEADLINE:")
+			);
+		});
+		const htmlCallBody = JSON.parse(
+			String((htmlCall?.[1] as RequestInit | undefined)?.body ?? "{}")
+		) as {
+			messages?: Array<{ content: string }>;
+		};
+		expect(htmlCallBody.messages?.[0]?.content).toContain(
+			`Logo data URI: data:image/png;base64,${"a".repeat(25000)}`
+		);
 	});
 
 	it("omits oversized inline logos from the main HTML generation prompt", async () => {
@@ -219,6 +309,7 @@ describe("generateTool", () => {
 			brandName: "Gymshark",
 			colors: { primary: "#111111", accent: "#ffffff" },
 			fonts: ["Inter", "Arial"],
+			typography: { headingFont: "Inter", bodyFont: "Inter" },
 			images: { logo: { canonicalDataUri: `data:image/png;base64,${"a".repeat(50000)}` } },
 		});
 		mockAnthropicSuccess("<!doctype html><html><body>hi</body></html>");
@@ -243,9 +334,12 @@ describe("generateTool", () => {
 		) as {
 			messages?: Array<{ content: string }>;
 		};
-		expect(htmlCallBody.messages?.[0]?.content).toContain("Logo asset omitted from the prompt");
+		expect(htmlCallBody.messages?.[0]?.content).toContain("No inline logo asset is available.");
 		expect(htmlCallBody.messages?.[0]?.content).not.toContain(
 			`data:image/png;base64,${"a".repeat(50000)}`
+		);
+		expect(htmlCallBody.messages?.[0]?.content).toContain(
+			"Do not invent an icon, mascot, sparkle, silhouette, monogram, or abstract badge."
 		);
 	});
 
@@ -297,6 +391,7 @@ describe("generateTool", () => {
 			brandName: "Stripe",
 			colors: { primary: "#635bff" },
 			fonts: ["Inter"],
+			typography: { headingFont: "Inter", bodyFont: "Inter" },
 			images: { logo: { canonicalDataUri: null } },
 		});
 		global.fetch = vi.fn().mockImplementation(async (_url, init) => {
@@ -650,6 +745,7 @@ describe("generateTool — revisions (toolId set)", () => {
 			brandName: "Linear",
 			colors: { primary: "#5e6ad2" },
 			fonts: ["Inter"],
+			typography: { headingFont: "Inter", bodyFont: "Inter" },
 			images: { logo: { canonicalDataUri: null } },
 		});
 		mockAnthropicSuccess("<!doctype html><html><body>revised</body></html>");

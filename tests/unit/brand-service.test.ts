@@ -181,6 +181,45 @@ describe("brand service", () => {
 		});
 	});
 
+	it("keeps image links and component-level font families when top-level typography is sparse", () => {
+		const parsed = parseContextDevBranding({
+			brandResponse: {
+				brand: {
+					title: "Mailchimp",
+					logos: [
+						{
+							url: "data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http://www.w3.org/2000/svg%22%3E%3C/svg%3E",
+							type: "logo",
+						},
+					],
+					links: {
+						favicon: "https://mailchimp.com/favicon.ico",
+						"og:image": "https://mailchimp.com/og.png",
+					},
+				},
+			},
+			styleguideResponse: {
+				styleguide: {
+					components: {
+						button: {
+							primary: { fontFamily: "__GraphikWeb_123abc", backgroundColor: "#FFE01B" },
+						},
+						card: { fontFamily: "__MeansWeb_456def" },
+						input: { fontFamily: "__GraphikWeb_123abc" },
+					},
+				},
+			},
+			fontsResponse: { fonts: [] },
+			markdownResponse: null,
+		});
+
+		expect(parsed.fonts).toEqual(["Means Web", "Graphik Web"]);
+		expect(parsed.typography.headingFont).toBe("Means Web");
+		expect(parsed.typography.bodyFont).toBe("Graphik Web");
+		expect(parsed.images.faviconUrl).toBe("https://mailchimp.com/favicon.ico");
+		expect(parsed.images.ogImageUrl).toBe("https://mailchimp.com/og.png");
+	});
+
 	it("rejects unsafe urls before calling Context.dev", async () => {
 		process.env.CONTEXT_DEV_API_KEY = "configured-key";
 		isSafeHttpsUrlMock.mockResolvedValue({ ok: false, reason: "blocked ip" });

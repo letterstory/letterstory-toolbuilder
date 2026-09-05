@@ -7,6 +7,8 @@ export interface GeneratedToolBrandSnapshot {
 	brandName: string | null;
 	colors: Record<string, string>;
 	fonts: string[];
+	headingFont?: string | null;
+	bodyFont?: string | null;
 	logoDataUri: string | null;
 }
 

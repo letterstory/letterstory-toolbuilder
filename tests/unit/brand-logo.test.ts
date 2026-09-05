@@ -114,12 +114,16 @@ describe("resolveCanonicalLogo / downloadAsLogoPng", () => {
 		expect(result.sourceUrl).toBe("https://example.com/favicon.ico");
 	});
 
-	it("skips data-URI candidates and falls back to null when nothing else is usable", async () => {
-		const result = await resolveCanonicalLogo(["data:image/png;base64,abc123"]);
+	it("normalizes inline SVG data-URI candidates into PNG output", async () => {
+		const svg = encodeURIComponent(
+			`<svg xmlns="http://www.w3.org/2000/svg" width="160" height="64"><rect width="160" height="64" fill="#ff385c"/></svg>`
+		);
 
-		expect(result.dataUri).toBeNull();
-		expect(result.sourceUrl).toBeNull();
-		expect(result.warnings.length).toBeGreaterThan(0);
+		const result = await resolveCanonicalLogo([`data:image/svg+xml;utf8,${svg}`]);
+
+		expect(result.dataUri).toMatch(/^data:image\/png;base64,/);
+		expect(result.sourceUrl).toBe("inline:image/svg+xml");
+		expect(result.warnings).toEqual([]);
 	});
 
 	it("skips candidates blocked by the SSRF guard", async () => {
