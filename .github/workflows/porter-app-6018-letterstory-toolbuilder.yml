@@ -15,7 +15,7 @@ jobs:
               timeout-minutes: 30
               run: porter apply --wait --tag "$GITHUB_SHA"
               env:
-                PORTER_APP_NAME: letterstory-toolbuilder-staging
+                PORTER_APP_NAME: letterstory-toolbuilder
                 PORTER_CLUSTER: "6018"
                 PORTER_DEPLOYMENT_TARGET_ID: 57c6c7ab-370f-43b9-a1e9-f061af782fdf
                 PORTER_HOST: https://dashboard.porter.run
