@@ -73,7 +73,7 @@ export function BuilderChatPanel({
 	}, [isRunning, messages.length]);
 	const statusLine = isRunning
 		? requestState === "updating"
-			? "Editing your code…"
+			? "Thinking…"
 			: activeBrandName || siteUrl
 				? `Building with ${activeBrandName ?? siteUrl} brand context…`
 				: "Building your tool…"

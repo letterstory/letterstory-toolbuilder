@@ -42,3 +42,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# generated test/verification artifacts (not source, shouldn't be tracked)
+/artifacts/
