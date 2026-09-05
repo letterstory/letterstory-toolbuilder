@@ -72,7 +72,6 @@ const MAX_TOKENS = 8_000;
 const MAX_GENERATION_ATTEMPTS = 2;
 const MAX_PROMPT_BRAND_COLORS = 4;
 const MAX_PROMPT_BRAND_FONTS = 2;
-const MAX_PROMPT_LOGO_DATA_URI_CHARS = 32_000;
 const BRAND_REPAIR_TIMEOUT_MS = 15_000;
 const MIN_ADVISORY_BUDGET_MS = 5_000;
 // Worst-case request-budget math for one /api/tools/generate request:
@@ -869,10 +868,6 @@ function escapeRegex(value: string): string {
 	return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function firstBrandAssetPrefix(logoDataUri: string): string {
-	return logoDataUri.slice(0, Math.min(160, logoDataUri.length));
-}
-
 function htmlMentionsFontFamily(html: string, family: string | null | undefined): boolean {
 	if (!family) return false;
 	return new RegExp(escapeRegex(family), "i").test(html);
@@ -890,16 +885,6 @@ function collectBrandRepairReasons(
 ): string[] {
 	const reasons: string[] = [];
 	const headerHtml = extractHeaderHtml(html);
-
-	if (
-		brandSnapshot.logoPolicy === "exact_asset" &&
-		brandSnapshot.logoDataUri &&
-		!html.includes(firstBrandAssetPrefix(brandSnapshot.logoDataUri))
-	) {
-		reasons.push(
-			"The supplied real logo asset was not rendered. Replace any drawn badge, SVG, monogram, or typed logo substitute with an <img> that uses the exact provided logo data URI."
-		);
-	}
 
 	if (
 		brandSnapshot.logoPolicy === "text_only" &&
@@ -934,8 +919,8 @@ function buildBrandRepairPrompt(
 		brandSnapshot.headingFont && brandSnapshot.headingFont !== brandSnapshot.bodyFont
 			? `Optional display font: ${brandSnapshot.headingFont}.`
 			: "Optional display font: none detected beyond the main UI font.",
-		brandSnapshot.logoPolicy === "exact_asset" && brandSnapshot.logoDataUri
-			? `Use this exact logo asset in the header if visible branding is present: ${brandSnapshot.logoDataUri}`
+		brandSnapshot.logoPolicy === "exact_asset"
+			? "A real logo asset will be injected into the header programmatically after generation. Leave a clean brand area for it and do not draw, trace, or type a substitute logo."
 			: `Do not draw or invent any icon for the header. If branding is visible, use the exact brand name text only: ${brandSnapshot.brandName ?? "Unknown"}.`,
 		"Required fixes:",
 		...reasons.map((reason) => `- ${reason}`),
@@ -1036,9 +1021,6 @@ function buildBrandPrompt(brandSnapshot: GeneratedToolBrandSnapshot | null): str
 	const fontList = brandSnapshot.fonts.slice(0, MAX_PROMPT_BRAND_FONTS);
 	const bodyFont = brandSnapshot.bodyFont ?? fontList[0] ?? null;
 	const headingFont = brandSnapshot.headingFont ?? bodyFont;
-	const includeLogo =
-		Boolean(brandSnapshot.logoDataUri) &&
-		(brandSnapshot.logoDataUri?.length ?? 0) <= MAX_PROMPT_LOGO_DATA_URI_CHARS;
 
 	return [
 		`Brand name: ${brandSnapshot.brandName ?? "Unknown"}`,
@@ -1051,8 +1033,8 @@ function buildBrandPrompt(brandSnapshot: GeneratedToolBrandSnapshot | null): str
 			? `Optional display font: ${headingFont}. Use it sparingly for large editorial-style headings only; do not use it for badges, icons, faux logos, labels, or compact tool chrome.`
 			: "Optional display font: none detected beyond the main UI font.",
 		"Use the supplied colors as the header, CTA, and highlight anchors. Ignore any conflicting legacy palette.",
-		includeLogo
-			? `Logo data URI: ${brandSnapshot.logoDataUri}\nLogo usage: Render this exact asset in the header (prefer an <img> element). Do not redraw it, trace it, simplify it, or swap it for a typed/logo-like substitute.`
+		brandSnapshot.logoPolicy === "exact_asset"
+			? "A real logo asset exists and will be injected into the header programmatically after generation. Leave space for a clean brand lockup and do not invent, redraw, trace, or type a substitute logo."
 			: `No trustworthy full-logo image is available. If you need visible branding, use a clean text-only brand-name treatment with the exact brand name "${brandSnapshot.brandName ?? "Unknown"}". Do not invent an icon, mascot, sparkle, silhouette, monogram, badge, or faux app-icon.`,
 	].join("\n");
 }

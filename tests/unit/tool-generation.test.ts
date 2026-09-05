@@ -178,7 +178,7 @@ describe("generateTool", () => {
 		}
 	});
 
-	it("includes small inline logos and authoritative-token guidance in the main HTML generation prompt", async () => {
+	it("describes programmatic exact-logo injection in the main generation prompt", async () => {
 		isBrandIngestionConfiguredMock.mockReturnValue(true);
 		pullBrandProfileMock.mockResolvedValue({
 			brandName: "Airbnb",
@@ -221,10 +221,13 @@ describe("generateTool", () => {
 		expect(htmlCallBody.messages?.[0]?.content).toContain(
 			"Optional display font: Circular. Use it sparingly for large editorial-style headings only"
 		);
-		expect(htmlCallBody.messages?.[0]?.content).toContain("Logo data URI: data:image/png;base64,abc");
+		expect(htmlCallBody.messages?.[0]?.content).toContain(
+			"A real logo asset exists and will be injected into the header programmatically after generation."
+		);
+		expect(htmlCallBody.messages?.[0]?.content).not.toContain("data:image/png;base64,abc");
 	});
 
-	it("falls back to an inline raw logo data URI when canonical normalization is unavailable", async () => {
+	it("does not inline raw logo data uris into the main prompt when canonical normalization is unavailable", async () => {
 		isBrandIngestionConfiguredMock.mockReturnValue(true);
 		pullBrandProfileMock.mockResolvedValue({
 			brandName: "Mailchimp",
@@ -260,10 +263,13 @@ describe("generateTool", () => {
 		) as {
 			messages?: Array<{ content: string }>;
 		};
-		expect(htmlCallBody.messages?.[0]?.content).toContain("Logo data URI: data:image/svg+xml;utf8,");
+		expect(htmlCallBody.messages?.[0]?.content).toContain(
+			"A real logo asset exists and will be injected into the header programmatically after generation."
+		);
+		expect(htmlCallBody.messages?.[0]?.content).not.toContain("data:image/svg+xml;utf8,");
 	});
 
-	it("includes moderately large canonical logos when they stay within the prompt budget", async () => {
+	it("keeps large canonical logos out of the prompt because header injection is deterministic", async () => {
 		isBrandIngestionConfiguredMock.mockReturnValue(true);
 		pullBrandProfileMock.mockResolvedValue({
 			brandName: "Mailchimp",
@@ -300,11 +306,14 @@ describe("generateTool", () => {
 			messages?: Array<{ content: string }>;
 		};
 		expect(htmlCallBody.messages?.[0]?.content).toContain(
-			`Logo data URI: data:image/png;base64,${"a".repeat(25000)}`
+			"A real logo asset exists and will be injected into the header programmatically after generation."
+		);
+		expect(htmlCallBody.messages?.[0]?.content).not.toContain(
+			`data:image/png;base64,${"a".repeat(25000)}`
 		);
 	});
 
-	it("omits oversized inline logos from the main HTML generation prompt", async () => {
+	it("keeps oversized inline logos out of the main HTML generation prompt", async () => {
 		isBrandIngestionConfiguredMock.mockReturnValue(true);
 		pullBrandProfileMock.mockResolvedValue({
 			brandName: "Gymshark",
@@ -335,11 +344,13 @@ describe("generateTool", () => {
 		) as {
 			messages?: Array<{ content: string }>;
 		};
-		expect(htmlCallBody.messages?.[0]?.content).toContain("No trustworthy full-logo image is available.");
+		expect(htmlCallBody.messages?.[0]?.content).toContain(
+			"A real logo asset exists and will be injected into the header programmatically after generation."
+		);
 		expect(htmlCallBody.messages?.[0]?.content).not.toContain(
 			`data:image/png;base64,${"a".repeat(50000)}`
 		);
-		expect(htmlCallBody.messages?.[0]?.content).toContain("Do not invent an icon");
+		expect(htmlCallBody.messages?.[0]?.content).toContain("do not invent, redraw, trace, or type");
 	});
 
 	it("falls back to text-only branding when only icon assets are available", async () => {
