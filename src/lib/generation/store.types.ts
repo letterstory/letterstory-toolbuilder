@@ -43,6 +43,18 @@ export interface GeneratedToolBrandFidelity {
 	notes: string;
 }
 
+export type VisualCongruenceStatus = "pending" | "completed" | "failed";
+
+export interface GeneratedToolVisualCongruence {
+	status: VisualCongruenceStatus;
+	congruenceScore: number | null;
+	verdict: BrandFidelityVerdict | null;
+	notes: string;
+	risks: string[];
+	referenceUrl: string | null;
+	analyzedAt: string | null;
+}
+
 /** The generated artifact + everything Claude was told to produce it — shared between the live record and each stored history snapshot. */
 export type GeneratedToolContent = {
 	projectName: string;
@@ -54,6 +66,8 @@ export type GeneratedToolContent = {
 	copy: GeneratedToolCopy | null;
 	/** Advisory-only LLM cross-check of whether the generated tool's styling is faithful to the brand. */
 	brandFidelity: GeneratedToolBrandFidelity | null;
+	/** Visual screenshot-vs-screenshot style congruence check against the live brand site. */
+	visualCongruence: GeneratedToolVisualCongruence | null;
 	model: string;
 	warnings: string[];
 };
@@ -84,6 +98,12 @@ export interface ToolStoreBackend {
 	saveGeneratedTool(input: GeneratedToolContent): Promise<GeneratedToolRecord>;
 	getGeneratedTool(id: string): Promise<GeneratedToolRecord | null>;
 	updateGeneratedTool(id: string, updates: GeneratedToolContent): Promise<GeneratedToolRecord | null>;
+	updateGeneratedToolVisualCongruence(
+		id: string,
+		expectedVersion: number,
+		visualCongruence: GeneratedToolVisualCongruence,
+		warnings: string[]
+	): Promise<GeneratedToolRecord | null>;
 	rollbackGeneratedTool(id: string, toVersion: number): Promise<GeneratedToolRecord | null>;
 	listGeneratedTools(): Promise<GeneratedToolRecord[]>;
 }
@@ -98,6 +118,7 @@ export function buildHistoryEntry(existing: GeneratedToolRecord): GeneratedToolH
 		html: existing.html,
 		copy: existing.copy,
 		brandFidelity: existing.brandFidelity,
+		visualCongruence: existing.visualCongruence,
 		model: existing.model,
 		warnings: existing.warnings,
 		version: existing.version,
@@ -115,6 +136,7 @@ export function contentFromHistoryEntry(entry: GeneratedToolHistoryEntry): Gener
 		html: entry.html,
 		copy: entry.copy,
 		brandFidelity: entry.brandFidelity,
+		visualCongruence: entry.visualCongruence,
 		model: entry.model,
 		warnings: entry.warnings,
 	};

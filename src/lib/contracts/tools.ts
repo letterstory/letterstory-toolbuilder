@@ -55,6 +55,16 @@ export const generatedToolBrandFidelitySchema = z.object({
 	notes: z.string(),
 });
 
+export const generatedToolVisualCongruenceSchema = z.object({
+	status: z.enum(["pending", "completed", "failed"]),
+	congruenceScore: z.number().nullable(),
+	verdict: z.enum(["pass", "warn", "fail"]).nullable(),
+	notes: z.string(),
+	risks: z.array(z.string()),
+	referenceUrl: z.string().nullable(),
+	analyzedAt: z.string().nullable(),
+});
+
 export const generatedToolHistoryEntrySchema = z.object({
 	projectName: z.string(),
 	prompt: z.string(),
@@ -63,6 +73,7 @@ export const generatedToolHistoryEntrySchema = z.object({
 	html: z.string(),
 	copy: generatedToolCopySchema.nullable(),
 	brandFidelity: generatedToolBrandFidelitySchema.nullable(),
+	visualCongruence: generatedToolVisualCongruenceSchema.nullable(),
 	model: z.string(),
 	warnings: z.array(z.string()),
 	version: z.number().int(),
@@ -78,6 +89,7 @@ export const generatedToolRecordSchema = z.object({
 	html: z.string(),
 	copy: generatedToolCopySchema.nullable(),
 	brandFidelity: generatedToolBrandFidelitySchema.nullable(),
+	visualCongruence: generatedToolVisualCongruenceSchema.nullable(),
 	model: z.string(),
 	warnings: z.array(z.string()),
 	createdAt: z.string(),

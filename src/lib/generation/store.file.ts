@@ -67,6 +67,7 @@ function recordPath(id: string): string {
 function normalizeRecord(record: GeneratedToolRecord): GeneratedToolRecord {
 	return {
 		...record,
+		visualCongruence: record.visualCongruence ?? null,
 		updatedAt: record.updatedAt ?? record.createdAt,
 		version: record.version ?? 1,
 		history: record.history ?? [],
@@ -142,6 +143,35 @@ async function updateGeneratedTool(
 	return record;
 }
 
+async function updateGeneratedToolVisualCongruence(
+	id: string,
+	expectedVersion: number,
+	visualCongruence: GeneratedToolContent["visualCongruence"],
+	warnings: string[]
+): Promise<GeneratedToolRecord | null> {
+	const existing = await getGeneratedTool(id);
+	if (!existing || existing.version !== expectedVersion) return null;
+
+	const record: GeneratedToolRecord = {
+		...existing,
+		visualCongruence,
+		warnings,
+		updatedAt: new Date().toISOString(),
+	};
+	if (storageMode === "memory") {
+		memoryRecords.set(id, record);
+		return record;
+	}
+	try {
+		await writeFile(recordPath(id), JSON.stringify(record, null, 2), "utf8");
+	} catch (error) {
+		if (!shouldFallbackToMemory(error)) throw error;
+		activateMemoryFallback(error);
+		memoryRecords.set(id, record);
+	}
+	return record;
+}
+
 async function rollbackGeneratedTool(id: string, toVersion: number): Promise<GeneratedToolRecord | null> {
 	const existing = await getGeneratedTool(id);
 	if (!existing) return null;
@@ -189,6 +219,7 @@ export const fileToolStore: ToolStoreBackend = {
 	saveGeneratedTool,
 	getGeneratedTool,
 	updateGeneratedTool,
+	updateGeneratedToolVisualCongruence,
 	rollbackGeneratedTool,
 	listGeneratedTools,
 };

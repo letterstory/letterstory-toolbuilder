@@ -117,6 +117,16 @@ export function BuilderDashboardPanel({
 									Brand fidelity: {activeTool.brandFidelity.verdict}
 								</Badge>
 							) : null}
+							{activeTool.visualCongruence ? (
+								<Badge
+									variant={visualCongruenceBadgeVariant(
+										activeTool.visualCongruence.status,
+										activeTool.visualCongruence.verdict
+									)}
+								>
+									{visualCongruenceBadgeLabel(activeTool.visualCongruence)}
+								</Badge>
+							) : null}
 						</div>
 						{activeTool.copy ? (
 							<div className="mt-4 rounded-3xl bg-brand-light/12 p-4">
@@ -128,6 +138,18 @@ export function BuilderDashboardPanel({
 						) : null}
 						{activeTool.brandFidelity?.notes ? (
 							<p className="mt-3 text-xs text-muted-foreground">{activeTool.brandFidelity.notes}</p>
+						) : null}
+						{activeTool.visualCongruence ? (
+							<div className="mt-3 space-y-2 text-xs text-muted-foreground">
+								<p>{activeTool.visualCongruence.notes}</p>
+								{activeTool.visualCongruence.risks.length ? (
+									<ul className="list-disc space-y-1 pl-5">
+										{activeTool.visualCongruence.risks.map((risk) => (
+											<li key={risk}>{risk}</li>
+										))}
+									</ul>
+								) : null}
+							</div>
 						) : null}
 					</section>
 
@@ -330,4 +352,21 @@ function brandFidelityBadgeVariant(
 	if (verdict === "fail") return "destructive";
 	if (verdict === "warn") return "outline";
 	return "secondary";
+}
+
+function visualCongruenceBadgeVariant(
+	status: "pending" | "completed" | "failed",
+	verdict: "pass" | "warn" | "fail" | null
+): "secondary" | "outline" | "destructive" {
+	if (status === "pending") return "secondary";
+	if (status === "failed") return "outline";
+	return brandFidelityBadgeVariant(verdict ?? "warn");
+}
+
+function visualCongruenceBadgeLabel(tool: NonNullable<BuilderDashboardPanelProps["activeTool"]>["visualCongruence"]) {
+	if (!tool) return "Visual match";
+	if (tool.status === "pending") return "Visual match: analyzing…";
+	if (tool.status === "failed") return "Visual match: unavailable";
+	const score = tool.congruenceScore ? ` (${tool.congruenceScore}/5)` : "";
+	return `Visual match: ${tool.verdict ?? "review"}${score}`;
 }

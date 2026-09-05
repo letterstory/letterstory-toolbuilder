@@ -175,6 +175,7 @@ export async function generateTool(request: ToolGenerationRequest): Promise<Tool
 	const built = await buildToolContent({
 		projectName: request.projectName,
 		prompt: request.prompt,
+		siteUrl: normalizedSiteUrl || null,
 		brandSnapshot,
 		brandWarning,
 		requestStartedAt: startedAt,
@@ -246,6 +247,7 @@ async function reviseTool(
 	const built = await buildToolContent({
 		projectName: request.projectName || existing.projectName,
 		prompt: request.prompt,
+		siteUrl: normalizedSiteUrl || existing.siteUrl,
 		brandSnapshot,
 		brandWarning,
 		existingHtml: existing.html,
@@ -303,6 +305,7 @@ interface BuildToolContentResult {
 		html: string;
 		copy: GeneratedToolCopy | null;
 		brandFidelity: GeneratedToolBrandFidelity | null;
+		visualCongruence: GeneratedToolVisualCongruence | null;
 		model: string;
 		warnings: string[];
 	};
@@ -319,6 +322,7 @@ interface BuildToolContentResult {
 async function buildToolContent(opts: {
 	projectName: string;
 	prompt: string;
+	siteUrl: string | null;
 	brandSnapshot: GeneratedToolBrandSnapshot | null;
 	brandWarning: string | null;
 	existingHtml?: string;
@@ -533,6 +537,8 @@ async function buildToolContent(opts: {
 		durationMs: Date.now() - buildStartedAt,
 		totalWarnings: warnings.length,
 	});
+	const visualCongruence =
+		opts.brandSnapshot && opts.siteUrl ? buildPendingVisualCongruence(opts.siteUrl) : null;
 	return {
 		status: "success",
 		content: {
@@ -543,6 +549,7 @@ async function buildToolContent(opts: {
 			html: sanitized.html,
 			copy,
 			brandFidelity,
+			visualCongruence,
 			model: envServer.ANTHROPIC_MODEL || DEFAULT_ANTHROPIC_MODEL,
 			warnings,
 		},

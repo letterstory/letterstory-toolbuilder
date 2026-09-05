@@ -41,6 +41,7 @@ describe("fileToolStore", () => {
 			html: "<!doctype html><html><body>hi</body></html>",
 			copy: null,
 			brandFidelity: null,
+			visualCongruence: null,
 			model: "claude-sonnet-4-6",
 			warnings: [],
 		});
@@ -66,6 +67,7 @@ describe("fileToolStore", () => {
 			html: "<!doctype html><html><body>v1</body></html>",
 			copy: null,
 			brandFidelity: null,
+			visualCongruence: null,
 			model: "claude-sonnet-4-6",
 			warnings: [],
 		});
@@ -78,6 +80,7 @@ describe("fileToolStore", () => {
 			html: "<!doctype html><html><body>v2</body></html>",
 			copy: null,
 			brandFidelity: null,
+			visualCongruence: null,
 			model: "claude-sonnet-4-6",
 			warnings: [],
 		});
@@ -101,6 +104,7 @@ describe("fileToolStore", () => {
 			html: "<!doctype html><html><body>v1</body></html>",
 			copy: { headline: "V1", supportingCopy: "First version." },
 			brandFidelity: null,
+			visualCongruence: null,
 			model: "claude-sonnet-4-6",
 			warnings: [],
 		});
@@ -112,6 +116,7 @@ describe("fileToolStore", () => {
 			html: "<!doctype html><html><body>v2</body></html>",
 			copy: { headline: "V2", supportingCopy: "Second version." },
 			brandFidelity: null,
+			visualCongruence: null,
 			model: "claude-sonnet-4-6",
 			warnings: ["second"],
 		});
@@ -123,6 +128,7 @@ describe("fileToolStore", () => {
 			html: "<!doctype html><html><body>v3</body></html>",
 			copy: { headline: "V3", supportingCopy: "Third version." },
 			brandFidelity: null,
+			visualCongruence: null,
 			model: "claude-sonnet-4-6",
 			warnings: ["third"],
 		});

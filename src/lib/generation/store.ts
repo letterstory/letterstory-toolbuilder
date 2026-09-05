@@ -11,7 +11,12 @@
 import { isSupabaseConfigured } from "@/lib/config/supabase";
 import { fileToolStore } from "./store.file";
 import { supabaseToolStore } from "./store.supabase";
-import type { GeneratedToolContent, GeneratedToolRecord, ToolStoreBackend } from "./store.types";
+import type {
+	GeneratedToolContent,
+	GeneratedToolRecord,
+	GeneratedToolVisualCongruence,
+	ToolStoreBackend,
+} from "./store.types";
 
 export type {
 	BrandFidelityVerdict,
@@ -21,6 +26,8 @@ export type {
 	GeneratedToolCopy,
 	GeneratedToolHistoryEntry,
 	GeneratedToolRecord,
+	GeneratedToolVisualCongruence,
+	VisualCongruenceStatus,
 } from "./store.types";
 
 function backend(): ToolStoreBackend {
@@ -44,6 +51,20 @@ export async function updateGeneratedTool(
 	updates: GeneratedToolContent
 ): Promise<GeneratedToolRecord | null> {
 	return backend().updateGeneratedTool(id, updates);
+}
+
+export async function updateGeneratedToolVisualCongruence(
+	id: string,
+	expectedVersion: number,
+	visualCongruence: GeneratedToolVisualCongruence,
+	warnings: string[]
+): Promise<GeneratedToolRecord | null> {
+	return backend().updateGeneratedToolVisualCongruence(
+		id,
+		expectedVersion,
+		visualCongruence,
+		warnings
+	);
 }
 
 export async function rollbackGeneratedTool(id: string, toVersion: number): Promise<GeneratedToolRecord | null> {

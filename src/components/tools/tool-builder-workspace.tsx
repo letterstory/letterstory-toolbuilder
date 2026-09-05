@@ -93,14 +93,22 @@ export function ToolBuilderWorkspace() {
 		}
 	}
 
-	const loadToolHistory = useCallback(async (id: string) => {
+	const loadToolDetail = useCallback(async (id: string, syncActiveTool = false) => {
 		try {
 			const response = await fetch(`/api/tools/${id}`);
 			const data = (await response.json()) as {
 				status: string;
-				tool?: { history?: ToolHistoryEntry[] };
+				tool?: (ToolSummary & { history?: ToolHistoryEntry[] }) | undefined;
 			};
-			setToolHistory(data.tool?.history ?? []);
+			if (data.status === "success" && data.tool) {
+				const tool = data.tool;
+				setToolHistory(tool.history ?? []);
+				if (syncActiveTool) {
+					setActiveTool((current) => (current?.id === tool.id ? toSummary(tool) : current));
+				}
+				return;
+			}
+			setToolHistory([]);
 		} catch {
 			setToolHistory([]);
 		}
@@ -131,6 +139,19 @@ export function ToolBuilderWorkspace() {
 		return () => window.clearInterval(interval);
 	}, [activeRun, requestState]);
 
+	useEffect(() => {
+		if (!activeTool || activeTool.visualCongruence?.status !== "pending") return;
+		const poll = async () => {
+			await loadToolDetail(activeTool.id, true);
+			void loadRecentTools();
+		};
+		void poll();
+		const interval = window.setInterval(() => {
+			void poll();
+		}, 4_000);
+		return () => window.clearInterval(interval);
+	}, [activeTool, loadRecentTools, loadToolDetail]);
+
 	const previewUrl = activeTool ? `/t/${activeTool.id}?v=${activeTool.version}` : null;
 	const origin = typeof window !== "undefined" ? window.location.origin : "";
 	const embedSnippet = activeTool
@@ -156,7 +177,13 @@ export function ToolBuilderWorkspace() {
 		: null;
 	const hostedUrl = activeTool ? `${origin}/t/${activeTool.id}` : "";
 
-	function toSummary(tool: GeneratedToolRecord): ToolSummary {
+	function toSummary(
+		tool:
+			| GeneratedToolRecord
+			| (ToolSummary & {
+					history?: ToolHistoryEntry[];
+			  })
+	): ToolSummary {
 		return {
 			id: tool.id,
 			projectName: tool.projectName,
@@ -165,12 +192,17 @@ export function ToolBuilderWorkspace() {
 			brandSnapshot: tool.brandSnapshot,
 			copy: tool.copy,
 			brandFidelity: tool.brandFidelity,
+			visualCongruence: tool.visualCongruence,
 			model: tool.model,
 			warnings: tool.warnings,
 			createdAt: tool.createdAt,
 			updatedAt: tool.updatedAt,
 			version: tool.version,
-			previousVersionCount: tool.history.length,
+			previousVersionCount: Array.isArray(tool.history)
+				? tool.history.length
+				: "previousVersionCount" in tool
+					? tool.previousVersionCount
+					: 0,
 		};
 	}
 
@@ -281,7 +313,7 @@ export function ToolBuilderWorkspace() {
 				setProjectName(summary.projectName);
 				appendConversation(buildSuccessReply(summary, Boolean(toolId)));
 				void loadRecentTools();
-				void loadToolHistory(summary.id);
+				void loadToolDetail(summary.id);
 			}
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
@@ -338,7 +370,7 @@ export function ToolBuilderWorkspace() {
 		setTelemetry(null);
 		setProgress(0);
 		setActiveView("preview");
-		void loadToolHistory(item.id);
+		void loadToolDetail(item.id);
 		setStatusMessage({
 			title: "Reopened tool",
 			description: `Showing ${item.projectName} v${item.version}. Open it in a new tab from Publish.`,
@@ -433,7 +465,7 @@ export function ToolBuilderWorkspace() {
 					tone: "success",
 				});
 				void loadRecentTools();
-				void loadToolHistory(summary.id);
+				void loadToolDetail(summary.id);
 			} else {
 				setStatusMessage({
 					title: "Restore failed",

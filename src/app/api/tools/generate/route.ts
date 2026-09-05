@@ -1,5 +1,6 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { TOOLS_GENERATE_RATE_LIMIT } from "@/lib/rate-limit/rules";
+import { finalizeVisualCongruenceForTool } from "@/lib/generation/visual-congruence";
 import { checkRateLimit, getClientIp } from "@/lib/security/rate-limit";
 import { generateToolRateLimited, generateToolSurface } from "@/lib/surfaces/tools";
 
@@ -12,6 +13,15 @@ export async function POST(request: Request) {
 		}
 
 		const response = await generateToolSurface(await request.json().catch(() => null), { request });
+		if (
+			response.body.status === "success" &&
+			response.body.tool.visualCongruence?.status === "pending"
+		) {
+			const { id, version } = response.body.tool;
+			after(async () => {
+				await finalizeVisualCongruenceForTool({ toolId: id, expectedVersion: version });
+			});
+		}
 		return NextResponse.json(response.body, {
 			status: response.statusCode,
 			headers: response.headers,

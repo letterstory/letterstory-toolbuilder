@@ -26,6 +26,7 @@ create table if not exists generated_tools (
 	html text not null,
 	copy jsonb,
 	brand_fidelity jsonb,
+	visual_congruence jsonb,
 	model text not null,
 	warnings jsonb not null default '[]'::jsonb,
 	created_at timestamptz not null default now(),

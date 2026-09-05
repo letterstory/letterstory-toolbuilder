@@ -31,6 +31,7 @@ interface ToolRow {
 	html: string;
 	copy: GeneratedToolRecord["copy"];
 	brand_fidelity: GeneratedToolRecord["brandFidelity"];
+	visual_congruence: GeneratedToolRecord["visualCongruence"];
 	model: string;
 	warnings: string[];
 	created_at: string;
@@ -49,6 +50,7 @@ function rowToRecord(row: ToolRow): GeneratedToolRecord {
 		html: row.html,
 		copy: row.copy,
 		brandFidelity: row.brand_fidelity,
+		visualCongruence: row.visual_congruence,
 		model: row.model,
 		warnings: row.warnings ?? [],
 		createdAt: row.created_at,
@@ -67,6 +69,7 @@ function contentToRow(content: GeneratedToolContent) {
 		html: content.html,
 		copy: content.copy,
 		brand_fidelity: content.brandFidelity,
+		visual_congruence: content.visualCongruence,
 		model: content.model,
 		warnings: content.warnings,
 	};
@@ -125,6 +128,27 @@ async function rollbackGeneratedTool(id: string, toVersion: number): Promise<Gen
 	return updateGeneratedTool(id, contentFromHistoryEntry(target));
 }
 
+async function updateGeneratedToolVisualCongruence(
+	id: string,
+	expectedVersion: number,
+	visualCongruence: GeneratedToolRecord["visualCongruence"],
+	warnings: string[]
+): Promise<GeneratedToolRecord | null> {
+	const { data, error } = await getSupabaseClient()
+		.from(TABLE)
+		.update({
+			visual_congruence: visualCongruence,
+			warnings,
+			updated_at: new Date().toISOString(),
+		})
+		.eq("id", id)
+		.eq("version", expectedVersion)
+		.select()
+		.maybeSingle();
+	if (error || !data) return null;
+	return rowToRecord(data as ToolRow);
+}
+
 async function listGeneratedTools(): Promise<GeneratedToolRecord[]> {
 	const { data, error } = await getSupabaseClient()
 		.from(TABLE)
@@ -138,6 +162,7 @@ export const supabaseToolStore: ToolStoreBackend = {
 	saveGeneratedTool,
 	getGeneratedTool,
 	updateGeneratedTool,
+	updateGeneratedToolVisualCongruence,
 	rollbackGeneratedTool,
 	listGeneratedTools,
 };
