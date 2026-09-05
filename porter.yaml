@@ -8,7 +8,7 @@
 # setup a human needs to do before this file works.)
 
 version: v2
-name: letterstory-toolbuilder-staging
+name: letterstory-toolbuilder
 
 build:
   method: docker
@@ -29,7 +29,10 @@ services:
   - name: web
     type: web
     run: node server.js
+    instances: 1
     port: 3000
+    domains:
+      - name: web-22301-57c6c7ab-4p0z458q.onporter.run
     healthCheck:
       enabled: true
       httpPath: /api/health

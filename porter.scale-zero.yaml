@@ -17,6 +17,8 @@ services:
     run: node server.js
     instances: 0
     port: 3000
+    domains:
+      - name: web-22301-57c6c7ab-4p0z458q.onporter.run
     healthCheck:
       enabled: true
       httpPath: /api/health
