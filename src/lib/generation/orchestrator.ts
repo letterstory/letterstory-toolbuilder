@@ -71,7 +71,7 @@ const MAX_TOKENS = 8_000;
 const MAX_GENERATION_ATTEMPTS = 2;
 const MAX_PROMPT_BRAND_COLORS = 4;
 const MAX_PROMPT_BRAND_FONTS = 2;
-const MAX_PROMPT_LOGO_DATA_URI_CHARS = 0;
+const MAX_PROMPT_LOGO_DATA_URI_CHARS = 18_000;
 const MIN_ADVISORY_BUDGET_MS = 5_000;
 // Worst-case request-budget math for one /api/tools/generate request:
 // - primary HTML generation attempt: 210s
@@ -586,7 +586,9 @@ async function requestToolHtml(opts: {
 		"- Implement the ACTUAL requested behavior with real working logic (real calculations, real state, real interactivity) — not a static mockup or placeholder. If the tool computes something, the computation must be correct and wired to visible inputs/outputs.",
 		"- Design must be clean, modern, accessible (labeled inputs, sufficient color contrast, keyboard-usable), and responsive so it looks correct at both narrow (embedded iframe) and wide layouts.",
 		"- Keep the implementation compact: no comments, no placeholder sections, no unnecessary copy, and only as much CSS/JS as the tool actually needs.",
-		"- If brand tokens are provided below, use them for the visual identity: primary/accent colors, font family names (assume standard web-safe fallbacks after the named font), and the logo image only if an inline logo asset is explicitly provided. Do not fabricate a different brand.",
+		"- If brand tokens are provided below, treat them as authoritative. Use those exact colors for the visible identity, even if they conflict with prior knowledge or an older palette you associate with the brand.",
+		"- If an inline logo asset is provided, render that asset instead of typing a substitute wordmark. If no logo asset is provided, do not invent a logo treatment or fall back to a different historical brand palette.",
+		"- Use the provided primary/accent colors, font family names (assume standard web-safe fallbacks after the named font), and optional inline logo asset. Do not fabricate a different brand.",
 		"- Keep the whole document self-sufficient and safe: no forms that submit to external endpoints, no fetch()/XMLHttpRequest calls to external hosts.",
 		"- Include a small, unobtrusive 'Powered by Letterstory' text credit near the bottom.",
 		...(isRevision
@@ -822,6 +824,7 @@ function buildBrandPrompt(brandSnapshot: GeneratedToolBrandSnapshot | null): str
 		`Brand name: ${brandSnapshot.brandName ?? "Unknown"}`,
 		`Colors: ${colorLines.length ? colorLines.join(", ") : "none detected"}`,
 		`Fonts: ${fontList.join(", ") || "none detected"}`,
+		"Use the supplied colors as the header, CTA, and highlight anchors. Ignore any conflicting legacy palette.",
 		includeLogo
 			? `Logo data URI: ${brandSnapshot.logoDataUri}`
 			: "Logo asset omitted from the prompt to keep generation fast; if no inline logo asset is provided, rely on color, typography, and brand name treatment instead.",

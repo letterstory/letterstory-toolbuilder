@@ -174,13 +174,52 @@ describe("generateTool", () => {
 		}
 	});
 
+	it("includes small inline logos and authoritative-token guidance in the main HTML generation prompt", async () => {
+		isBrandIngestionConfiguredMock.mockReturnValue(true);
+		pullBrandProfileMock.mockResolvedValue({
+			brandName: "Airbnb",
+			colors: { primary: "#008489", accent: "#914669" },
+			fonts: ["Airbnb Cereal VF", "Circular"],
+			images: { logo: { canonicalDataUri: "data:image/png;base64,abc" } },
+		});
+		mockAnthropicSuccess("<!doctype html><html><body>hi</body></html>");
+
+		const result = await generateTool({
+			projectName: "Trip Cost Splitter",
+			siteUrl: "https://airbnb.com",
+			prompt: "split travel costs",
+		});
+
+		expect(result.status).toBe("success");
+		const htmlCall = (global.fetch as ReturnType<typeof vi.fn>).mock.calls.find(([, init]) => {
+			const parsed = JSON.parse(String((init as RequestInit | undefined)?.body ?? "{}")) as {
+				system?: string;
+			};
+			return (
+				!(parsed.system ?? "").includes("VERDICT:") && !(parsed.system ?? "").includes("HEADLINE:")
+			);
+		});
+		const htmlCallBody = JSON.parse(
+			String((htmlCall?.[1] as RequestInit | undefined)?.body ?? "{}")
+		) as {
+			system?: string;
+			messages?: Array<{ content: string }>;
+		};
+		expect(htmlCallBody.system).toContain("treat them as authoritative");
+		expect(htmlCallBody.system).toContain("render that asset instead of typing a substitute wordmark");
+		expect(htmlCallBody.messages?.[0]?.content).toContain(
+			"Use the supplied colors as the header, CTA, and highlight anchors. Ignore any conflicting legacy palette."
+		);
+		expect(htmlCallBody.messages?.[0]?.content).toContain("Logo data URI: data:image/png;base64,abc");
+	});
+
 	it("omits oversized inline logos from the main HTML generation prompt", async () => {
 		isBrandIngestionConfiguredMock.mockReturnValue(true);
 		pullBrandProfileMock.mockResolvedValue({
 			brandName: "Gymshark",
 			colors: { primary: "#111111", accent: "#ffffff" },
 			fonts: ["Inter", "Arial"],
-			images: { logo: { canonicalDataUri: `data:image/png;base64,${"a".repeat(5000)}` } },
+			images: { logo: { canonicalDataUri: `data:image/png;base64,${"a".repeat(50000)}` } },
 		});
 		mockAnthropicSuccess("<!doctype html><html><body>hi</body></html>");
 
@@ -206,7 +245,7 @@ describe("generateTool", () => {
 		};
 		expect(htmlCallBody.messages?.[0]?.content).toContain("Logo asset omitted from the prompt");
 		expect(htmlCallBody.messages?.[0]?.content).not.toContain(
-			`data:image/png;base64,${"a".repeat(5000)}`
+			`data:image/png;base64,${"a".repeat(50000)}`
 		);
 	});
 
