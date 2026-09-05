@@ -10,3 +10,5 @@
 ## Notes
 
 (Append learnings, decisions affecting this role, and cross-agent context here.)
+
+📌 Team update (2026-09-04T22:23:35.396-04:00): The Context.dev cutover cycle is closed out — the six-domain production parity retest and screenshot capture are complete, the Airbnb regression was fixed, and the final verdict is validated-with-known-issues rather than an accuracy-upgrade claim.
