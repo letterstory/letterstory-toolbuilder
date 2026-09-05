@@ -181,7 +181,8 @@ describe("generateTool", () => {
 		buildCompetitorContextForBrandMock.mockResolvedValue({
 			industry: "payments",
 			signal: "matches",
-			summary: "Competitor read for payments: cool palette, sans-serif typography. Extracted target broadly matches that pattern.",
+			summary:
+				"Competitor read for payments: cool palette, sans-serif typography. Extracted target broadly matches that pattern.",
 			target: {
 				primaryColor: "#635BFF",
 				primaryColorFamily: "cool",
@@ -268,14 +269,19 @@ describe("generateTool", () => {
 		);
 		expect(htmlCallBody.system).toContain("Total Deduction: $362.50");
 		expect(htmlCallBody.system).toContain("100% business miles reimbursed");
+		expect(htmlCallBody.system).toContain("formula note/disclaimer does NOT count");
 		expect(htmlCallBody.system).toContain("data-letterstory-tool='true'");
 		expect(htmlCallBody.system).toContain(
 			"See how [Brand] [automates/handles/simplifies] [topic] for [X] [customers/businesses]"
 		);
 		expect(htmlCallBody.system).toContain("Business miles driven ($0.725 / mile)");
 		expect(htmlCallBody.system).toContain(
+			"Do NOT output a standalone helper line like `Typical range: 1%–3% per month`"
+		);
+		expect(htmlCallBody.system).toContain(
 			"fixed-formula calculators must use exactly two action buttons in this order"
 		);
+		expect(htmlCallBody.system).toContain("Never replace `Clear` with a lone `Reset` button.");
 		expect(htmlCallBody.system).toContain("Copy mission` + `Try again");
 	});
 
