@@ -3,6 +3,7 @@ import {
 	buildCompetitorContextForBrand,
 	extractCompetitorSignalFromFirecrawl,
 	extractCompetitorSignalFromHtml,
+	parseCompetitorResponse,
 	type CompetitorCandidate,
 } from "../../src/lib/brand/competitor-context";
 import type { BrandProfile } from "../../src/lib/brand";
@@ -275,5 +276,16 @@ describe("competitor context", () => {
 			logoStyle: "wordmark",
 		});
 		expect(signal.notes).toContain("Used direct-site fallback after Firecrawl failed.");
+	});
+
+	it("parses competitor JSON wrapped in markdown fences", () => {
+		const parsed = parseCompetitorResponse(`\`\`\`json
+{"industry":"food delivery","competitors":[{"companyName":"Uber Eats","domain":"ubereats.com"}]}
+\`\`\``);
+
+		expect(parsed).toEqual({
+			industry: "food delivery",
+			competitors: [{ companyName: "Uber Eats", domain: "ubereats.com" }],
+		});
 	});
 });

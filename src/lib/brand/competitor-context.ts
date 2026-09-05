@@ -525,7 +525,27 @@ async function requestAdvisoryText(system: string, userContent: string, maxToken
 	}
 }
 
-function parseCompetitorResponse(
+export function parseCompetitorResponse(
+	text: string
+): { industry: string | null; competitors: CompetitorCandidate[] } | null {
+	const candidates = [
+		text.trim(),
+		text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, ""),
+	];
+	const firstBrace = text.indexOf("{");
+	const lastBrace = text.lastIndexOf("}");
+	if (firstBrace >= 0 && lastBrace > firstBrace) {
+		candidates.push(text.slice(firstBrace, lastBrace + 1));
+	}
+
+	for (const candidateText of candidates) {
+		const parsed = parseCompetitorResponseJson(candidateText);
+		if (parsed) return parsed;
+	}
+	return null;
+}
+
+function parseCompetitorResponseJson(
 	text: string
 ): { industry: string | null; competitors: CompetitorCandidate[] } | null {
 	try {
