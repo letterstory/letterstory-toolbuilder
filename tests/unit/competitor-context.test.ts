@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	buildCompetitorContextForBrand,
 	extractCompetitorSignalFromFirecrawl,
+	extractCompetitorSignalFromHtml,
 	type CompetitorCandidate,
 } from "../../src/lib/brand/competitor-context";
 import type { BrandProfile } from "../../src/lib/brand";
@@ -112,43 +113,55 @@ describe("competitor context", () => {
 			] satisfies CompetitorCandidate[],
 		});
 		const fetchCompetitorSignal = vi.fn(async (candidate: CompetitorCandidate) => {
-				if (candidate.domain === "postmates.com") {
-					throw new Error("timeout");
-				}
-				return {
-					companyName: candidate.companyName,
-					domain: candidate.domain,
-					status: "analyzed" as const,
-					brandName: candidate.companyName,
-					primaryColor: candidate.domain === "grubhub.com" ? "#F63440" : "#06C167",
-					primaryColorFamily: "warm" as const,
-					fontFamily: "Inter",
-					fontCategory: "sans-serif" as const,
-					logoStyle: "wordmark" as const,
-					notes: [],
-				};
-			});
+			if (candidate.domain === "postmates.com") {
+				throw new Error("timeout");
+			}
+			return {
+				companyName: candidate.companyName,
+				domain: candidate.domain,
+				status: "analyzed" as const,
+				brandName: candidate.companyName,
+				primaryColor: candidate.domain === "grubhub.com" ? "#F63440" : "#06C167",
+				primaryColorFamily: "warm" as const,
+				fontFamily: "Inter",
+				fontCategory: "sans-serif" as const,
+				logoStyle: "wordmark" as const,
+				notes: [],
+			};
+		});
 
 		const context = await buildCompetitorContextForBrand(makeProfile(), {
 			identifyCompetitors,
 			fetchCompetitorSignal,
+			fetchCompetitorSignalFallback: async (candidate) => ({
+				companyName: candidate.companyName,
+				domain: candidate.domain,
+				status: "analyzed",
+				brandName: candidate.companyName,
+				primaryColor: "#F63440",
+				primaryColorFamily: "warm",
+				fontFamily: "Inter",
+				fontCategory: "sans-serif",
+				logoStyle: "wordmark",
+				notes: ["Used direct-site fallback after Firecrawl failed."],
+			}),
 		});
 
 		expect(context).toMatchObject({
 			industry: "food delivery",
 			signal: "diverges",
 			industryNorms: {
-				sampleSize: 2,
+				sampleSize: 3,
 				primaryColorFamily: "warm",
 				fontCategory: "sans-serif",
 				logoStyle: "wordmark",
 			},
 		});
 		expect(context?.notes).toEqual(
-			expect.arrayContaining([
-				expect.stringContaining("Target differs from competitor norms"),
-				expect.stringContaining("Could not analyze Postmates"),
-			])
+			expect.arrayContaining([expect.stringContaining("Target differs from competitor norms")])
+		);
+		expect(context?.competitors.find((competitor) => competitor.domain === "postmates.com")?.notes).toContain(
+			"Used direct-site fallback after Firecrawl failed."
 		);
 		expect(identifyCompetitors).toHaveBeenCalledTimes(1);
 		expect(fetchCompetitorSignal).toHaveBeenCalledTimes(3);
@@ -233,5 +246,34 @@ describe("competitor context", () => {
 			fontCategory: "sans-serif",
 			logoStyle: "wordmark",
 		});
+	});
+
+	it("extracts fallback brand heuristics from raw competitor HTML", () => {
+		const signal = extractCompetitorSignalFromHtml(
+			{ companyName: "Grubhub", domain: "grubhub.com" },
+			[
+				"<html><head>",
+				'<title>Grubhub | Food Delivery</title>',
+				'<meta property="og:site_name" content="Grubhub" />',
+				'<meta name="theme-color" content="#F63440" />',
+				"<style>",
+				":root { --brand-primary: #F63440; --font-body: 'GT America', sans-serif; }",
+				"body { font-family: 'GT America', Arial, sans-serif; }",
+				"</style>",
+				"</head><body>",
+				'<img alt="Grubhub wordmark logo" src="/logo.svg" />',
+				"</body></html>",
+			].join("")
+		);
+
+		expect(signal).toMatchObject({
+			brandName: "Grubhub",
+			primaryColor: "#F63440",
+			primaryColorFamily: "warm",
+			fontFamily: "GT America",
+			fontCategory: "sans-serif",
+			logoStyle: "wordmark",
+		});
+		expect(signal.notes).toContain("Used direct-site fallback after Firecrawl failed.");
 	});
 });
