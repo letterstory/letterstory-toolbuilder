@@ -25,7 +25,6 @@ export type BrandSpacingRhythm = "tight" | "balanced" | "airy";
 export type BrandValidationStatus = "pass" | "warn" | "fail";
 export type BrandValidationConfidence = "low" | "medium" | "high";
 export type BrandValidationGapSeverity = "low" | "medium" | "high";
-export type BrandDistinctivenessStatus = "distinct" | "adjacent" | "overlapping";
 
 export interface BrandTypographyProfile {
 	primaryFont: string | null;
@@ -190,63 +189,6 @@ export interface BrandFidelityValidationFailureResult {
 
 export type BrandFidelityValidationResult =
 	BrandFidelityValidationSuccessResult | BrandFidelityValidationFailureResult;
-
-export interface BrandCompetitorComparisonRequest {
-	primarySiteUrl: string;
-	competitorUrls: string[];
-	primaryProfile?: BrandProfile;
-}
-
-export interface BrandVisualSimilarity {
-	score: number;
-	rationale: string;
-}
-
-export interface BrandCompetitorDelta {
-	competitorUrl: string;
-	competitorBrandName: string | null;
-	sharedColorFamilies: string[];
-	primaryOnlyColorFamilies: string[];
-	competitorOnlyColorFamilies: string[];
-	sharedFonts: string[];
-	primaryOnlyFonts: string[];
-	competitorOnlyFonts: string[];
-	sharedToneDescriptors: string[];
-	distinctivenessScore: number;
-	status: BrandDistinctivenessStatus;
-	rationale: string;
-	visualSimilarity: BrandVisualSimilarity | null;
-}
-
-export interface BrandCompetitorComparisonSuccessResult {
-	status: "success";
-	requestedUrl: string;
-	primaryProfile: BrandProfile;
-	competitors: Array<{
-		profile: BrandProfile;
-		comparison: BrandCompetitorDelta;
-	}>;
-	overallDistinctiveness: {
-		score: number;
-		status: BrandDistinctivenessStatus;
-		summary: string;
-	};
-	overallVisualDistinctiveness: {
-		score: number;
-		status: BrandDistinctivenessStatus;
-		summary: string;
-	} | null;
-}
-
-export interface BrandCompetitorComparisonFailureResult {
-	status: "not_configured" | "error";
-	code: "context_dev_not_configured" | "context_dev_error" | "invalid_input";
-	requestedUrl: string;
-	message: string;
-}
-
-export type BrandCompetitorComparisonResult =
-	BrandCompetitorComparisonSuccessResult | BrandCompetitorComparisonFailureResult;
 
 interface AnthropicMessageBlock {
 	type?: string;
@@ -444,12 +386,6 @@ function normalizeGapField(value: unknown): BrandFidelityGap["field"] {
 
 function normalizeGapSeverity(value: unknown): BrandValidationGapSeverity {
 	return value === "low" || value === "medium" || value === "high" ? value : "medium";
-}
-
-function normalizeDistinctivenessStatus(value: number): BrandDistinctivenessStatus {
-	if (value >= 70) return "distinct";
-	if (value >= 45) return "adjacent";
-	return "overlapping";
 }
 
 function extractJsonObject(text: string): string | null {
@@ -1180,142 +1116,6 @@ function normalizeColorHex(value: string): string | null {
 	return trimmed.toUpperCase();
 }
 
-function rgbToHsl(hex: string): { h: number; s: number; l: number } {
-	const normalized = normalizeColorHex(hex) ?? "#000000";
-	const r = parseInt(normalized.slice(1, 3), 16) / 255;
-	const g = parseInt(normalized.slice(3, 5), 16) / 255;
-	const b = parseInt(normalized.slice(5, 7), 16) / 255;
-	const max = Math.max(r, g, b);
-	const min = Math.min(r, g, b);
-	let h = 0;
-	let s = 0;
-	const l = (max + min) / 2;
-	const delta = max - min;
-
-	if (delta !== 0) {
-		s = delta / (1 - Math.abs(2 * l - 1));
-		switch (max) {
-			case r:
-				h = 60 * (((g - b) / delta) % 6);
-				break;
-			case g:
-				h = 60 * ((b - r) / delta + 2);
-				break;
-			default:
-				h = 60 * ((r - g) / delta + 4);
-		}
-	}
-
-	return { h: h < 0 ? h + 360 : h, s, l };
-}
-
-function colorFamilyFromHex(hex: string): string | null {
-	const normalized = normalizeColorHex(hex);
-	if (!normalized) return null;
-	const { h, s, l } = rgbToHsl(normalized);
-	if (s < 0.1 && l >= 0.92) return "white";
-	if (s < 0.1 && l <= 0.12) return "black";
-	if (s < 0.12) return "gray";
-	if (h < 15 || h >= 345) return "red";
-	if (h < 45) return "orange";
-	if (h < 70) return "yellow";
-	if (h < 165) return "green";
-	if (h < 200) return "teal";
-	if (h < 255) return "blue";
-	if (h < 300) return "purple";
-	return "pink";
-}
-
-function normalizeFontName(font: string): string {
-	return font.trim().toLowerCase().replace(/["']/g, "");
-}
-
-function tokenSet(values: string[]): Set<string> {
-	return new Set(values.map((value) => value.trim().toLowerCase()).filter(Boolean));
-}
-
-function setIntersection(left: Set<string>, right: Set<string>): string[] {
-	return [...left].filter((value) => right.has(value)).sort();
-}
-
-function setDifference(left: Set<string>, right: Set<string>): string[] {
-	return [...left].filter((value) => !right.has(value)).sort();
-}
-
-function jaccard(left: Set<string>, right: Set<string>): number | null {
-	const union = new Set([...left, ...right]);
-	if (!union.size) return null;
-	const intersection = setIntersection(left, right).length;
-	return intersection / union.size;
-}
-
-function collectColorFamilies(profile: BrandProfile): Set<string> {
-	return tokenSet(
-		Object.values(profile.colors)
-			.map((value) => colorFamilyFromHex(value))
-			.filter((entry): entry is string => Boolean(entry))
-	);
-}
-
-function collectToneDescriptors(profile: BrandProfile): Set<string> {
-	return tokenSet([
-		profile.personality.tone ?? "",
-		profile.personality.toneOfVoice ?? "",
-		...profile.personality.descriptors,
-		profile.personality.targetAudience ?? "",
-	]);
-}
-
-function compareBrandProfiles(
-	primary: BrandProfile,
-	competitor: BrandProfile
-): BrandCompetitorDelta {
-	const primaryColorFamilies = collectColorFamilies(primary);
-	const competitorColorFamilies = collectColorFamilies(competitor);
-	const primaryFonts = tokenSet(primary.fonts.map(normalizeFontName));
-	const competitorFonts = tokenSet(competitor.fonts.map(normalizeFontName));
-	const primaryTone = collectToneDescriptors(primary);
-	const competitorTone = collectToneDescriptors(competitor);
-	const overlaps = [
-		jaccard(primaryColorFamilies, competitorColorFamilies),
-		jaccard(primaryFonts, competitorFonts),
-		jaccard(primaryTone, competitorTone),
-	].filter((value): value is number => value !== null);
-	const averageOverlap = overlaps.length
-		? overlaps.reduce((sum, value) => sum + value, 0) / overlaps.length
-		: 0;
-	const distinctivenessScore = clampScore((1 - averageOverlap) * 100);
-	const status = normalizeDistinctivenessStatus(distinctivenessScore);
-	const sharedColorFamilies = setIntersection(primaryColorFamilies, competitorColorFamilies);
-	const sharedFonts = setIntersection(primaryFonts, competitorFonts);
-	const sharedToneDescriptors = setIntersection(primaryTone, competitorTone);
-	const rationaleParts = [
-		sharedColorFamilies.length
-			? `shared color families: ${sharedColorFamilies.join(", ")}`
-			: "minimal color-family overlap",
-		sharedFonts.length ? `shared fonts: ${sharedFonts.join(", ")}` : "different font stack",
-		sharedToneDescriptors.length
-			? `shared tone descriptors: ${sharedToneDescriptors.slice(0, 3).join(", ")}`
-			: "copy/tone cues differ",
-	];
-
-	return {
-		competitorUrl: competitor.url,
-		competitorBrandName: competitor.brandName,
-		sharedColorFamilies,
-		primaryOnlyColorFamilies: setDifference(primaryColorFamilies, competitorColorFamilies),
-		competitorOnlyColorFamilies: setDifference(competitorColorFamilies, primaryColorFamilies),
-		sharedFonts,
-		primaryOnlyFonts: setDifference(primaryFonts, competitorFonts),
-		competitorOnlyFonts: setDifference(competitorFonts, primaryFonts),
-		sharedToneDescriptors,
-		distinctivenessScore,
-		status,
-		rationale: rationaleParts.join("; "),
-		visualSimilarity: null,
-	};
-}
-
 export async function pullBrandProfile(siteUrlOrDomain: string): Promise<BrandProfile> {
 	if (!isBrandIngestionConfigured()) {
 		throw new Error("Brand extraction requires Context.dev (CONTEXT_DEV_API_KEY is unset)");
@@ -1444,73 +1244,6 @@ export async function validateBrandFidelity(
 			code: message.includes("Anthropic") ? "anthropic_error" : "context_dev_error",
 			requestedUrl: siteUrl,
 			message,
-		};
-	}
-}
-
-export async function compareBrandAgainstCompetitors(
-	request: BrandCompetitorComparisonRequest
-): Promise<BrandCompetitorComparisonResult> {
-	if (!isBrandIngestionConfigured()) {
-		return {
-			status: "not_configured",
-			code: "context_dev_not_configured",
-			requestedUrl: request.primarySiteUrl,
-			message: "Set CONTEXT_DEV_API_KEY before running competitor brand comparisons.",
-		};
-	}
-
-	const competitorUrls = dedupeStrings(request.competitorUrls)
-		.map((url) => normalizeBrandSiteUrl(url))
-		.filter((url): url is string => Boolean(url));
-	if (!competitorUrls.length) {
-		return {
-			status: "error",
-			code: "invalid_input",
-			requestedUrl: request.primarySiteUrl,
-			message: "Provide at least one valid competitor URL.",
-		};
-	}
-
-	try {
-		const primaryProfile =
-			request.primaryProfile ?? (await pullBrandProfile(request.primarySiteUrl));
-		const competitorProfiles = await Promise.all(
-			competitorUrls.map((url) => pullBrandProfile(url))
-		);
-		const competitors = competitorProfiles.map((profile) => ({
-			profile,
-			comparison: compareBrandProfiles(primaryProfile, profile),
-		}));
-
-		const overallScore = Math.round(
-			competitors.reduce((sum, competitor) => sum + competitor.comparison.distinctivenessScore, 0) /
-				competitors.length
-		);
-		const overallStatus = normalizeDistinctivenessStatus(overallScore);
-		return {
-			status: "success",
-			requestedUrl: request.primarySiteUrl,
-			primaryProfile,
-			competitors,
-			overallDistinctiveness: {
-				score: overallScore,
-				status: overallStatus,
-				summary:
-					overallStatus === "distinct"
-						? "Primary brand remains distinct from the supplied competitors on extracted colors, fonts, and tone signals."
-						: overallStatus === "adjacent"
-							? "Primary brand shares some palette, type, or tone cues with the supplied competitors."
-							: "Primary brand overlaps heavily with the supplied competitors on extracted colors, fonts, and tone signals.",
-			},
-			overallVisualDistinctiveness: null,
-		};
-	} catch (error) {
-		return {
-			status: "error",
-			code: "context_dev_error",
-			requestedUrl: request.primarySiteUrl,
-			message: error instanceof Error ? error.message : String(error),
 		};
 	}
 }

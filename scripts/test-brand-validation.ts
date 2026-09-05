@@ -1,20 +1,15 @@
-import {
-	compareBrandAgainstCompetitors,
-	pullBrandProfile,
-	validateBrandFidelity,
-} from "../src/lib/brand";
+import { pullBrandProfile, validateBrandFidelity } from "../src/lib/brand";
 
 interface ProbeTarget {
 	label: string;
 	url: string;
-	competitors?: string[];
 }
 
 const DEFAULT_TARGETS: ProbeTarget[] = [
-	{ label: "Stripe", url: "stripe.com", competitors: ["adyen.com"] },
-	{ label: "Ramp", url: "ramp.com", competitors: ["brex.com"] },
-	{ label: "Duolingo", url: "duolingo.com", competitors: ["babbel.com"] },
-	{ label: "Basecamp", url: "basecamp.com", competitors: ["asana.com"] },
+	{ label: "Stripe", url: "stripe.com" },
+	{ label: "Ramp", url: "ramp.com" },
+	{ label: "Duolingo", url: "duolingo.com" },
+	{ label: "Basecamp", url: "basecamp.com" },
 ];
 
 function describeMap(values: Record<string, string>): string {
@@ -57,28 +52,6 @@ async function main() {
 				}
 			} else {
 				console.log(`fidelity: ${fidelity.status} (${fidelity.code}) ${fidelity.message}`);
-			}
-
-			if (target.competitors?.length) {
-				const comparison = await compareBrandAgainstCompetitors({
-					primarySiteUrl: target.url,
-					primaryProfile: profile,
-					competitorUrls: target.competitors,
-				});
-				if (comparison.status === "success") {
-					console.log(
-						`distinctiveness: ${comparison.overallDistinctiveness.status} ${comparison.overallDistinctiveness.score}/100`
-					);
-					for (const competitor of comparison.competitors) {
-						console.log(
-							`vs ${competitor.profile.brandName ?? competitor.profile.url}: ${competitor.comparison.status} ${competitor.comparison.distinctivenessScore}/100 (${competitor.comparison.rationale})`
-						);
-					}
-				} else {
-					console.log(
-						`comparison: ${comparison.status} (${comparison.code}) ${comparison.message}`
-					);
-				}
 			}
 		} catch (error) {
 			console.log(`error: ${error instanceof Error ? error.message : String(error)}`);

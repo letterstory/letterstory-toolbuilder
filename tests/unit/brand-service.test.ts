@@ -8,7 +8,6 @@ vi.mock("@/lib/net/ssrf", () => ({
 }));
 
 import {
-	compareBrandAgainstCompetitors,
 	isBrandIngestionConfigured,
 	normalizeBrandSiteUrl,
 	parseContextDevBranding,
@@ -503,125 +502,6 @@ describe("brand service", () => {
 		});
 	});
 
-	it("compares a primary brand against explicit competitors", async () => {
-		process.env.CONTEXT_DEV_API_KEY = "configured-key";
-		const primaryProfile = parseContextDevBranding({
-			brandResponse: {
-				brand: {
-					title: "Stripe",
-					colors: [
-						{ hex: "#635BFF", source: "site" },
-						{ hex: "#0A2540", source: "site" },
-					],
-				},
-			},
-			styleguideResponse: {
-				styleguide: {
-					colors: { accent: "#635BFF", background: "#FFFFFF", text: "#0A2540" },
-					typography: {
-						headings: { h1: { fontFamily: "Sohne", fontSize: "48px" } },
-						p: { fontFamily: "Inter", fontSize: "16px" },
-					},
-					elementSpacing: { stack: "8px" },
-				},
-			},
-			fontsResponse: { fonts: [{ font: "Sohne", percent_words: 0.7 }] },
-		});
-		const fetchMock = vi
-			.fn()
-			.mockResolvedValueOnce(
-				new Response(
-					JSON.stringify({
-						brand: {
-							title: "Adyen",
-							colors: [
-								{ hex: "#0ABF53", source: "site" },
-								{ hex: "#00112C", source: "site" },
-							],
-						},
-					}),
-					{ status: 200 }
-				)
-			)
-			.mockResolvedValueOnce(
-				new Response(
-					JSON.stringify({
-						styleguide: {
-							colors: { accent: "#0ABF53", background: "#FFFFFF", text: "#00112C" },
-							typography: {
-								headings: { h1: { fontFamily: "Inter", fontSize: "52px" } },
-								p: { fontFamily: "Inter", fontSize: "18px" },
-							},
-							elementSpacing: { stack: "8px" },
-						},
-					}),
-					{ status: 200 }
-				)
-			)
-			.mockResolvedValueOnce(
-				new Response(JSON.stringify({ fonts: [{ font: "Inter", percent_words: 1 }] }), {
-					status: 200,
-				})
-			)
-			.mockResolvedValueOnce(new Response(JSON.stringify({ metadata: {} }), { status: 200 }))
-			.mockResolvedValueOnce(
-				new Response(
-					JSON.stringify({
-						brand: {
-							title: "PayPal",
-							colors: [
-								{ hex: "#003087", source: "site" },
-								{ hex: "#009CDE", source: "site" },
-							],
-						},
-					}),
-					{ status: 200 }
-				)
-			)
-			.mockResolvedValueOnce(
-				new Response(
-					JSON.stringify({
-						styleguide: {
-							colors: { accent: "#003087", background: "#FFFFFF", text: "#1F2937" },
-							typography: {
-								headings: { h1: { fontFamily: "PayPalOpen", fontSize: "44px" } },
-								p: { fontFamily: "Helvetica Neue", fontSize: "16px" },
-							},
-							elementSpacing: { stack: "6px" },
-						},
-					}),
-					{ status: 200 }
-				)
-			)
-			.mockResolvedValueOnce(
-				new Response(JSON.stringify({ fonts: [{ font: "PayPalOpen", percent_words: 0.7 }] }), {
-					status: 200,
-				})
-			)
-			.mockResolvedValueOnce(new Response(JSON.stringify({ metadata: {} }), { status: 200 }));
-		global.fetch = fetchMock as typeof fetch;
-
-		const result = await compareBrandAgainstCompetitors({
-			primarySiteUrl: "stripe.com",
-			primaryProfile: {
-				...primaryProfile,
-				url: "https://stripe.com",
-				source: "context.dev",
-			},
-			competitorUrls: ["adyen.com", "paypal.com"],
-		});
-
-		expect(result.status).toBe("success");
-		if (result.status !== "success") return;
-		expect(result.competitors).toHaveLength(2);
-		expect(result.competitors[0]?.comparison).toMatchObject({
-			competitorBrandName: "Adyen",
-			status: expect.stringMatching(/distinct|adjacent|overlapping/),
-		});
-		expect(result.overallDistinctiveness.score).toBeGreaterThanOrEqual(0);
-		expect(result.overallDistinctiveness.score).toBeLessThanOrEqual(100);
-		expect(result.overallVisualDistinctiveness).toBeNull();
-	});
 });
 
 async function pullProfileFixture() {

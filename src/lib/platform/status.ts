@@ -23,7 +23,7 @@ export function getPlatformScaffoldStatus(): PlatformScaffoldStatus {
 				nextSteps: [
 					"Run the live ingestion probe against representative customer sites.",
 					"Add follow-up validation for tone, imagery, and layout fidelity.",
-					"Layer in LLM/competitor cross-checks once baseline extraction is stable.",
+					"Feed the validated profile into tool generation and spot-check embed quality.",
 				],
 			},
 			{
