@@ -25,11 +25,17 @@ env:
   CONTEXT_DEV_BASE_URL: https://api.context.dev/v1
   PORTER_ENVIRONMENT: staging
 
+envGroups:
+  - letterstory-toolbuilder-secrets
+
 services:
   - name: web
     type: web
     run: node server.js
     instances: 1
+    cpuCores: 0.5
+    ramMegabytes: 512
+    terminationGracePeriodSeconds: 30
     port: 3000
     domains:
       - name: web-22301-57c6c7ab-4p0z458q.onporter.run
@@ -49,6 +55,4 @@ services:
       minInstances: 1
       maxInstances: 3
       targetCPUUtilizationPercentage: 70
-    resources:
-      cpuCores: 0.5
-      ramMegabytes: 512
+    sleep: false

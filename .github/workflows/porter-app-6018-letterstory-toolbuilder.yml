@@ -11,9 +11,11 @@ jobs:
               uses: actions/checkout@v4
             - name: Setup porter
               uses: porter-dev/setup-porter@v0.2.0
-            - name: Build and apply desired revision
+            - name: Build and push desired image
               timeout-minutes: 30
-              run: porter apply --tag "$GITHUB_SHA"
+              run: |
+                porter app build "$PORTER_APP_NAME" --tag "$GITHUB_SHA" --build-method docker --build-context . --dockerfile ./Dockerfile
+                porter app push "$PORTER_APP_NAME" --tag "$GITHUB_SHA"
               env:
                 PORTER_APP_NAME: letterstory-toolbuilder
                 PORTER_CLUSTER: "6018"
