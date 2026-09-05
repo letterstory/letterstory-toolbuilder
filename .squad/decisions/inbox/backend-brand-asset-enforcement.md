@@ -1,0 +1,4 @@
+### 2026-09-05: Enforce real brand assets after tool generation
+**By:** Backend
+**What:** Generated tools now pass brand font-face metadata through the stored snapshot and run a deterministic post-generation enforcement step that always rewrites the header branding to either the real ingested logo data URI or an honest text wordmark. That same pass self-hosts Google-loadable brand fonts into inline `@font-face` rules and strips unloadable custom font names from the final HTML in favor of system serif/sans stacks chosen from Context.dev typography metadata.
+**Why:** Mir's directive requires generated tools to use real ingested brand assets directly and to degrade honestly when exact assets are unavailable. Prompt-only guidance was still letting the model invent header icons and emit orphaned custom font names that silently fell through to wrong browser defaults, so asset fidelity had to become deterministic backend behavior instead of advisory LLM behavior.

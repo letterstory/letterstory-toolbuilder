@@ -17,6 +17,7 @@
 
 import { envServer } from "@/lib/config/env.server";
 import { isBrandIngestionConfigured, pullBrandProfile, type BrandProfile } from "@/lib/brand";
+import { enforceBrandPresentation } from "@/lib/generation/brand-enforcement";
 import {
 	looksLikeHtmlDocument,
 	sanitizeGeneratedHtml,
@@ -430,11 +431,17 @@ async function buildToolContent(opts: {
 		sanitized,
 		requestStartedAt: opts.requestStartedAt,
 	});
-	sanitized = repaired.sanitized;
+	const enforced = await enforceBrandPresentation({
+		html: repaired.sanitized.html,
+		projectName: opts.projectName,
+		brandSnapshot: opts.brandSnapshot,
+	});
+	sanitized = enforced.sanitized;
 	const warnings = [
 		...(opts.brandWarning ? [opts.brandWarning] : []),
-		...sanitized.warnings,
 		...repaired.warnings,
+		...enforced.warnings,
+		...sanitized.warnings,
 	];
 
 	// Both of these are advisory, fail-soft enrichments — Mathew's brief
@@ -566,6 +573,24 @@ function toBrandSnapshot(profile: BrandProfile | null): GeneratedToolBrandSnapsh
 		fonts: profile.fonts,
 		headingFont: profile.typography.headingFont,
 		bodyFont: profile.typography.bodyFont,
+		headingFontFace: profile.typography.headingFontFace
+			? {
+					family: profile.typography.headingFontFace.family,
+					google: profile.typography.headingFontFace.google,
+					category: profile.typography.headingFontFace.category,
+					files: profile.typography.headingFontFace.files,
+					fallbacks: profile.typography.headingFontFace.fallbacks,
+			  }
+			: null,
+		bodyFontFace: profile.typography.bodyFontFace
+			? {
+					family: profile.typography.bodyFontFace.family,
+					google: profile.typography.bodyFontFace.google,
+					category: profile.typography.bodyFontFace.category,
+					files: profile.typography.bodyFontFace.files,
+					fallbacks: profile.typography.bodyFontFace.fallbacks,
+			  }
+			: null,
 		logoPolicy,
 		logoDataUri: logoPolicy === "exact_asset" ? logoDataUri : null,
 	};
@@ -859,153 +884,6 @@ function extractHeaderHtml(html: string): string {
 	return html.slice(0, 5_000);
 }
 
-function escapeHtml(value: string): string {
-	return value
-		.replace(/&/g, "&amp;")
-		.replace(/</g, "&lt;")
-		.replace(/>/g, "&gt;")
-		.replace(/"/g, "&quot;")
-		.replace(/'/g, "&#39;");
-}
-
-function quoteFontFamily(family: string): string {
-	if (/^[a-z0-9-]+$/i.test(family)) return family;
-	return `'${family.replace(/'/g, "\\'")}'`;
-}
-
-function inferGenericFontFallback(fonts: string[]): string {
-	const combined = fonts.join(" ").toLowerCase();
-	if (/\b(serif|times|georgia|baskerville|garamond)\b/.test(combined)) return "serif";
-	return "sans-serif";
-}
-
-function buildFontStack(primary: string | null | undefined, fonts: string[]): string {
-	const ordered = [primary, ...fonts].filter((font, index, array): font is string => {
-		if (!font) return false;
-		return array.findIndex((candidate) => candidate === font) === index;
-	});
-	if (!ordered.length) return inferGenericFontFallback(fonts);
-	return [...ordered.map(quoteFontFamily), inferGenericFontFallback(ordered)].join(", ");
-}
-
-function appendCssOverride(html: string, css: string): string {
-	if (/<\/style>/i.test(html)) {
-		return html.replace(/<\/style>/i, `${css}\n</style>`);
-	}
-	if (/<\/head>/i.test(html)) {
-		return html.replace(/<\/head>/i, `<style>${css}</style></head>`);
-	}
-	return html;
-}
-
-function buildDeterministicHeaderHtml(
-	projectName: string,
-	brandSnapshot: GeneratedToolBrandSnapshot
-): string {
-	const safeProjectName = escapeHtml(projectName.trim() || "Untitled tool");
-	const safeBrandName = escapeHtml(brandSnapshot.brandName ?? "Brand");
-	const logoMarkup =
-		brandSnapshot.logoPolicy === "exact_asset" && brandSnapshot.logoDataUri
-			? `<img class="ls-brand-lockup__logo" src="${brandSnapshot.logoDataUri}" alt="${safeBrandName} logo" />`
-			: `<span class="ls-brand-lockup__wordmark">${safeBrandName}</span>`;
-
-	return [
-		'<header class="ls-brand-verified-header">',
-		`  <div class="ls-brand-lockup ls-brand-lockup--${brandSnapshot.logoPolicy ?? "text_only"}">`,
-		`    ${logoMarkup}`,
-		"  </div>",
-		'  <div class="ls-brand-verified-copy">',
-		`    <h1>${safeProjectName}</h1>`,
-		"  </div>",
-		"</header>",
-	].join("\n");
-}
-
-function applyDeterministicBrandFixes(opts: {
-	html: string;
-	projectName: string;
-	brandSnapshot: GeneratedToolBrandSnapshot;
-	reasons: string[];
-}): SanitizedHtml {
-	const bodyFontStack = buildFontStack(opts.brandSnapshot.bodyFont, opts.brandSnapshot.fonts);
-	const headingFontStack = buildFontStack(
-		opts.brandSnapshot.headingFont ?? opts.brandSnapshot.bodyFont,
-		opts.brandSnapshot.fonts
-	);
-	const brandColor =
-		opts.brandSnapshot.colors.primary ??
-		opts.brandSnapshot.colors.text ??
-		opts.brandSnapshot.colors.accent ??
-		"#111111";
-	const textColor = opts.brandSnapshot.colors.text ?? "#111111";
-	const needsHeaderRewrite = opts.reasons.some(
-		(reason) =>
-			reason.includes("logo asset was not rendered") ||
-			reason.includes("Remove the invented graphical mark")
-	);
-
-	let nextHtml = appendCssOverride(
-		opts.html,
-		[
-			"",
-			"body, input, button, select, textarea {",
-			`  font-family: ${bodyFontStack} !important;`,
-			"}",
-			"h1, h2, h3, h4, h5, h6, .ls-brand-lockup__wordmark {",
-			`  font-family: ${headingFontStack} !important;`,
-			"}",
-			".ls-brand-verified-header {",
-			"  display: flex;",
-			"  flex-wrap: wrap;",
-			"  align-items: center;",
-			"  gap: 1rem;",
-			"  margin-bottom: 1.5rem;",
-			"}",
-			".ls-brand-lockup {",
-			"  display: inline-flex;",
-			"  align-items: center;",
-			"  gap: 0.75rem;",
-			"  min-width: 0;",
-			"}",
-			".ls-brand-lockup__logo {",
-			"  display: block;",
-			"  width: auto;",
-			"  max-width: min(240px, 100%);",
-			"  max-height: 3.5rem;",
-			"  object-fit: contain;",
-			"}",
-			".ls-brand-lockup__wordmark {",
-			"  display: inline-block;",
-			`  color: ${brandColor};`,
-			"  font-size: clamp(1.15rem, 2vw, 1.5rem);",
-			"  font-weight: 700;",
-			"  letter-spacing: -0.02em;",
-			"  line-height: 1;",
-			"}",
-			".ls-brand-verified-copy {",
-			"  min-width: 0;",
-			"}",
-			".ls-brand-verified-copy h1 {",
-			"  margin: 0;",
-			`  color: ${textColor};`,
-			"}",
-		].join("\n")
-	);
-
-	if (needsHeaderRewrite) {
-		const headerHtml = buildDeterministicHeaderHtml(opts.projectName, opts.brandSnapshot);
-		if (/<header\b[\s\S]*?<\/header>/i.test(nextHtml)) {
-			nextHtml = nextHtml.replace(/<header\b[\s\S]*?<\/header>/i, headerHtml);
-		} else if (/<main\b/i.test(nextHtml)) {
-			nextHtml = nextHtml.replace(/<main\b/i, `${headerHtml}\n<main`);
-		} else if (/<body[^>]*>/i.test(nextHtml)) {
-			nextHtml = nextHtml.replace(/<body([^>]*)>/i, `<body$1>\n${headerHtml}`);
-		}
-	}
-
-	return sanitizeGeneratedHtml(nextHtml);
-}
-
 function collectBrandRepairReasons(
 	html: string,
 	brandSnapshot: GeneratedToolBrandSnapshot
@@ -1084,29 +962,9 @@ async function maybeRepairBrandPresentation(opts: {
 	}
 
 	const finalize = (sanitized: SanitizedHtml, extraWarnings: string[] = []) => {
-		const remainingReasons = collectBrandRepairReasons(sanitized.html, opts.brandSnapshot as GeneratedToolBrandSnapshot);
-		const deterministic =
-			remainingReasons.length > 0
-				? applyDeterministicBrandFixes({
-						html: sanitized.html,
-						projectName: opts.projectName,
-						brandSnapshot: opts.brandSnapshot as GeneratedToolBrandSnapshot,
-						reasons: remainingReasons,
-				  })
-				: sanitized;
-		const finalReasons = collectBrandRepairReasons(
-			deterministic.html,
-			opts.brandSnapshot as GeneratedToolBrandSnapshot
-		);
-
 		return {
-			sanitized: deterministic,
-			warnings: finalReasons.length
-				? [
-						...extraWarnings,
-						"Brand repair improved the output but could not fully confirm the supplied logo/font guidance; review the header fidelity manually.",
-				  ]
-				: extraWarnings,
+			sanitized,
+			warnings: extraWarnings,
 		};
 	};
 

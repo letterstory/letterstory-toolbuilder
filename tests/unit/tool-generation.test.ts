@@ -165,7 +165,7 @@ describe("generateTool", () => {
 		expect(pullBrandProfileMock).toHaveBeenCalledWith("https://stripe.com");
 		expect(result.status).toBe("success");
 		if (result.status === "success") {
-			expect(result.tool.brandSnapshot).toEqual({
+			expect(result.tool.brandSnapshot).toMatchObject({
 				brandName: "Stripe",
 				colors: { primary: "#635bff" },
 				fonts: ["Inter"],
@@ -528,10 +528,13 @@ describe("generateTool", () => {
 		if (result.status === "success") {
 			expect(result.tool.html).toContain('class="ls-brand-verified-header"');
 			expect(result.tool.html).toContain('src="data:image/png;base64,abc"');
-			expect(result.tool.html).toContain("Graphik Web");
+			expect(result.tool.html).not.toContain("Graphik Web");
+			expect(result.tool.html).toContain(
+				'-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif'
+			);
 			expect(
 				result.tool.warnings.some((warning) =>
-					warning.includes("applied deterministic logo/font corrections instead")
+					warning.includes("Brand repair returned invalid HTML")
 				)
 			).toBe(true);
 		}
@@ -592,7 +595,94 @@ describe("generateTool", () => {
 			expect(result.tool.html).toContain('class="ls-brand-lockup__wordmark"');
 			expect(result.tool.html).toContain("DoorDash");
 			expect(result.tool.html).not.toContain("brand-mark");
-			expect(result.tool.html).toContain("DD Norms");
+			expect(result.tool.html).not.toContain("DD Norms");
+			expect(result.tool.html).not.toContain("Times New Roman");
+			expect(result.tool.html).toContain(
+				'-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif'
+			);
+		}
+	});
+
+	it("embeds google-loadable brand fonts and removes orphaned custom names from final html", async () => {
+		isBrandIngestionConfiguredMock.mockReturnValue(true);
+		pullBrandProfileMock.mockResolvedValue({
+			brandName: "Spotify",
+			colors: { primary: "#1DB954", text: "#191414" },
+			fonts: ["Inter", "Spotify Mix"],
+			typography: {
+				headingFont: "Inter",
+				bodyFont: "Inter",
+				headingFontFace: {
+					family: "Inter",
+					google: true,
+					category: "sans-serif",
+					files: { "400": "https://fonts.gstatic.com/s/inter/v20/inter-400.woff2" },
+					fallbacks: ["sans-serif"],
+				},
+				bodyFontFace: {
+					family: "Inter",
+					google: true,
+					category: "sans-serif",
+					files: { "400": "https://fonts.gstatic.com/s/inter/v20/inter-400.woff2" },
+					fallbacks: ["sans-serif"],
+				},
+			},
+			images: {
+				logo: {
+					type: "logo",
+					canonicalDataUri: "data:image/png;base64,spotify-logo",
+					url: null,
+				},
+			},
+		});
+		global.fetch = vi.fn().mockImplementation(async (url, init) => {
+			if (typeof url === "string" && url.includes("fonts.gstatic.com")) {
+				return new Response(Buffer.from("fake-font"), {
+					status: 200,
+					headers: { "content-type": "font/woff2" },
+				});
+			}
+
+			const parsedBody = JSON.parse(String((init as RequestInit | undefined)?.body ?? "{}")) as {
+				system?: string;
+			};
+			const system = parsedBody.system ?? "";
+			if (system.includes("VERDICT:")) {
+				return new Response(
+					JSON.stringify({ content: [{ type: "text", text: "VERDICT: pass\nNOTES:" }] }),
+					{ status: 200 }
+				);
+			}
+			if (system.includes("HEADLINE:")) {
+				return advisoryFallbackResponse();
+			}
+			return new Response(
+				JSON.stringify({
+					content: [
+						{
+							type: "text",
+							text: '<!doctype html><html><head><style>body{font-family:"Spotify Mix","Times New Roman",serif;}h1{font-family:"Spotify Mix",serif;}</style></head><body><header><div class="brand-mark"><svg></svg></div><h1>Spotify</h1></header><main></main></body></html>',
+						},
+					],
+				}),
+				{ status: 200 }
+			);
+		}) as unknown as typeof fetch;
+
+		const result = await generateTool({
+			projectName: "Playlist ROI Calculator",
+			siteUrl: "https://spotify.com",
+			prompt: "a calculator",
+		});
+
+		expect(result.status).toBe("success");
+		if (result.status === "success") {
+			expect(result.tool.html).toContain("@font-face");
+			expect(result.tool.html).toContain('font-family: Inter');
+			expect(result.tool.html).toContain("data:font/woff2;base64");
+			expect(result.tool.html).not.toContain("Spotify Mix");
+			expect(result.tool.html).not.toContain("Times New Roman");
+			expect(result.tool.html).toContain('src="data:image/png;base64,spotify-logo"');
 		}
 	});
 

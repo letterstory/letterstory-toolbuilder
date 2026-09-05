@@ -3,12 +3,22 @@
 // store.supabase.ts) and the dispatcher (store.ts) can depend on the same
 // shapes without a circular import.
 
+export interface GeneratedToolBrandFontFace {
+	family: string;
+	google: boolean;
+	category: string | null;
+	files: Record<string, string>;
+	fallbacks: string[];
+}
+
 export interface GeneratedToolBrandSnapshot {
 	brandName: string | null;
 	colors: Record<string, string>;
 	fonts: string[];
 	headingFont?: string | null;
 	bodyFont?: string | null;
+	headingFontFace?: GeneratedToolBrandFontFace | null;
+	bodyFontFace?: GeneratedToolBrandFontFace | null;
 	/**
 	 * `exact_asset`: a real full-logo asset exists and the generator should
 	 * render that exact image. `text_only`: no trustworthy full-logo asset is
