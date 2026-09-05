@@ -95,6 +95,14 @@ export interface ContextBrandLogo {
 	};
 }
 
+export interface ContextFontLink {
+	type?: "google" | "custom";
+	files?: Record<string, string>;
+	category?: string;
+}
+
+export type ContextFontLinks = Record<string, ContextFontLink>;
+
 export interface ContextBrandResponse {
 	brand?: {
 		domain?: string;
@@ -144,7 +152,7 @@ export interface ContextStyleguideResponse {
 		};
 		elementSpacing?: Record<string, string>;
 		shadows?: Record<string, string>;
-		fontLinks?: Record<string, unknown>;
+		fontLinks?: ContextFontLinks;
 		components?: {
 			button?: Record<string, ContextComponentStyle>;
 			card?: ContextComponentStyle;
@@ -161,7 +169,7 @@ export interface ContextFontsResponse {
 		percent_words?: number;
 		percent_elements?: number;
 	}>;
-	fontLinks?: Record<string, unknown>;
+	fontLinks?: ContextFontLinks;
 }
 
 export interface ContextMarkdownResponse {

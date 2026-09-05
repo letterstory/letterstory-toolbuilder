@@ -12,6 +12,7 @@ import {
 	normalizeBrandSiteUrl,
 	parseContextDevBranding,
 	pullBrandProfile,
+	selectBrandLogoVariant,
 	validateBrandFidelity,
 } from "../../src/lib/brand";
 
@@ -62,8 +63,28 @@ describe("brand service", () => {
 						{ hex: "#00D4FF", source: "logo" },
 					],
 					logos: [
-						{ url: "https://cdn.example.com/icon.svg", type: "icon" },
-						{ url: "https://cdn.example.com/logo.svg", type: "logo" },
+						{
+							url: "https://cdn.example.com/logo-light.svg",
+							type: "logo",
+							mode: "light",
+							colors: [{ hex: "#635BFF" }],
+							resolution: { width: 280, height: 72 },
+						},
+						{
+							url: "https://cdn.example.com/logo-dark.svg",
+							type: "logo",
+							mode: "dark",
+							colors: [{ hex: "#FFFFFF" }],
+							resolution: { width: 280, height: 72 },
+						},
+						{
+							url: "https://cdn.example.com/logo-opaque.svg",
+							type: "logo",
+							mode: "has_opaque_background",
+							colors: [{ hex: "#0A2540" }],
+							resolution: { width: 280, height: 72 },
+						},
+						{ url: "https://cdn.example.com/icon.svg", type: "icon", mode: "dark" },
 					],
 				},
 			},
@@ -80,6 +101,12 @@ describe("brand service", () => {
 							h1: { fontFamily: "__Sohne_123abc", fontSize: "48px", fontFallbacks: ["sans-serif"] },
 						},
 						p: { fontFamily: "__Inter_456def", fontSize: "16px", fontFallbacks: ["system-ui"] },
+					},
+					fontLinks: {
+						__Sohne_123abc: {
+							type: "custom",
+							files: { "400": "https://cdn.example.com/fonts/sohne-400.woff2" },
+						},
 					},
 					elementSpacing: {
 						stack: "8px",
@@ -111,6 +138,13 @@ describe("brand service", () => {
 					{ font: "__Inter_456def", percent_words: 0.82 },
 					{ font: "__Sohne_123abc", percent_words: 0.18 },
 				],
+				fontLinks: {
+					__Inter_456def: {
+						type: "google",
+						category: "sans-serif",
+						files: { "400": "https://fonts.gstatic.com/s/inter/v20/inter-400.woff2" },
+					},
+				},
 			},
 			markdownResponse: {
 				url: "https://example.com",
@@ -123,10 +157,12 @@ describe("brand service", () => {
 
 		expect(parsed.brandName).toBe("Example");
 		expect(parsed.colorScheme).toBe("dark");
-		expect(parsed.primaryLogoUrl).toBe("https://cdn.example.com/logo.svg");
+		expect(parsed.primaryLogoUrl).toBe("https://cdn.example.com/logo-dark.svg");
 		expect(parsed.logoUrls).toEqual([
+			"https://cdn.example.com/logo-light.svg",
+			"https://cdn.example.com/logo-dark.svg",
+			"https://cdn.example.com/logo-opaque.svg",
 			"https://cdn.example.com/icon.svg",
-			"https://cdn.example.com/logo.svg",
 		]);
 		expect(parsed.colors).toMatchObject({
 			primary: "#635BFF",
@@ -145,6 +181,25 @@ describe("brand service", () => {
 				body: "16px",
 			},
 		});
+		expect(parsed.typography.headingFontFace).toMatchObject({
+			family: "Sohne",
+			google: false,
+			files: { "400": "https://cdn.example.com/fonts/sohne-400.woff2" },
+			fallbacks: ["sans-serif"],
+		});
+		expect(parsed.typography.bodyFontFace).toMatchObject({
+			family: "Inter",
+			google: true,
+			category: "sans-serif",
+			files: { "400": "https://fonts.gstatic.com/s/inter/v20/inter-400.woff2" },
+			fallbacks: ["system-ui"],
+		});
+		expect(parsed.typography.fontFaces).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ family: "Sohne" }),
+				expect.objectContaining({ family: "Inter" }),
+			])
+		);
 		expect(parsed.spacing).toEqual({
 			baseUnit: 8,
 			borderRadius: "12px",
@@ -161,9 +216,39 @@ describe("brand service", () => {
 			borderRadius: "16px",
 		});
 		expect(parsed.images.logo).toMatchObject({
-			url: "https://cdn.example.com/logo.svg",
-			selectionReasoning: "Selected the first full logo asset returned by Context.dev.",
+			url: "https://cdn.example.com/logo-dark.svg",
+			mode: "dark",
+			type: "logo",
+			width: 280,
+			height: 72,
+			colors: ["#FFFFFF"],
+			selectionReasoning: "Selected the dark-mode logo asset returned by Context.dev.",
 		});
+		expect(parsed.images.logoVariants).toEqual([
+			expect.objectContaining({
+				url: "https://cdn.example.com/logo-light.svg",
+				mode: "light",
+				type: "logo",
+			}),
+			expect.objectContaining({
+				url: "https://cdn.example.com/logo-dark.svg",
+				mode: "dark",
+				type: "logo",
+			}),
+			expect.objectContaining({
+				url: "https://cdn.example.com/logo-opaque.svg",
+				mode: "has_opaque_background",
+				type: "logo",
+			}),
+			expect.objectContaining({
+				url: "https://cdn.example.com/icon.svg",
+				mode: "dark",
+				type: "icon",
+			}),
+		]);
+		expect(parsed.images.notes).toContain(
+			"Opaque-background logo variants were preserved but skipped for the active selection when a transparent alternative was available."
+		);
 		expect(parsed.personality).toMatchObject({
 			tone: "Reliable, developer-first",
 			toneOfVoice: "Reliable, developer-first",
@@ -215,8 +300,42 @@ describe("brand service", () => {
 		expect(parsed.fonts).toEqual(["Means Web", "Graphik Web"]);
 		expect(parsed.typography.headingFont).toBe("Means Web");
 		expect(parsed.typography.bodyFont).toBe("Graphik Web");
+		expect(parsed.typography.fontFaces).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ family: "Means Web", google: false }),
+				expect.objectContaining({ family: "Graphik Web", google: false }),
+			])
+		);
 		expect(parsed.images.faviconUrl).toBe("https://mailchimp.com/favicon.ico");
 		expect(parsed.images.ogImageUrl).toBe("https://mailchimp.com/og.png");
+	});
+
+	it("prefers mode-matched transparent logos before opaque-background fallbacks", () => {
+		expect(
+			selectBrandLogoVariant(
+				[
+					{
+						url: "https://cdn.example.com/logo-opaque.svg",
+						kind: "url",
+						mode: "has_opaque_background",
+						type: "logo",
+						width: 200,
+						height: 80,
+						colors: ["#111111"],
+					},
+					{
+						url: "https://cdn.example.com/logo-dark.svg",
+						kind: "url",
+						mode: "dark",
+						type: "logo",
+						width: 200,
+						height: 80,
+						colors: ["#FFFFFF"],
+					},
+				],
+				"dark"
+			)?.url
+		).toBe("https://cdn.example.com/logo-dark.svg");
 	});
 
 	it("rejects unsafe urls before calling Context.dev", async () => {
@@ -519,7 +638,7 @@ async function pullProfileFixture() {
 						{ hex: "#FFFFFF", source: "site" },
 						{ hex: "#0A2540", source: "site" },
 					],
-					logos: [{ url: "data:image/svg+xml;base64,PHN2Zz4=", type: "logo" }],
+					logos: [{ url: "data:image/svg+xml;base64,PHN2Zz4=", type: "logo", mode: "light" }],
 				},
 			},
 			styleguideResponse: {

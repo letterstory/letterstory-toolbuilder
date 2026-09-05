@@ -6,6 +6,7 @@ import {
 	contextScrapeMarkdown,
 	contextScrapeStyleguide,
 	type ContextBrandLogo,
+	type ContextFontLinks,
 	type ContextBrandResponse,
 	type ContextComponentStyle as ContextDevComponentStyle,
 	type ContextFontsResponse,
@@ -25,6 +26,15 @@ export type BrandSpacingRhythm = "tight" | "balanced" | "airy";
 export type BrandValidationStatus = "pass" | "warn" | "fail";
 export type BrandValidationConfidence = "low" | "medium" | "high";
 export type BrandValidationGapSeverity = "low" | "medium" | "high";
+export type BrandLogoMode = "light" | "dark" | "has_opaque_background";
+
+export interface BrandFontFace {
+	family: string;
+	google: boolean;
+	category: string | null;
+	files: Record<string, string>;
+	fallbacks: string[];
+}
 
 export interface BrandTypographyProfile {
 	primaryFont: string | null;
@@ -32,6 +42,9 @@ export interface BrandTypographyProfile {
 	headingFont: string | null;
 	bodyFont: string | null;
 	fontFamilies: string[];
+	fontFaces: BrandFontFace[];
+	headingFontFace: BrandFontFace | null;
+	bodyFontFace: BrandFontFace | null;
 	fontStacks: Partial<Record<"heading" | "body" | "paragraph", string[]>>;
 	scale: Partial<Record<"h1" | "h2" | "h3" | "body" | "small", string>>;
 	hierarchy: BrandTypographyHierarchy | null;
@@ -62,6 +75,11 @@ export interface BrandComponentsProfile {
 export interface BrandLogoAsset {
 	url: string | null;
 	kind: "url" | "data-uri" | "unknown" | null;
+	mode: BrandLogoMode | null;
+	type: "icon" | "logo" | null;
+	width: number | null;
+	height: number | null;
+	colors: string[];
 	alt: string | null;
 	href: string | null;
 	selectionReasoning: string | null;
@@ -73,8 +91,19 @@ export interface BrandLogoAsset {
 	canonicalWarnings: string[];
 }
 
+export interface BrandLogoVariant {
+	url: string;
+	kind: "url" | "data-uri" | "unknown";
+	mode: BrandLogoMode;
+	type: "icon" | "logo";
+	width: number;
+	height: number;
+	colors: string[];
+}
+
 export interface BrandImagesProfile {
 	logo: BrandLogoAsset;
+	logoVariants: BrandLogoVariant[];
 	faviconUrl: string | null;
 	ogImageUrl: string | null;
 	gallery: string[];
@@ -536,6 +565,9 @@ function createValidationPromptProfile(profile: BrandProfile): Record<string, un
 			secondaryFont: profile.typography.secondaryFont,
 			headingFont: profile.typography.headingFont,
 			bodyFont: profile.typography.bodyFont,
+			fontFaces: profile.typography.fontFaces,
+			headingFontFace: profile.typography.headingFontFace,
+			bodyFontFace: profile.typography.bodyFontFace,
 			scale: profile.typography.scale,
 			hierarchy: profile.typography.hierarchy,
 		},
@@ -545,10 +577,19 @@ function createValidationPromptProfile(profile: BrandProfile): Record<string, un
 			logo: {
 				url: summarizeAssetUrl(profile.images.logo.url),
 				kind: profile.images.logo.kind,
+				mode: profile.images.logo.mode,
+				type: profile.images.logo.type,
+				width: profile.images.logo.width,
+				height: profile.images.logo.height,
+				colors: profile.images.logo.colors,
 				alt: profile.images.logo.alt,
 				href: profile.images.logo.href,
 				selectionReasoning: profile.images.logo.selectionReasoning,
 			},
+			logoVariants: profile.images.logoVariants.map((variant) => ({
+				...variant,
+				url: summarizeAssetUrl(variant.url),
+			})),
 			faviconUrl: profile.images.faviconUrl,
 			ogImageUrl: profile.images.ogImageUrl,
 			imageryStyle: profile.images.imageryStyle,
@@ -594,6 +635,87 @@ function readContextFontFamily(value: unknown): string | null {
 	return raw ? normalizeContextDevFontFamily(raw) : null;
 }
 
+function normalizeFontFiles(value: unknown): Record<string, string> {
+	if (!isRecord(value)) return {};
+
+	return Object.fromEntries(
+		Object.entries(value).flatMap(([weight, url]) => {
+			const normalized = readString(url);
+			return normalized ? [[weight, normalized]] : [];
+		})
+	);
+}
+
+function findContextFontLink(raw: string, fontLinks: ContextFontLinks) {
+	return (
+		fontLinks[raw] ??
+		Object.entries(fontLinks).find(([family]) => normalizeContextDevFontFamily(family) === raw)?.[1] ??
+		Object.entries(fontLinks).find(
+			([family]) => normalizeContextDevFontFamily(family) === normalizeContextDevFontFamily(raw)
+		)?.[1] ??
+		null
+	);
+}
+
+function resolveContextFontFace(
+	family: unknown,
+	fallbacks: unknown,
+	fontLinks: ContextFontLinks
+): BrandFontFace | null {
+	const raw = readString(family);
+	if (!raw) return null;
+
+	const link = findContextFontLink(raw, fontLinks);
+	const normalizedFamily = normalizeContextDevFontFamily(raw);
+	const files = normalizeFontFiles(link?.files);
+	const normalizedFallbacks = Array.isArray(fallbacks)
+		? dedupeStrings(
+				fallbacks.map((entry) => readContextFontFamily(entry)).filter((entry): entry is string => Boolean(entry))
+			)
+		: [];
+
+	return {
+		family: normalizedFamily,
+		google:
+			link?.type === "google" || Object.values(files).some((url) => url.includes("fonts.gstatic.com")),
+		category: readString(link?.category),
+		files,
+		fallbacks: normalizedFallbacks,
+	};
+}
+
+function dedupeFontFaces(faces: Array<BrandFontFace | null | undefined>): BrandFontFace[] {
+	const deduped = new Map<string, BrandFontFace>();
+
+	for (const face of faces) {
+		if (!face) continue;
+		const existing = deduped.get(face.family);
+		if (
+			!existing ||
+			Object.keys(face.files).length > Object.keys(existing.files).length ||
+			(face.google && !existing.google)
+		) {
+			deduped.set(face.family, face);
+		}
+	}
+
+	return [...deduped.values()];
+}
+
+function buildFallbackFontFace(family: string, fontLinks: ContextFontLinks): BrandFontFace {
+	const link = findContextFontLink(family, fontLinks);
+	const files = normalizeFontFiles(link?.files);
+
+	return {
+		family,
+		google:
+			link?.type === "google" || Object.values(files).some((url) => url.includes("fonts.gstatic.com")),
+		category: readString(link?.category),
+		files,
+		fallbacks: [],
+	};
+}
+
 type ContextStyleguideComponents = NonNullable<
 	NonNullable<ContextStyleguideResponse["styleguide"]>["components"]
 >;
@@ -607,6 +729,78 @@ function collectComponentFontFamilies(components: ContextStyleguideComponents | 
 		readContextFontFamily(components.card?.fontFamily),
 		readContextFontFamily(components.input?.fontFamily),
 	]);
+}
+
+function normalizeLogoMode(value: unknown): BrandLogoMode {
+	return value === "dark" || value === "has_opaque_background" ? value : "light";
+}
+
+function mapLogoVariants(logos: ContextBrandLogo[]): BrandLogoVariant[] {
+	const variants: BrandLogoVariant[] = [];
+
+	for (const logo of logos) {
+		const url = readString(logo.url);
+		if (!url) continue;
+
+		variants.push({
+			url,
+			kind: inferLogoKind(url) ?? "unknown",
+			mode: normalizeLogoMode(logo.mode),
+			type: logo.type === "icon" ? "icon" : "logo",
+			width: readNumber(logo.resolution?.width) ?? 0,
+			height: readNumber(logo.resolution?.height) ?? 0,
+			colors: dedupeStrings(
+				(logo.colors ?? []).map((color) => normalizeColorHex(color.hex ?? "") ?? readString(color.hex))
+			),
+		});
+	}
+
+	return variants.sort((left, right) => {
+		const typeScore = (left.type === "logo" ? 0 : 1) - (right.type === "logo" ? 0 : 1);
+		if (typeScore !== 0) return typeScore;
+
+		const opaqueScore =
+			(left.mode === "has_opaque_background" ? 1 : 0) -
+			(right.mode === "has_opaque_background" ? 1 : 0);
+		if (opaqueScore !== 0) return opaqueScore;
+
+		return 0;
+	});
+}
+
+export function selectBrandLogoVariant(
+	logos: BrandLogoVariant[],
+	activeMode: "light" | "dark" | null
+): BrandLogoVariant | null {
+	if (!logos.length) return null;
+
+	const usable = logos.filter((logo) => logo.mode !== "has_opaque_background");
+	if (activeMode) {
+		return usable.find((logo) => logo.mode === activeMode) ?? usable[0] ?? logos[0] ?? null;
+	}
+
+	return usable[0] ?? logos[0] ?? null;
+}
+
+function describeLogoSelection(
+	logo: BrandLogoVariant | null,
+	activeMode: "light" | "dark" | null,
+	logoCount: number
+): string | null {
+	if (!logo) return null;
+	if (logo.mode === "has_opaque_background") {
+		return "Only logo candidates with built-in opaque backgrounds were available, so the best full-logo asset was kept.";
+	}
+	if (activeMode && logo.mode === activeMode) {
+		return `Selected the ${activeMode}-mode ${logo.type} asset returned by Context.dev.`;
+	}
+	if (activeMode) {
+		return `No ${activeMode}-mode logo was available, so the best alternate ${logo.type} asset was used.`;
+	}
+	if (logoCount > 1) {
+		return "Selected the best full-logo asset while keeping all provider logo variants for later mode-aware resolution.";
+	}
+	return `Selected the only ${logo.type} asset returned by Context.dev.`;
 }
 
 function toRgb(hex: string): { r: number; g: number; b: number } | null {
@@ -712,27 +906,28 @@ function mapContextComponentStyle(
 	return Object.values(style).some(Boolean) ? style : null;
 }
 
-function selectPreferredLogo(logos: ContextBrandLogo[]): ContextBrandLogo | null {
-	const usable = logos.filter((logo) => readString(logo.url));
-	if (!usable.length) return null;
-	usable.sort((left, right) => {
-		const leftScore = left.type === "logo" ? 0 : 1;
-		const rightScore = right.type === "logo" ? 0 : 1;
-		return leftScore - rightScore;
-	});
-	return usable[0] ?? null;
-}
-
-function buildContextImageNotes(logo: BrandLogoAsset): string[] {
+function buildContextImageNotes(logo: BrandLogoAsset, variants: BrandLogoVariant[]): string[] {
 	const notes: string[] = [];
 	if (logo.kind === "data-uri") {
 		notes.push(
 			"Context.dev selected an inline data-URI logo, which may be less reusable than a durable asset URL."
 		);
 	}
-	if (logo.url?.includes("apple-touch-icon") || logo.url?.includes("app-icon")) {
+	if (
+		logo.type === "icon" ||
+		logo.url?.includes("apple-touch-icon") ||
+		logo.url?.includes("app-icon")
+	) {
 		notes.push(
 			"Selected logo appears to be an app-icon-style asset rather than a primary wordmark."
+		);
+	}
+	if (
+		variants.some((variant) => variant.mode === "has_opaque_background") &&
+		logo.mode !== "has_opaque_background"
+	) {
+		notes.push(
+			"Opaque-background logo variants were preserved but skipped for the active selection when a transparent alternative was available."
 		);
 	}
 	return notes;
@@ -817,24 +1012,43 @@ export function parseContextDevBranding(payload: {
 	const paragraph = styleguide?.typography?.p;
 	const componentFonts = collectComponentFontFamilies(styleguide?.components);
 	const rawLogos = Array.isArray(brand.logos) ? brand.logos : [];
-	const preferredLogo = selectPreferredLogo(rawLogos);
-	const logoUrls = dedupeStrings(rawLogos.map((logo) => readString(logo.url)));
+	const logoVariants = mapLogoVariants(rawLogos);
+	const activeMode =
+		styleguide?.mode === "light" || styleguide?.mode === "dark" ? styleguide.mode : null;
+	const preferredLogo = selectBrandLogoVariant(logoVariants, activeMode);
+	const logoUrls = dedupeStrings(logoVariants.map((logo) => logo.url));
 	const colors = buildColorMap(brand, styleguide);
+	const fontLinks: ContextFontLinks = {
+		...(payload.fontsResponse?.fontLinks ?? {}),
+		...(styleguide?.fontLinks ?? {}),
+	};
 	const fontRanked = [...(payload.fontsResponse?.fonts ?? [])].sort(
 		(left, right) =>
 			(right.percent_words ?? right.percent_elements ?? 0) -
 			(left.percent_words ?? left.percent_elements ?? 0)
 	);
+	const bodyFontFace =
+		resolveContextFontFace(paragraph?.fontFamily, paragraph?.fontFallbacks, fontLinks) ??
+		resolveContextFontFace(
+			styleguide?.components?.input?.fontFamily,
+			undefined,
+			fontLinks
+		) ??
+		resolveContextFontFace(
+			styleguide?.components?.button?.primary?.fontFamily,
+			undefined,
+			fontLinks
+		);
+	const headingFontFace =
+		resolveContextFontFace(headings.h1?.fontFamily, headings.h1?.fontFallbacks, fontLinks) ??
+		resolveContextFontFace(headings.h2?.fontFamily, headings.h2?.fontFallbacks, fontLinks) ??
+		resolveContextFontFace(headings.h3?.fontFamily, headings.h3?.fontFallbacks, fontLinks);
 	const bodyFont =
-		readContextFontFamily(paragraph?.fontFamily) ??
-		readContextFontFamily(styleguide?.components?.input?.fontFamily) ??
-		readContextFontFamily(styleguide?.components?.button?.primary?.fontFamily) ??
+		bodyFontFace?.family ??
 		componentFonts[0] ??
 		null;
 	const headingFont =
-		readContextFontFamily(headings.h1?.fontFamily) ??
-		readContextFontFamily(headings.h2?.fontFamily) ??
-		readContextFontFamily(headings.h3?.fontFamily) ??
+		headingFontFace?.family ??
 		componentFonts.find((font) => font !== bodyFont) ??
 		componentFonts[0] ??
 		null;
@@ -842,6 +1056,15 @@ export function parseContextDevBranding(payload: {
 		.map((font) => readContextFontFamily(font.font))
 		.filter((font): font is string => Boolean(font));
 	const fonts = dedupeStrings([...rankedFonts, headingFont, bodyFont, ...componentFonts]);
+	const rankedFontFaces = dedupeStrings(
+		fontRanked.map((font) => readContextFontFamily(font.font))
+	).map((font) => resolveContextFontFace(font, undefined, fontLinks) ?? buildFallbackFontFace(font, fontLinks));
+	const fontFaces = dedupeFontFaces([
+		headingFontFace,
+		bodyFontFace,
+		...rankedFontFaces,
+		...fonts.map((font) => resolveContextFontFace(font, undefined, fontLinks) ?? buildFallbackFontFace(font, fontLinks)),
+	]);
 	const secondaryFont =
 		fonts.find((font) => font !== (headingFont ?? bodyFont ?? fonts[0] ?? null)) ?? null;
 	const typeScale = normalizeTypeScale({
@@ -876,15 +1099,16 @@ export function parseContextDevBranding(payload: {
 		"image",
 	]);
 	const logo: BrandLogoAsset = {
-		url: logoUrl,
-		kind: inferLogoKind(logoUrl),
+		url: preferredLogo?.url ?? null,
+		kind: preferredLogo?.kind ?? inferLogoKind(logoUrl),
+		mode: preferredLogo?.mode ?? null,
+		type: preferredLogo?.type ?? null,
+		width: preferredLogo?.width ?? null,
+		height: preferredLogo?.height ?? null,
+		colors: preferredLogo?.colors ?? [],
 		alt: brand.title?.trim() ? `${brand.title.trim()} logo` : null,
 		href: null,
-		selectionReasoning: preferredLogo
-			? preferredLogo.type === "logo"
-				? "Selected the first full logo asset returned by Context.dev."
-				: "Context.dev only returned icon-style assets, so the first available logo candidate was used."
-			: null,
+		selectionReasoning: describeLogoSelection(preferredLogo, activeMode, logoVariants.length),
 		selectionConfidence: null,
 		canonicalDataUri: null,
 		canonicalSourceUrl: null,
@@ -900,8 +1124,7 @@ export function parseContextDevBranding(payload: {
 
 	return {
 		brandName: readString(brand.title),
-		colorScheme:
-			styleguide?.mode === "light" || styleguide?.mode === "dark" ? styleguide.mode : null,
+		colorScheme: activeMode,
 		confidence: null,
 		primaryLogoUrl: logoUrl,
 		logoUrls,
@@ -913,6 +1136,9 @@ export function parseContextDevBranding(payload: {
 			headingFont: headingFont ?? fonts[0] ?? null,
 			bodyFont: bodyFont ?? fonts[0] ?? null,
 			fontFamilies: fonts,
+			fontFaces,
+			headingFontFace,
+			bodyFontFace,
 			fontStacks: {
 				heading: dedupeStrings([
 					headingFont,
@@ -944,11 +1170,12 @@ export function parseContextDevBranding(payload: {
 		components,
 		images: {
 			logo,
+			logoVariants,
 			faviconUrl,
 			ogImageUrl,
 			gallery: logoUrls,
 			imageryStyle: null,
-			notes: buildContextImageNotes(logo),
+			notes: buildContextImageNotes(logo, logoVariants),
 		},
 		personality: {
 			tone: readString(brand.slogan),
@@ -1157,6 +1384,7 @@ async function resolveCanonicalLogoForBranding(
 	try {
 		return await resolveCanonicalLogo([
 			branding.primaryLogoUrl,
+			...branding.images.logoVariants.map((variant) => variant.url),
 			...branding.logoUrls,
 			branding.images.faviconUrl,
 		]);
