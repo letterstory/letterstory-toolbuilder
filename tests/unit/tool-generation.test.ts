@@ -138,6 +138,16 @@ describe("generateTool", () => {
 		}
 	});
 
+	it("rejects an empty project name without calling Anthropic", async () => {
+		const result = await generateTool({ projectName: "   ", siteUrl: "", prompt: "a calculator" });
+
+		expect(result.status).toBe("error");
+		if (result.status === "error") {
+			expect(result.message).toMatch(/enter a tool name/i);
+		}
+		expect(global.fetch).toBe(originalFetch);
+	});
+
 	it("generates successfully without brand context when no siteUrl is given", async () => {
 		mockAnthropicSuccess("<!doctype html><html><body>hi</body></html>");
 
@@ -1096,7 +1106,7 @@ describe("generateTool — revisions (toolId set)", () => {
 		getGeneratedToolMock.mockResolvedValue(null);
 
 		const result = await generateTool({
-			projectName: "",
+			projectName: "Mileage Calculator",
 			siteUrl: "",
 			prompt: "add a dark mode toggle",
 			toolId: "missing-id",

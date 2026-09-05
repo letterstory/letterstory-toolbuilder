@@ -144,6 +144,17 @@ export function ToolBuilderWorkspace() {
 			: "";
 
 	async function runGeneration(toolId: string | undefined) {
+		const trimmedProjectName = projectName.trim();
+		if (!trimmedProjectName) {
+			setStatusMessage({
+				title: "Tool name required",
+				description: "Enter a tool name before generating or updating this tool.",
+				tone: "destructive",
+			});
+			return;
+		}
+
+		setProjectName(trimmedProjectName);
 		const normalizedSiteUrl = normalizeSiteUrl(siteUrl);
 		setSiteUrl(normalizedSiteUrl);
 		setRequestState(toolId ? "updating" : "generating");
@@ -162,7 +173,7 @@ export function ToolBuilderWorkspace() {
 			const response = await fetch("/api/tools/generate", {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ projectName, siteUrl: normalizedSiteUrl, prompt, toolId }),
+				body: JSON.stringify({ projectName: trimmedProjectName, siteUrl: normalizedSiteUrl, prompt, toolId }),
 			});
 			const contentType = response.headers.get("content-type") ?? "";
 			if (!contentType.includes("application/json")) {
@@ -288,16 +299,19 @@ export function ToolBuilderWorkspace() {
 						(optional) plus a plain-language prompt produce a single self-contained, functional HTML tool.
 					</CardDescription>
 				</CardHeader>
-				<form onSubmit={handleGenerate}>
+				<form onSubmit={handleGenerate} noValidate>
 					<CardContent className="space-y-4">
 						<div className="grid gap-4 sm:grid-cols-2">
 							<div className="space-y-2">
-								<Label htmlFor="projectName">Tool name</Label>
+								<Label htmlFor="projectName">
+									Tool name<span aria-hidden="true"> *</span>
+								</Label>
 								<Input
 									id="projectName"
 									value={projectName}
 									onChange={(event) => setProjectName(event.target.value)}
 									placeholder="Mileage reimbursement calculator"
+									required
 								/>
 							</div>
 							<div className="space-y-2">

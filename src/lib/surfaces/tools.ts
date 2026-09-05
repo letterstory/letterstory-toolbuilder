@@ -204,9 +204,18 @@ export async function generateToolSurface(
 			}),
 		};
 	}
+	if (!parsed.data.projectName?.trim()) {
+		return {
+			statusCode: 400,
+			body: generateToolOutputSchema.parse({
+				status: "error",
+				message: "Enter a tool name before generating this tool.",
+			}),
+		};
+	}
 
 	const result = await generateTool({
-		projectName: typeof parsed.data.projectName === "string" ? parsed.data.projectName : "",
+		projectName: parsed.data.projectName,
 		siteUrl: typeof parsed.data.siteUrl === "string" ? parsed.data.siteUrl : "",
 		prompt: parsed.data.prompt,
 		toolId:

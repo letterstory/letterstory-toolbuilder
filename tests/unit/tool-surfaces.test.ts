@@ -128,6 +128,21 @@ describe("tool surfaces embed snippet parity", () => {
 		});
 	});
 
+	it("rejects blank project names before calling generateTool", async () => {
+		const response = await generateToolSurface({
+			projectName: "   ",
+			siteUrl: "https://stripe.com",
+			prompt: "Build a BMI calculator",
+		});
+
+		expect(response.statusCode).toBe(400);
+		expect(response.body).toMatchObject({
+			status: "error",
+			message: "Enter a tool name before generating this tool.",
+		});
+		expect(generateToolMock).not.toHaveBeenCalled();
+	});
+
 	it("keeps list-generated-tools summaries free of embedSnippet", async () => {
 		listGeneratedToolsMock.mockResolvedValue([baseTool]);
 
