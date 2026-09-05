@@ -49,16 +49,10 @@ const INITIAL_STATUS: StatusMessage = {
 	tone: "info",
 };
 
-const EXAMPLE_PROMPTS = [
-	"A mileage reimbursement calculator: enter miles driven and it computes the reimbursement using the current IRS standard mileage rate.",
-	"A blood pressure category checker: enter systolic/diastolic readings and it classifies them (normal, elevated, stage 1/2 hypertension, crisis) with plain-language guidance.",
-	"A SaaS ROI calculator: enter current manual hours/week and hourly cost, show annual savings from automating with the product.",
-];
-
 export function ToolBuilderWorkspace() {
 	const [projectName, setProjectName] = useState("");
 	const [siteUrl, setSiteUrl] = useState("");
-	const [prompt, setPrompt] = useState(EXAMPLE_PROMPTS[0]);
+	const [prompt, setPrompt] = useState("");
 	const [requestState, setRequestState] = useState<RequestState>("idle");
 	const [statusMessage, setStatusMessage] = useState<StatusMessage>(INITIAL_STATUS);
 	const [copiedTarget, setCopiedTarget] = useState<"iframe" | "full" | null>(null);
@@ -215,7 +209,7 @@ export function ToolBuilderWorkspace() {
 		setCopiedTarget(null);
 		setProjectName("");
 		setSiteUrl("");
-		setPrompt(EXAMPLE_PROMPTS[0]);
+		setPrompt("");
 		setStatusMessage(INITIAL_STATUS);
 	}
 
@@ -326,19 +320,6 @@ export function ToolBuilderWorkspace() {
 								rows={4}
 								placeholder="Describe the tool's inputs, logic, and outputs in plain language."
 							/>
-							<div className="flex flex-wrap gap-2 pt-1">
-								{EXAMPLE_PROMPTS.map((example) => (
-									<Button
-										key={example}
-										type="button"
-										variant="outline"
-										size="sm"
-										onClick={() => setPrompt(example)}
-									>
-										{example.slice(0, 28)}…
-									</Button>
-								))}
-							</div>
 						</div>
 					</CardContent>
 					<CardFooter className="flex-col items-stretch gap-4">
