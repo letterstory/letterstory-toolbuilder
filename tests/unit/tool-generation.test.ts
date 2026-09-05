@@ -468,6 +468,134 @@ describe("generateTool", () => {
 		expect((global.fetch as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(4);
 	});
 
+	it("applies deterministic exact-logo corrections when the repair pass fails", async () => {
+		isBrandIngestionConfiguredMock.mockReturnValue(true);
+		pullBrandProfileMock.mockResolvedValue({
+			brandName: "Mailchimp",
+			colors: { primary: "#FFE01B", text: "#000000" },
+			fonts: ["Graphik Web", "Means Web"],
+			typography: { headingFont: "Means Web", bodyFont: "Graphik Web" },
+			images: {
+				logo: {
+					type: "logo",
+					canonicalDataUri: "data:image/png;base64,abc",
+					url: null,
+				},
+				logoVariants: [],
+			},
+		});
+		global.fetch = vi.fn().mockImplementation(async (_url, init) => {
+			const parsedBody = JSON.parse(String((init as RequestInit | undefined)?.body ?? "{}")) as {
+				system?: string;
+				messages?: Array<{ content: string }>;
+			};
+			const system = parsedBody.system ?? "";
+			const content = parsedBody.messages?.[0]?.content ?? "";
+			if (system.includes("VERDICT:")) {
+				return new Response(
+					JSON.stringify({ content: [{ type: "text", text: "VERDICT: pass\nNOTES:" }] }),
+					{ status: 200 }
+				);
+			}
+			if (system.includes("HEADLINE:")) {
+				return advisoryFallbackResponse();
+			}
+			if (content.includes("Brand fidelity correction only.")) {
+				return new Response(JSON.stringify({ content: [{ type: "text", text: "<html>bad" }] }), {
+					status: 200,
+				});
+			}
+			return new Response(
+				JSON.stringify({
+					content: [
+						{
+							type: "text",
+							text: '<!doctype html><html><head><style>body{color:#111;}</style></head><body><header><div class="brand-mark"><svg></svg></div><div>Mailchimp</div></header><main></main></body></html>',
+						},
+					],
+				}),
+				{ status: 200 }
+			);
+		}) as unknown as typeof fetch;
+
+		const result = await generateTool({
+			projectName: "Email Open Rate Calculator",
+			siteUrl: "https://mailchimp.com",
+			prompt: "a calculator",
+		});
+
+		expect(result.status).toBe("success");
+		if (result.status === "success") {
+			expect(result.tool.html).toContain('class="ls-brand-verified-header"');
+			expect(result.tool.html).toContain('src="data:image/png;base64,abc"');
+			expect(result.tool.html).toContain("Graphik Web");
+			expect(
+				result.tool.warnings.some((warning) =>
+					warning.includes("applied deterministic logo/font corrections instead")
+				)
+			).toBe(true);
+		}
+	});
+
+	it("applies deterministic text-only branding and body-font overrides for icon-only brands", async () => {
+		isBrandIngestionConfiguredMock.mockReturnValue(true);
+		pullBrandProfileMock.mockResolvedValue({
+			brandName: "DoorDash",
+			colors: { primary: "#EB1700", text: "#000000" },
+			fonts: ["DD Norms", "TTNormsProCond-Blk", "Arial"],
+			typography: { headingFont: "TTNormsProCond-Blk", bodyFont: "DD Norms" },
+			images: {
+				logo: {
+					type: "icon",
+					canonicalDataUri: "data:image/png;base64,icon-asset",
+					url: null,
+				},
+				logoVariants: [],
+			},
+		});
+		global.fetch = vi.fn().mockImplementation(async (_url, init) => {
+			const parsedBody = JSON.parse(String((init as RequestInit | undefined)?.body ?? "{}")) as {
+				system?: string;
+			};
+			const system = parsedBody.system ?? "";
+			if (system.includes("VERDICT:")) {
+				return new Response(
+					JSON.stringify({ content: [{ type: "text", text: "VERDICT: pass\nNOTES:" }] }),
+					{ status: 200 }
+				);
+			}
+			if (system.includes("HEADLINE:")) {
+				return advisoryFallbackResponse();
+			}
+			return new Response(
+				JSON.stringify({
+					content: [
+						{
+							type: "text",
+							text: '<!doctype html><html><head><style>body{font-family:"Times New Roman",serif;}</style></head><body><header><div class="brand-mark"><svg></svg></div><h1>DoorDash</h1></header><main></main></body></html>',
+						},
+					],
+				}),
+				{ status: 200 }
+			);
+		}) as unknown as typeof fetch;
+
+		const result = await generateTool({
+			projectName: "Delivery Fee Calculator",
+			siteUrl: "https://doordash.com",
+			prompt: "a calculator",
+		});
+
+		expect(result.status).toBe("success");
+		if (result.status === "success") {
+			expect(result.tool.brandSnapshot).toMatchObject({ logoPolicy: "text_only", bodyFont: "DD Norms" });
+			expect(result.tool.html).toContain('class="ls-brand-lockup__wordmark"');
+			expect(result.tool.html).toContain("DoorDash");
+			expect(result.tool.html).not.toContain("brand-mark");
+			expect(result.tool.html).toContain("DD Norms");
+		}
+	});
+
 	it("generates supporting headline/copy alongside the tool", async () => {
 		mockAnthropicSuccess("<!doctype html><html><body>hi</body></html>");
 
