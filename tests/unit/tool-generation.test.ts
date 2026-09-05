@@ -574,7 +574,7 @@ describe("generateTool", () => {
 		isBrandIngestionConfiguredMock.mockReturnValue(true);
 		pullBrandProfileMock.mockResolvedValue({
 			brandName: "DoorDash",
-			colors: { primary: "#EB1700", text: "#000000" },
+			colors: { primary: "#EB1700", secondary: "#EC9C84", text: "#000000" },
 			fonts: ["DD Norms", "TTNormsProCond-Blk", "Arial"],
 			typography: { headingFont: "TTNormsProCond-Blk", bodyFont: "DD Norms" },
 			images: {
@@ -627,6 +627,7 @@ describe("generateTool", () => {
 			expect(result.tool.html).not.toContain("brand-mark");
 			expect(result.tool.html).not.toContain("DD Norms");
 			expect(result.tool.html).not.toContain("Times New Roman");
+			expect(result.tool.html).toContain("--ls-brand-color-secondary: #EC9C84;");
 			expect(result.tool.html).toContain(
 				'-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif'
 			);
@@ -786,6 +787,163 @@ describe("generateTool", () => {
 		if (result.status === "success") {
 			expect(result.tool.html).not.toContain("Iowan Old Style");
 			expect(result.tool.html).not.toContain("Times New Roman");
+			expect(result.tool.html).toContain(
+				'h1, h2, h3, h4, h5, h6, .ls-brand-lockup__wordmark {\n  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;'
+			);
+		}
+	});
+
+	it("keeps serif-safe heading fallbacks for editorial brands while leaving body ui sans-serif", async () => {
+		isBrandIngestionConfiguredMock.mockReturnValue(true);
+		pullBrandProfileMock.mockResolvedValue({
+			brandName: "The New York Times",
+			colors: { primary: "#567B95", text: "#363636" },
+			fonts: ["Times New Roman", "nyt-franklin"],
+			typography: {
+				headingFont: "Times New Roman",
+				bodyFont: "nyt-franklin",
+				headingFontFace: {
+					family: "Times New Roman",
+					google: false,
+					category: "serif",
+					files: {},
+					fallbacks: ["Times New Roman", "serif"],
+				},
+				bodyFontFace: {
+					family: "nyt-franklin",
+					google: false,
+					category: "sans-serif",
+					files: {},
+					fallbacks: ["Arial", "sans-serif"],
+				},
+			},
+			images: {
+				logo: {
+					type: "logo",
+					canonicalDataUri: "data:image/png;base64,nyt",
+					url: null,
+				},
+				logoVariants: [],
+			},
+		});
+		global.fetch = vi.fn().mockImplementation(async (_url, init) => {
+			const parsedBody = JSON.parse(String((init as RequestInit | undefined)?.body ?? "{}")) as {
+				system?: string;
+			};
+			const system = parsedBody.system ?? "";
+			if (system.includes("VERDICT:")) {
+				return new Response(
+					JSON.stringify({ content: [{ type: "text", text: "VERDICT: pass\nNOTES:" }] }),
+					{ status: 200 }
+				);
+			}
+			if (system.includes("HEADLINE:")) {
+				return advisoryFallbackResponse();
+			}
+			return new Response(
+				JSON.stringify({
+					content: [
+						{
+							type: "text",
+							text: '<!doctype html><html><head><style>body{font-family:"nyt-franklin",Arial,sans-serif;}h1{font-family:"Times New Roman",serif;}</style></head><body><header><div>The New York Times</div></header><main><h1>Hello</h1></main></body></html>',
+						},
+					],
+				}),
+				{ status: 200 }
+			);
+		}) as unknown as typeof fetch;
+
+		const result = await generateTool({
+			projectName: "Subscription Lift Calculator",
+			siteUrl: "https://nytimes.com",
+			prompt: "a calculator",
+		});
+
+		expect(result.status).toBe("success");
+		if (result.status === "success") {
+			expect(result.tool.html).not.toContain("nyt-franklin");
+			expect(result.tool.html).toContain(
+				'body, input, button, select, textarea {\n  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;'
+			);
+			expect(result.tool.html).toContain(
+				'h1, h2, h3, h4, h5, h6, .ls-brand-lockup__wordmark {\n  font-family: "Iowan Old Style", Georgia, Cambria, "Times New Roman", Times, serif !important;'
+			);
+		}
+	});
+
+	it("defaults ambiguous unknown brand fonts to sans-serif fallbacks", async () => {
+		isBrandIngestionConfiguredMock.mockReturnValue(true);
+		pullBrandProfileMock.mockResolvedValue({
+			brandName: "Acme",
+			colors: { primary: "#222222", text: "#111111" },
+			fonts: ["Acme Display", "Acme Text"],
+			typography: {
+				headingFont: "Acme Display",
+				bodyFont: "Acme Text",
+				headingFontFace: {
+					family: "Acme Display",
+					google: false,
+					category: null,
+					files: {},
+					fallbacks: [],
+				},
+				bodyFontFace: {
+					family: "Acme Text",
+					google: false,
+					category: null,
+					files: {},
+					fallbacks: [],
+				},
+			},
+			images: {
+				logo: {
+					type: "text",
+					canonicalDataUri: null,
+					url: null,
+				},
+				logoVariants: [],
+			},
+		});
+		global.fetch = vi.fn().mockImplementation(async (_url, init) => {
+			const parsedBody = JSON.parse(String((init as RequestInit | undefined)?.body ?? "{}")) as {
+				system?: string;
+			};
+			const system = parsedBody.system ?? "";
+			if (system.includes("VERDICT:")) {
+				return new Response(
+					JSON.stringify({ content: [{ type: "text", text: "VERDICT: pass\nNOTES:" }] }),
+					{ status: 200 }
+				);
+			}
+			if (system.includes("HEADLINE:")) {
+				return advisoryFallbackResponse();
+			}
+			return new Response(
+				JSON.stringify({
+					content: [
+						{
+							type: "text",
+							text: '<!doctype html><html><head><style>body{font-family:"Acme Text",serif;}h1{font-family:"Acme Display",serif;}</style></head><body><header><div>Acme</div></header><main><h1>Hello</h1></main></body></html>',
+						},
+					],
+				}),
+				{ status: 200 }
+			);
+		}) as unknown as typeof fetch;
+
+		const result = await generateTool({
+			projectName: "Acme Tool",
+			siteUrl: "https://example.com",
+			prompt: "a calculator",
+		});
+
+		expect(result.status).toBe("success");
+		if (result.status === "success") {
+			expect(result.tool.html).not.toContain("Acme Text");
+			expect(result.tool.html).not.toContain("Acme Display");
+			expect(result.tool.html).toContain(
+				'body, input, button, select, textarea {\n  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;'
+			);
 			expect(result.tool.html).toContain(
 				'h1, h2, h3, h4, h5, h6, .ls-brand-lockup__wordmark {\n  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;'
 			);
