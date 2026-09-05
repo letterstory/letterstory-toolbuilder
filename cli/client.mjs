@@ -1,15 +1,24 @@
 const DEFAULT_API_URL = process.env.TOOLBUILDER_API_URL || "http://localhost:3000";
 
-export function parseArgv(argv) {
+export function parseArgv(argv, { stopAtFirstPositional = false } = {}) {
 	const positionals = [];
 	const options = {};
 	for (let index = 0; index < argv.length; index += 1) {
 		const value = argv[index];
 		if (!value.startsWith("--")) {
 			positionals.push(value);
+			if (stopAtFirstPositional) {
+				positionals.push(...argv.slice(index + 1));
+				break;
+			}
 			continue;
 		}
-		const key = value.slice(2);
+		const equalsIndex = value.indexOf("=");
+		const key = equalsIndex === -1 ? value.slice(2) : value.slice(2, equalsIndex);
+		if (equalsIndex !== -1) {
+			options[key] = value.slice(equalsIndex + 1);
+			continue;
+		}
 		const next = argv[index + 1];
 		if (next !== undefined && !next.startsWith("--")) {
 			options[key] = next;

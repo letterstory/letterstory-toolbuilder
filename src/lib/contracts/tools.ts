@@ -50,6 +50,10 @@ export const generatedToolRecordSchema = z.object({
 	history: z.array(generatedToolHistoryEntrySchema),
 });
 
+export const generatedToolWithEmbedSchema = generatedToolRecordSchema.extend({
+	embedSnippet: z.string(),
+});
+
 export const listGeneratedToolsInputSchema = z.object({});
 
 export const generatedToolSummarySchema = generatedToolRecordSchema.omit({
@@ -68,7 +72,7 @@ export const getGeneratedToolInputSchema = z.object({
 	id: z.string(),
 });
 
-export const generatedToolDetailSchema = generatedToolRecordSchema.omit({
+export const generatedToolDetailSchema = generatedToolWithEmbedSchema.omit({
 	html: true,
 	history: true,
 }).extend({
@@ -100,7 +104,7 @@ export const generateToolInputSchema = z.object({
 export const generateToolOutputSchema = z.union([
 	z.object({
 		status: z.literal("success"),
-		tool: generatedToolRecordSchema,
+		tool: generatedToolWithEmbedSchema,
 	}),
 	z.object({
 		status: z.enum(["not_configured", "error"]),

@@ -6,6 +6,54 @@ function requiredPositional(positionals, index, label) {
 	return value;
 }
 
+const CLI_IFRAME_SANDBOX = "allow-scripts allow-forms allow-popups allow-modals";
+
+function buildCliEmbedSnippet({ origin, toolId, projectName }) {
+	const domId = `letterstory-tool-${toolId}`;
+	const iframeTag = `<iframe id="${domId}" src="${origin}/t/${toolId}" sandbox="${CLI_IFRAME_SANDBOX}" style="width:100%;min-height:200px;border:0" title="${escapeHtmlAttribute(projectName)}"></iframe>`;
+	const listenerScript = `<script>(function(){
+  var frame = document.getElementById(${JSON.stringify(domId)});
+  if (!frame) return;
+  var expectedOrigin = null;
+  try { expectedOrigin = new URL(frame.src, window.location.href).origin; } catch (e) {}
+  window.addEventListener("message", function(event){
+    if (expectedOrigin && event.origin !== expectedOrigin) return;
+    var data = event.data;
+    if (!data || data.source !== "letterstory-tool" || data.toolId !== ${JSON.stringify(toolId)}) return;
+    if (typeof data.height === "number" && data.height > 0) {
+      frame.style.height = data.height + "px";
+    }
+  });
+})();</script>`;
+	return `${iframeTag}\n${listenerScript}`;
+}
+
+function escapeHtmlAttribute(value) {
+	return String(value)
+		.replace(/&/g, "&amp;")
+		.replace(/"/g, "&quot;")
+		.replace(/</g, "&lt;")
+		.replace(/>/g, "&gt;");
+}
+
+function ensureEmbedSnippet(tool, client) {
+	if (!tool || typeof tool !== "object") return null;
+	if (typeof tool.embedSnippet === "string" && tool.embedSnippet.trim()) {
+		return tool.embedSnippet;
+	}
+	if (typeof tool.id !== "string" || typeof tool.projectName !== "string") return null;
+	const origin = typeof client?.baseUrl === "string" && client.baseUrl.trim() ? client.baseUrl : "http://localhost:3000";
+	return buildCliEmbedSnippet({ origin: origin.replace(/\/$/, ""), toolId: tool.id, projectName: tool.projectName });
+}
+
+function printToolResult(output, client) {
+	printJson(output);
+	if (commandFailed(output) || !output || typeof output !== "object" || !("tool" in output)) return;
+	const embedSnippet = ensureEmbedSnippet(output.tool, client);
+	if (!embedSnippet) return;
+	console.error(`\nEmbed snippet:\n${embedSnippet}`);
+}
+
 export async function runToolsCommand({ client, argv }) {
 	const { positionals, options } = parseArgv(argv);
 	const action = positionals[0];
@@ -24,7 +72,7 @@ export async function runToolsCommand({ client, argv }) {
 	if (action === "get") {
 		const id = requiredPositional(positionals, 1, "tool id");
 		const response = await client.callTool("get_generated_tool", { id });
-		printJson(response.output);
+		printToolResult(response.output, client);
 		return commandFailed(response.output) ? 1 : 0;
 	}
 
@@ -37,7 +85,7 @@ export async function runToolsCommand({ client, argv }) {
 			prompt,
 			toolId: typeof options["tool-id"] === "string" ? options["tool-id"] : undefined,
 		});
-		printJson(response.output);
+		printToolResult(response.output, client);
 		return commandFailed(response.output) ? 1 : 0;
 	}
 

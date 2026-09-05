@@ -21,6 +21,7 @@ import {
 	generateTool,
 	isToolGenerationConfigured,
 	MAX_ANTHROPIC_PIPELINE_WORST_CASE_MS,
+	MAX_REVISION_ANTHROPIC_PIPELINE_WORST_CASE_MS,
 	NGINX_GENERATION_ROUTE_BUDGET_MS,
 	TOOL_GENERATION_TARGET_BUDGET_MS,
 } from "../../src/lib/generation/orchestrator";
@@ -110,7 +111,13 @@ describe("generateTool", () => {
 		expect(MAX_ANTHROPIC_PIPELINE_WORST_CASE_MS).toBeLessThanOrEqual(
 			TOOL_GENERATION_TARGET_BUDGET_MS
 		);
+		expect(MAX_REVISION_ANTHROPIC_PIPELINE_WORST_CASE_MS).toBeLessThanOrEqual(
+			TOOL_GENERATION_TARGET_BUDGET_MS
+		);
 		expect(MAX_ANTHROPIC_PIPELINE_WORST_CASE_MS).toBeLessThan(NGINX_GENERATION_ROUTE_BUDGET_MS);
+		expect(MAX_REVISION_ANTHROPIC_PIPELINE_WORST_CASE_MS).toBeLessThan(
+			NGINX_GENERATION_ROUTE_BUDGET_MS
+		);
 	});
 
 	it("reports not_configured when ANTHROPIC_API_KEY is unset", async () => {
@@ -791,6 +798,52 @@ describe("generateTool — revisions (toolId set)", () => {
 		expect(updateGeneratedToolMock).toHaveBeenCalledWith(
 			"tool-123",
 			expect.objectContaining({ copy: existingTool.copy })
+		);
+	});
+
+	it("gives revisions a longer retry budget after an invalid first HTML response", async () => {
+		getGeneratedToolMock.mockResolvedValue(existingTool);
+		const timeoutSpy = vi
+			.spyOn(AbortSignal, "timeout")
+			.mockImplementation(
+				((ms: number) =>
+					({ timeoutMs: ms }) as unknown as AbortSignal) as typeof AbortSignal.timeout
+			);
+		global.fetch = vi
+			.fn()
+			.mockResolvedValueOnce(
+				new Response(
+					JSON.stringify({
+						content: [{ type: "text", text: "<!doctype html><html><body>cut off" }],
+					}),
+					{ status: 200 }
+				)
+			)
+			.mockResolvedValueOnce(
+				new Response(
+					JSON.stringify({
+						content: [{ type: "text", text: "<!doctype html><html><body>revised</body></html>" }],
+					}),
+					{ status: 200 }
+				)
+			)
+			.mockResolvedValueOnce(advisoryFallbackResponse()) as unknown as typeof fetch;
+
+		const result = await generateTool({
+			projectName: "Mileage Calculator",
+			siteUrl: "",
+			prompt: "add a dark mode toggle",
+			toolId: "tool-123",
+		});
+
+		expect(result.status).toBe("success");
+		expect(timeoutSpy).toHaveBeenNthCalledWith(1, 210000);
+		expect(timeoutSpy).toHaveBeenNthCalledWith(2, 70000);
+		expect(timeoutSpy).toHaveBeenNthCalledWith(3, 15000);
+		expect(timeoutSpy).toHaveBeenCalledTimes(3);
+		expect(updateGeneratedToolMock).toHaveBeenCalledWith(
+			"tool-123",
+			expect.objectContaining({ html: expect.stringContaining("revised") })
 		);
 	});
 });

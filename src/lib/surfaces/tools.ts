@@ -1,5 +1,7 @@
+import { envServer } from "@/lib/config/env.server";
 import { generateTool } from "@/lib/generation";
 import { getGeneratedTool, listGeneratedTools, rollbackGeneratedTool } from "@/lib/generation/store";
+import { buildEmbedSnippet } from "@/lib/embed/contract";
 import {
 	generateToolInputSchema,
 	generateToolOutputSchema,
@@ -13,6 +15,10 @@ import {
 } from "@/lib/contracts/tools";
 import type { GeneratedToolRecord } from "@/lib/generation/store";
 import type { SurfaceHttpResult } from "./brand";
+
+interface ToolSurfaceContext {
+	request?: Request;
+}
 
 function toToolSummary(tool: GeneratedToolRecord) {
 	return generatedToolSummarySchema.parse({
@@ -32,7 +38,7 @@ function toToolSummary(tool: GeneratedToolRecord) {
 	});
 }
 
-function toToolDetail(tool: GeneratedToolRecord) {
+function toToolDetail(tool: GeneratedToolRecord, request?: Request) {
 	return generatedToolDetailSchema.parse({
 		id: tool.id,
 		projectName: tool.projectName,
@@ -46,6 +52,7 @@ function toToolDetail(tool: GeneratedToolRecord) {
 		createdAt: tool.createdAt,
 		updatedAt: tool.updatedAt,
 		version: tool.version,
+		embedSnippet: buildServerEmbedSnippet(tool, request),
 		history: tool.history.map((entry) => ({
 			version: entry.version,
 			createdAt: entry.createdAt,
@@ -59,6 +66,66 @@ function toToolDetail(tool: GeneratedToolRecord) {
 			warnings: entry.warnings,
 		})),
 	});
+}
+
+function buildServerEmbedSnippet(tool: Pick<GeneratedToolRecord, "id" | "projectName">, request?: Request) {
+	return buildEmbedSnippet({
+		origin: deriveToolbuilderOrigin(request),
+		toolId: tool.id,
+		projectName: tool.projectName,
+	});
+}
+
+function toGeneratedToolWithEmbed(tool: GeneratedToolRecord, request?: Request) {
+	return {
+		...tool,
+		embedSnippet: buildServerEmbedSnippet(tool, request),
+	};
+}
+
+function firstHeaderValue(value: string | null): string | null {
+	if (!value) return null;
+	const first = value.split(",")[0]?.trim();
+	return first || null;
+}
+
+function parseForwardedHeader(header: string | null): { proto: string | null; host: string | null } {
+	const firstEntry = firstHeaderValue(header);
+	if (!firstEntry) return { proto: null, host: null };
+	const protoMatch = firstEntry.match(/proto=([^;,\s]+)/i);
+	const hostMatch = firstEntry.match(/host=([^;,\s]+)/i);
+	const unquote = (value: string | undefined) => value?.replace(/^"|"$/g, "") ?? null;
+	return {
+		proto: unquote(protoMatch?.[1]),
+		host: unquote(hostMatch?.[1]),
+	};
+}
+
+function withForwardedPort(host: string, port: string | null, protocol: string): string {
+	if (!port || host.includes(":")) return host;
+	if ((protocol === "https" && port === "443") || (protocol === "http" && port === "80")) return host;
+	return `${host}:${port}`;
+}
+
+function deriveToolbuilderOrigin(request?: Request): string {
+	if (request) {
+		const forwarded = parseForwardedHeader(request.headers.get("forwarded"));
+		const protocolFromUrl = new URL(request.url).protocol.replace(/:$/, "") || "http";
+		const protocol = firstHeaderValue(request.headers.get("x-forwarded-proto")) ?? forwarded.proto ?? protocolFromUrl;
+		const forwardedHost =
+			firstHeaderValue(request.headers.get("x-forwarded-host")) ??
+			forwarded.host ??
+			firstHeaderValue(request.headers.get("host"));
+		const host = withForwardedPort(
+			forwardedHost ?? new URL(request.url).host,
+			firstHeaderValue(request.headers.get("x-forwarded-port")),
+			protocol
+		);
+		if (host) return `${protocol}://${host}`;
+		return new URL(request.url).origin;
+	}
+
+	return envServer.TOOLBUILDER_BASE_URL || "http://localhost:3000";
 }
 
 function diagnosticsHeaders(diagnostics: {
@@ -95,7 +162,8 @@ export async function listGeneratedToolsSurface(): Promise<
 }
 
 export async function getGeneratedToolSurface(
-	input: unknown
+	input: unknown,
+	context: ToolSurfaceContext = {}
 ): Promise<SurfaceHttpResult<ReturnType<typeof getGeneratedToolOutputSchema.parse>>> {
 	const parsed = getGeneratedToolInputSchema.safeParse(input);
 	if (!parsed.success || !parsed.data.id.trim()) {
@@ -115,12 +183,16 @@ export async function getGeneratedToolSurface(
 
 	return {
 		statusCode: 200,
-		body: getGeneratedToolOutputSchema.parse({ status: "success", tool: toToolDetail(tool) }),
+		body: getGeneratedToolOutputSchema.parse({
+			status: "success",
+			tool: toToolDetail(tool, context.request),
+		}),
 	};
 }
 
 export async function generateToolSurface(
-	body: unknown
+	body: unknown,
+	context: ToolSurfaceContext = {}
 ): Promise<SurfaceHttpResult<ReturnType<typeof generateToolOutputSchema.parse>>> {
 	const parsed = generateToolInputSchema.safeParse(body);
 	if (!parsed.success || !parsed.data.prompt.trim()) {
@@ -143,10 +215,17 @@ export async function generateToolSurface(
 				: undefined,
 	});
 	const { diagnostics, ...responseBody } = result;
+	const parsedBody =
+		result.status === "success"
+			? generateToolOutputSchema.parse({
+					status: "success",
+					tool: toGeneratedToolWithEmbed(result.tool, context.request),
+				})
+			: generateToolOutputSchema.parse(responseBody);
 
 	return {
 		statusCode: result.status === "success" ? 200 : 400,
-		body: generateToolOutputSchema.parse(responseBody),
+		body: parsedBody,
 		headers: diagnostics ? diagnosticsHeaders(diagnostics) : undefined,
 	};
 }

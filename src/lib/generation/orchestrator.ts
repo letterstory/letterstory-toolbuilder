@@ -64,7 +64,8 @@ export type ToolGenerationResult = ToolGenerationSuccessResult | ToolGenerationF
 export const NGINX_GENERATION_ROUTE_BUDGET_MS = 300_000;
 export const TOOL_GENERATION_TARGET_BUDGET_MS = 280_000;
 const PRIMARY_ANTHROPIC_TIMEOUT_MS = 210_000;
-const RETRY_ANTHROPIC_TIMEOUT_MS = 35_000;
+const INITIAL_RETRY_ANTHROPIC_TIMEOUT_MS = 35_000;
+const REVISION_RETRY_ANTHROPIC_TIMEOUT_MS = 70_000;
 const ADVISORY_TIMEOUT_MS = 15_000;
 const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-6";
 const MAX_TOKENS = 8_000;
@@ -74,13 +75,21 @@ const MAX_PROMPT_BRAND_FONTS = 2;
 const MAX_PROMPT_LOGO_DATA_URI_CHARS = 32_000;
 const MIN_ADVISORY_BUDGET_MS = 5_000;
 // Worst-case request-budget math for one /api/tools/generate request:
-// - primary HTML generation attempt: 210s
-// - fallback retry (only for malformed HTML / transient 5xx/network failures): 35s
-// - advisory copy + brand-fidelity checks: 15s max wall time because they run in parallel
-// Total capped post-brand-fetch wall time = 260s, leaving ~40s inside nginx's
-// 300s budget for brand-context fetching, storage, and Next.js response overhead.
+// - initial generation path:
+//   - primary HTML generation attempt: 210s
+//   - fallback retry (only for malformed HTML / transient 5xx/network failures): 35s
+//   - advisory copy + brand-fidelity checks: 15s max wall time because they run in parallel
+//   - total capped post-brand-fetch wall time = 260s, leaving ~40s inside nginx's
+//     300s budget for brand-context fetching, storage, and Next.js response overhead.
+// - revision path:
+//   - primary HTML generation attempt: 210s
+//   - retry after malformed / transient output: 70s
+//   - advisories can be skipped entirely when that recovery attempt consumes the
+//     remaining request budget, so the revision path is still capped at 280s.
 export const MAX_ANTHROPIC_PIPELINE_WORST_CASE_MS =
-	PRIMARY_ANTHROPIC_TIMEOUT_MS + RETRY_ANTHROPIC_TIMEOUT_MS + ADVISORY_TIMEOUT_MS;
+	PRIMARY_ANTHROPIC_TIMEOUT_MS + INITIAL_RETRY_ANTHROPIC_TIMEOUT_MS + ADVISORY_TIMEOUT_MS;
+export const MAX_REVISION_ANTHROPIC_PIPELINE_WORST_CASE_MS =
+	PRIMARY_ANTHROPIC_TIMEOUT_MS + REVISION_RETRY_ANTHROPIC_TIMEOUT_MS;
 // <head>/<style> plus the top of <body> carries almost all brand-relevant
 // signal (colors, fonts, logo <img>) — capping keeps this a cheap, fast
 // advisory check instead of resending the whole (possibly large) document.
@@ -318,6 +327,10 @@ async function buildToolContent(opts: {
 		hasBrandSnapshot: Boolean(opts.brandSnapshot),
 		isRevision: Boolean(opts.existingHtml),
 	});
+	const isRevision = Boolean(opts.existingHtml);
+	const retryTimeoutCeilingMs = isRevision
+		? REVISION_RETRY_ANTHROPIC_TIMEOUT_MS
+		: INITIAL_RETRY_ANTHROPIC_TIMEOUT_MS;
 	// A single bad or slow generation (truncated by max_tokens, the model
 	// wrapping the doc in prose, or a transient Anthropic timeout/5xx)
 	// shouldn't cost the customer a full manual retry — we get one automatic
@@ -330,11 +343,11 @@ async function buildToolContent(opts: {
 	for (let attempt = 1; attempt <= MAX_GENERATION_ATTEMPTS; attempt += 1) {
 		const timeSpentMs = Date.now() - opts.requestStartedAt;
 		const remainingBudgetMs = Math.max(0, TOOL_GENERATION_TARGET_BUDGET_MS - timeSpentMs);
-		const reservedAdvisoryMs = opts.existingHtml ? 0 : ADVISORY_TIMEOUT_MS;
+		const reservedAdvisoryMs = isRevision ? 0 : ADVISORY_TIMEOUT_MS;
 		const timeoutMs = Math.max(
 			MIN_ADVISORY_BUDGET_MS,
 			Math.min(
-				attempt === 1 ? PRIMARY_ANTHROPIC_TIMEOUT_MS : RETRY_ANTHROPIC_TIMEOUT_MS,
+				attempt === 1 ? PRIMARY_ANTHROPIC_TIMEOUT_MS : retryTimeoutCeilingMs,
 				Math.max(MIN_ADVISORY_BUDGET_MS, remainingBudgetMs - reservedAdvisoryMs)
 			)
 		);

@@ -150,7 +150,11 @@ describe("POST /api/tools/generate", () => {
 			statusCode: 200,
 			body: {
 				status: "success",
-				tool: { id: "abc", projectName: "Calc" },
+				tool: {
+					id: "abc",
+					projectName: "Calc",
+					embedSnippet: "<iframe src=\"https://example.com/t/abc\"></iframe>",
+				},
 			},
 			headers: {
 				"Server-Timing": "total;dur=1234, brand;dur=56, build;dur=1100, advisory;dur=78",
@@ -176,11 +180,14 @@ describe("POST /api/tools/generate", () => {
 			siteUrl: "https://stripe.com",
 			prompt: "a calculator",
 			toolId: "abc",
-		});
+		}, { request: expect.any(Request) });
 		expect(response.status).toBe(200);
 		expect(response.headers.get("server-timing")).toContain("total;dur=1234");
 		expect(response.headers.get("x-tool-generation-attempts")).toBe("1:success:1100/210000");
-		await expect(response.json()).resolves.toMatchObject({ status: "success" });
+		await expect(response.json()).resolves.toMatchObject({
+			status: "success",
+			tool: { embedSnippet: expect.stringContaining("/t/abc") },
+		});
 	});
 
 	it("returns a JSON 500 when generateToolSurface throws unexpectedly", async () => {
@@ -309,6 +316,8 @@ describe("GET /api/tools/[id]", () => {
 					createdAt: "2024-01-01T00:00:00.000Z",
 					updatedAt: "2024-01-02T00:00:00.000Z",
 					version: 2,
+					embedSnippet:
+						"<iframe id=\"letterstory-tool-abc\" src=\"https://example.com/t/abc\"></iframe>",
 					history: [
 						{
 							version: 1,
@@ -332,10 +341,15 @@ describe("GET /api/tools/[id]", () => {
 		});
 		const body = (await response.json()) as { status: string; tool: Record<string, unknown> };
 
+		expect(getGeneratedToolSurfaceMock).toHaveBeenCalledWith(
+			{ id: "abc" },
+			{ request: expect.any(Request) }
+		);
 		expect(response.status).toBe(200);
 		expect(body.tool).not.toHaveProperty("html");
 		expect(body.tool.id).toBe("abc");
 		expect(body.tool.version).toBe(2);
+		expect(body.tool.embedSnippet).toContain("/t/abc");
 		const history = body.tool.history as Array<Record<string, unknown>>;
 		expect(history).toHaveLength(1);
 		expect(history[0]).not.toHaveProperty("html");

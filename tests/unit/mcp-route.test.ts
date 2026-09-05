@@ -68,8 +68,14 @@ describe("/api/mcp", () => {
 
 	it("POST tools/call dispatches through the central dispatcher", async () => {
 		dispatchToolCallMock.mockResolvedValueOnce({
-			name: "get_health",
-			output: { ok: true },
+			name: "get_generated_tool",
+			output: {
+				status: "success",
+				tool: {
+					id: "tool-123",
+					embedSnippet: "<iframe src=\"https://example.com/t/tool-123\"></iframe>",
+				},
+			},
 			meta: { httpStatus: 200 },
 		});
 
@@ -81,19 +87,22 @@ describe("/api/mcp", () => {
 					jsonrpc: "2.0",
 					id: 3,
 					method: "tools/call",
-					params: { name: "get_health", arguments: {} },
+					params: { name: "get_generated_tool", arguments: { id: "tool-123" } },
 				}),
 			})
 		);
 		expect(dispatchToolCallMock).toHaveBeenCalledWith({
-			name: "get_health",
-			arguments: {},
+			name: "get_generated_tool",
+			arguments: { id: "tool-123" },
 			request: expect.any(Request),
 		});
 		await expect(response.json()).resolves.toMatchObject({
 			jsonrpc: "2.0",
 			id: 3,
-			result: { name: "get_health", output: { ok: true } },
+			result: {
+				name: "get_generated_tool",
+				output: { tool: { embedSnippet: expect.stringContaining("/t/tool-123") } },
+			},
 		});
 	});
 

@@ -11,7 +11,7 @@ export async function POST(request: Request) {
 			return NextResponse.json(response.body, { status: response.statusCode, headers: response.headers });
 		}
 
-		const response = await generateToolSurface(await request.json().catch(() => null));
+		const response = await generateToolSurface(await request.json().catch(() => null), { request });
 		return NextResponse.json(response.body, {
 			status: response.statusCode,
 			headers: response.headers,

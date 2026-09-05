@@ -28,6 +28,10 @@ import {
 
 type McpSchema = z.ZodTypeAny;
 
+export interface McpHandlerContext {
+	request?: Request;
+}
+
 export interface McpRegistryEntry<TInput extends McpSchema = McpSchema, TOutput extends McpSchema = McpSchema> {
 	name: string;
 	description: string;
@@ -35,7 +39,7 @@ export interface McpRegistryEntry<TInput extends McpSchema = McpSchema, TOutput 
 	inputSchema: TInput;
 	outputSchema: TOutput;
 	rateLimitTag?: McpRateLimitedToolName;
-	handler: (input: z.infer<TInput>) => Promise<z.infer<TOutput>>;
+	handler: (input: z.infer<TInput>, context: McpHandlerContext) => Promise<z.infer<TOutput>>;
 }
 
 export const MCP_TOOL_REGISTRY = [
@@ -79,7 +83,8 @@ export const MCP_TOOL_REGISTRY = [
 		capability: "tools.get",
 		inputSchema: getGeneratedToolInputSchema,
 		outputSchema: getGeneratedToolOutputSchema,
-		handler: async (input) => (await getGeneratedToolSurface(input)).body,
+		handler: async (input, context) =>
+			(await getGeneratedToolSurface(input, { request: context.request })).body,
 	},
 	{
 		name: "generate_tool",
@@ -88,7 +93,8 @@ export const MCP_TOOL_REGISTRY = [
 		inputSchema: generateToolInputSchema,
 		outputSchema: generateToolOutputSchema,
 		rateLimitTag: "generate_tool",
-		handler: async (input) => (await generateToolSurface(input)).body,
+		handler: async (input, context) =>
+			(await generateToolSurface(input, { request: context.request })).body,
 	},
 	{
 		name: "rollback_generated_tool",

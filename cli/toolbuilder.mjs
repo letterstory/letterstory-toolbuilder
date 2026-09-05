@@ -21,7 +21,9 @@ Usage:
 }
 
 async function main() {
-	const { positionals, options } = parseArgv(process.argv.slice(2));
+	const { positionals, options } = parseArgv(process.argv.slice(2), {
+		stopAtFirstPositional: true,
+	});
 	if (options.help || positionals.length === 0) {
 		printHelp();
 		process.exit(0);

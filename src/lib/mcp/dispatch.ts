@@ -75,8 +75,7 @@ export async function dispatchToolCall({ name, arguments: args, request }: Dispa
 		});
 	}
 
-
-	const output = await tool.handler(parsed.data);
+	const output = await tool.handler(parsed.data, { request });
 	return {
 		name,
 		output,
