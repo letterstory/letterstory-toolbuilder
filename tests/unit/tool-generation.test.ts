@@ -547,6 +547,8 @@ describe("generateTool", () => {
 			expect(result.tool.html).toContain('class="ls-brand-verified-header"');
 			expect(result.tool.html).toContain('src="data:image/png;base64,abc"');
 			expect(result.tool.html).not.toContain("Graphik Web");
+			expect(result.tool.html).not.toContain("Iowan Old Style");
+			expect(result.tool.html).not.toContain("Times New Roman");
 			expect(result.tool.html).toContain(
 				'-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif'
 			);
@@ -701,6 +703,82 @@ describe("generateTool", () => {
 			expect(result.tool.html).not.toContain("Spotify Mix");
 			expect(result.tool.html).not.toContain("Times New Roman");
 			expect(result.tool.html).toContain('src="data:image/png;base64,spotify-logo"');
+		}
+	});
+
+	it("replaces non-embedded serif heading fallbacks with sans-serif for non-serif brands", async () => {
+		isBrandIngestionConfiguredMock.mockReturnValue(true);
+		pullBrandProfileMock.mockResolvedValue({
+			brandName: "Mailchimp",
+			colors: { primary: "#FFE01B", text: "#000000" },
+			fonts: ["Graphik Web", "Means Web"],
+			typography: {
+				headingFont: "Means Web",
+				bodyFont: "Graphik Web",
+				headingFontFace: {
+					family: "Means Web",
+					google: false,
+					category: "serif",
+					files: {},
+					fallbacks: ["serif"],
+				},
+				bodyFontFace: {
+					family: "Graphik Web",
+					google: false,
+					category: "sans-serif",
+					files: {},
+					fallbacks: ["sans-serif"],
+				},
+			},
+			images: {
+				logo: {
+					type: "logo",
+					canonicalDataUri: "data:image/png;base64,abc",
+					url: null,
+				},
+				logoVariants: [],
+			},
+		});
+		global.fetch = vi.fn().mockImplementation(async (_url, init) => {
+			const parsedBody = JSON.parse(String((init as RequestInit | undefined)?.body ?? "{}")) as {
+				system?: string;
+			};
+			const system = parsedBody.system ?? "";
+			if (system.includes("VERDICT:")) {
+				return new Response(
+					JSON.stringify({ content: [{ type: "text", text: "VERDICT: pass\nNOTES:" }] }),
+					{ status: 200 }
+				);
+			}
+			if (system.includes("HEADLINE:")) {
+				return advisoryFallbackResponse();
+			}
+			return new Response(
+				JSON.stringify({
+					content: [
+						{
+							type: "text",
+							text: '<!doctype html><html><head><style>.brand-label{font-family:"Iowan Old Style", Georgia, Cambria, "Times New Roman", Times, serif;}h1{font-family:"Iowan Old Style", Georgia, Cambria, "Times New Roman", Times, serif !important;}body{font-family:"Graphik Web", Arial, sans-serif;}</style></head><body><header><div>Mailchimp</div></header><main><h1>Hello</h1></main></body></html>',
+						},
+					],
+				}),
+				{ status: 200 }
+			);
+		}) as unknown as typeof fetch;
+
+		const result = await generateTool({
+			projectName: "Email ROI Calculator",
+			siteUrl: "https://mailchimp.com",
+			prompt: "a calculator",
+		});
+
+		expect(result.status).toBe("success");
+		if (result.status === "success") {
+			expect(result.tool.html).not.toContain("Iowan Old Style");
+			expect(result.tool.html).not.toContain("Times New Roman");
+			expect(result.tool.html).toContain(
+				'h1, h2, h3, h4, h5, h6, .ls-brand-lockup__wordmark {\n  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;'
+			);
 		}
 	});
 

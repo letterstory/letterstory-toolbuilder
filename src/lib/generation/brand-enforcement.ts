@@ -33,6 +33,7 @@ interface BrandFontPlan {
 	css: string;
 	body: FontRolePlan;
 	heading: FontRolePlan;
+	brandPrefersSansFallback: boolean;
 	embeddedFamilies: Set<string>;
 	unloadableFamilies: string[];
 	warnings: string[];
@@ -228,12 +229,28 @@ function buildRolePlan(
 	return { embeddedFamily: null, stack: systemStack };
 }
 
+function detectSansFallbackPreference(brandSnapshot: GeneratedToolBrandSnapshot): boolean {
+	const bodyCategory = brandSnapshot.bodyFontFace?.category?.toLowerCase() ?? null;
+	if (bodyCategory === "serif") return false;
+	if (bodyCategory === "sans-serif") return true;
+
+	const bodyFallbacks = brandSnapshot.bodyFontFace?.fallbacks ?? [];
+	if (bodyFallbacks.some((fallback) => normalizeFontFamilyKey(fallback) === "serif")) return false;
+	if (bodyFallbacks.some((fallback) => normalizeFontFamilyKey(fallback) === "sans-serif")) return true;
+
+	const headingCategory = brandSnapshot.headingFontFace?.category?.toLowerCase() ?? null;
+	if (headingCategory === "sans-serif") return true;
+
+	return !looksSerif(brandSnapshot.bodyFont ?? brandSnapshot.headingFont);
+}
+
 function buildBrandFontPlan(
 	brandSnapshot: GeneratedToolBrandSnapshot,
 	embeddedFaces: EmbeddedFontFace[],
 	warnings: string[]
 ): BrandFontPlan {
 	const embeddedFamilies = new Set(embeddedFaces.map((face) => face.family));
+	const brandPrefersSansFallback = detectSansFallbackPreference(brandSnapshot);
 	const body = buildRolePlan(
 		brandSnapshot.bodyFontFace,
 		brandSnapshot.bodyFont,
@@ -244,6 +261,10 @@ function buildBrandFontPlan(
 		brandSnapshot.headingFont ?? brandSnapshot.bodyFont,
 		embeddedFamilies
 	);
+	const normalizedHeading =
+		heading.embeddedFamily || !brandPrefersSansFallback || heading.stack !== SYSTEM_SERIF_STACK
+			? heading
+			: { ...heading, stack: SYSTEM_SANS_STACK };
 	const unloadableFamilies = dedupeStrings(
 		[brandSnapshot.bodyFont, brandSnapshot.headingFont, ...brandSnapshot.fonts].filter(
 			(family) => Boolean(family) && !embeddedFamilies.has(family as string)
@@ -252,7 +273,8 @@ function buildBrandFontPlan(
 	return {
 		css: embeddedFaces.map(buildFontFaceCss).join("\n"),
 		body,
-		heading,
+		heading: normalizedHeading,
+		brandPrefersSansFallback,
 		embeddedFamilies,
 		unloadableFamilies,
 		warnings,
@@ -333,6 +355,23 @@ function rewriteFontFamilies(html: string, plan: BrandFontPlan): string {
 	}
 
 	return rewritten;
+}
+
+function scrubMismatchedSerifFallbacks(html: string, plan: BrandFontPlan): string {
+	if (!plan.brandPrefersSansFallback) return html;
+
+	return html.replace(/font-family\s*:\s*([^;}{]+)([;}]?)/gi, (match, value, suffix, offset) => {
+		const normalizedValue = value.toLowerCase();
+		if (!/\bserif\b/.test(normalizedValue) || /\bsans-serif\b/.test(normalizedValue)) {
+			return match;
+		}
+
+		const window = html.slice(Math.max(0, offset - 80), Math.min(html.length, offset + 40)).toLowerCase();
+		const likelyHeading = /(h1|h2|h3|h4|h5|h6|header|title|brand|wordmark)/.test(window);
+		const replacement = likelyHeading ? plan.heading.stack : plan.body.stack;
+		if (!replacement.includes("sans-serif")) return match;
+		return `font-family: ${replacement}${suffix}`;
+	});
 }
 
 function buildEnforcementCss(
@@ -450,6 +489,7 @@ export async function enforceBrandPresentation(opts: {
 	html = rewriteHeader(html, buildDeterministicHeaderHtml(opts.projectName, opts.brandSnapshot));
 	html = rewriteFontFamilies(html, plan);
 	html = appendCss(html, `\n${buildEnforcementCss(opts.brandSnapshot, plan)}\n`);
+	html = scrubMismatchedSerifFallbacks(html, plan);
 
 	return {
 		sanitized: sanitizeGeneratedHtml(html),

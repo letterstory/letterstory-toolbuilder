@@ -1045,6 +1045,7 @@ function buildBrandPrompt(brandSnapshot: GeneratedToolBrandSnapshot | null): str
 		headingFont && headingFont !== bodyFont
 			? `Optional display font: ${headingFont}. Use it sparingly for large editorial-style headings only; do not use it for badges, icons, faux logos, labels, or compact tool chrome.`
 			: "Optional display font: none detected beyond the main UI font.",
+		"Fallback rule: if the named brand fonts are not actually embedded in the document, fall back to a clean system sans-serif stack unless the authoritative brand metadata clearly indicates a serif body/UI identity.",
 		"Use the supplied colors as the header, CTA, and highlight anchors. Ignore any conflicting legacy palette.",
 		brandSnapshot.logoPolicy === "exact_asset"
 			? "A real logo asset exists and will be injected into the header programmatically after generation. Leave space for a clean brand lockup and do not invent, redraw, trace, or type a substitute logo."
