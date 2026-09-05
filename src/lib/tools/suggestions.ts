@@ -205,10 +205,25 @@ function normalizeSuggestion(value: unknown): ToolSuggestion | null {
 
 function parseJsonObject<T>(text: string): T {
 	try {
-		return JSON.parse(text) as T;
+		return JSON.parse(extractJsonObject(text)) as T;
 	} catch {
 		throw new Error("Anthropic suggestions returned a non-JSON response.");
 	}
+}
+
+function extractJsonObject(text: string): string {
+	const trimmed = text.trim();
+	if (!trimmed) return trimmed;
+	if (trimmed.startsWith("{") && trimmed.endsWith("}")) return trimmed;
+
+	const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/i)?.[1]?.trim();
+	if (fenced?.startsWith("{") && fenced.endsWith("}")) return fenced;
+
+	const start = trimmed.indexOf("{");
+	const end = trimmed.lastIndexOf("}");
+	if (start >= 0 && end > start) return trimmed.slice(start, end + 1);
+
+	return trimmed;
 }
 
 function readRecord(value: unknown): Record<string, unknown> | null {

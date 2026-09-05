@@ -120,4 +120,43 @@ describe("tool suggestions service", () => {
 			message: "Anthropic suggestions returned a non-JSON response.",
 		});
 	});
+
+	it("accepts JSON wrapped in markdown fences", async () => {
+		requestAnthropicTextMock.mockResolvedValue({
+			model: "claude-sonnet-4-6",
+			text: [
+				"```json",
+				JSON.stringify({
+					industry: "Fintech / payments infrastructure",
+					businessSummary:
+						"Stripe sells payments, billing, invoicing, and revenue operations software for internet businesses.",
+					suggestions: [
+						{
+							title: "Payment Fee Calculator",
+							description: "Estimate processing costs across order volume and payment mix.",
+							prompt: "Build a payment fee calculator.",
+						},
+						{
+							title: "Subscription Revenue Forecaster",
+							description: "Project recurring revenue across growth and churn scenarios.",
+							prompt: "Build a subscription revenue forecaster.",
+						},
+						{
+							title: "Invoice Terms Cost Estimator",
+							description: "Compare the cash-flow impact of payment-term options.",
+							prompt: "Build an invoice terms cost estimator.",
+						},
+					],
+				}),
+				"```",
+			].join("\n"),
+		});
+
+		const result = await suggestToolsForBrand("https://stripe.com");
+
+		expect(result).toMatchObject({
+			status: "success",
+			requestedUrl: "https://stripe.com",
+		});
+	});
 });
