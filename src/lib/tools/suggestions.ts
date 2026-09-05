@@ -72,7 +72,7 @@ export async function suggestToolsForBrand(siteUrl: string): Promise<ToolSuggest
 			maxTokens: 1_400,
 			timeoutMs: TOOL_SUGGESTION_TIMEOUT_MS,
 		});
-		const parsed = normalizeSuggestionResponse(parseJsonObject<RawSuggestionResponse>(text));
+		const parsed = parseSuggestionResponse(text);
 
 		return {
 			status: "success",
@@ -104,23 +104,18 @@ interface RawSuggestionResponse {
 function buildSuggestionSystemPrompt(): string {
 	return [
 		"You are a product strategist helping a website owner decide which one small embeddable utility tool to build next.",
-		"Return JSON only. No markdown fences.",
-		"Use this schema exactly:",
-		JSON.stringify(
-			{
-				industry: "string",
-				businessSummary: "string",
-				suggestions: [
-					{
-						title: "string",
-						description: "string",
-						prompt: "string",
-					},
-				],
-			},
-			null,
-			2
-		),
+		"Return plain text only with this exact structure:",
+		"INDUSTRY: <short industry label>",
+		"BUSINESS_SUMMARY: <one sentence about what the company actually sells or does>",
+		"---",
+		"TITLE: <short tool title>",
+		"DESCRIPTION: <one sentence>",
+		"PROMPT: <ready-to-use build prompt on a single line>",
+		"---",
+		"TITLE: <short tool title>",
+		"DESCRIPTION: <one sentence>",
+		"PROMPT: <ready-to-use build prompt on a single line>",
+		"Repeat 3 to 5 suggestion blocks total.",
 		"First infer the company's real business and industry from the supplied homepage evidence and structured brand profile. Do not guess only from the domain name.",
 		"Then propose 3 to 5 genuinely useful, concrete, free utility or lead-gen tools that fit that exact business. Think like the best polished utility-tool libraries from SaaS brands such as calculators, estimators, checkers, planners, or generators.",
 		"Every suggestion must be single-purpose, customer-facing, embeddable in one iframe, and realistically buildable in one shot with HTML/CSS/JS only.",
@@ -193,6 +188,20 @@ function normalizeSuggestionResponse(payload: RawSuggestionResponse): {
 	return { industry, businessSummary, suggestions };
 }
 
+function parseSuggestionResponse(text: string): {
+	industry: string;
+	businessSummary: string;
+	suggestions: ToolSuggestion[];
+} {
+	try {
+		return normalizeSuggestionResponse(parseJsonObject<RawSuggestionResponse>(text));
+	} catch {
+		const structured = parseStructuredSuggestionText(text);
+		if (structured) return structured;
+		throw new Error("Anthropic suggestions returned a non-JSON response.");
+	}
+}
+
 function normalizeSuggestion(value: unknown): ToolSuggestion | null {
 	if (!value || typeof value !== "object") return null;
 	const record = value as Record<string, unknown>;
@@ -238,4 +247,32 @@ function readString(value: unknown): string | null {
 
 function readNonEmptyString(value: unknown): string | null {
 	return readString(value);
+}
+
+function parseStructuredSuggestionText(text: string): {
+	industry: string;
+	businessSummary: string;
+	suggestions: ToolSuggestion[];
+} | null {
+	const normalized = text.replace(/\r\n/g, "\n").trim();
+	const industry = normalized.match(/^\s*INDUSTRY:\s*(.+)$/im)?.[1]?.trim() ?? null;
+	const businessSummary =
+		normalized.match(/^\s*BUSINESS_SUMMARY:\s*(.+)$/im)?.[1]?.trim() ?? null;
+	const blockPattern =
+		/^\s*TITLE:\s*(.+)\nDESCRIPTION:\s*(.+)\nPROMPT:\s*([\s\S]*?)(?=\n(?:---\s*\n)?TITLE:|\s*$)/gim;
+	const suggestions: ToolSuggestion[] = [];
+
+	for (const match of normalized.matchAll(blockPattern)) {
+		const title = match[1]?.trim();
+		const description = match[2]?.trim();
+		const prompt = match[3]?.replace(/\n+/g, " ").trim();
+		if (!title || !description || !prompt) continue;
+		suggestions.push({ title, description, prompt });
+	}
+
+	if (!industry || !businessSummary || suggestions.length < 3 || suggestions.length > 5) {
+		return null;
+	}
+
+	return { industry, businessSummary, suggestions };
 }

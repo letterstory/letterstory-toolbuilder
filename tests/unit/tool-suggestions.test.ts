@@ -159,4 +159,33 @@ describe("tool suggestions service", () => {
 			requestedUrl: "https://stripe.com",
 		});
 	});
+
+	it("accepts structured plain-text suggestions", async () => {
+		requestAnthropicTextMock.mockResolvedValue({
+			model: "claude-sonnet-4-6",
+			text: [
+				"INDUSTRY: Fintech / payments infrastructure",
+				"BUSINESS_SUMMARY: Stripe sells payments, billing, invoicing, and revenue operations software for internet businesses.",
+				"---",
+				"TITLE: Payment Fee Calculator",
+				"DESCRIPTION: Estimate processing costs across order volume and payment mix.",
+				"PROMPT: Build a payment fee calculator for a payments platform with inputs for monthly volume, average order value, domestic versus international share, and card mix, then show estimated fees, take rate, and optimization tips.",
+				"---",
+				"TITLE: Subscription Revenue Forecaster",
+				"DESCRIPTION: Project recurring revenue across growth and churn scenarios.",
+				"PROMPT: Build a subscription revenue forecaster for a billing platform with inputs for starting customers, new customers, plan price, churn, annual plan share, and expansion revenue, then show projected MRR, ARR, and retention outcomes.",
+				"---",
+				"TITLE: Invoice Terms Cost Estimator",
+				"DESCRIPTION: Compare the cash-flow impact of payment-term options.",
+				"PROMPT: Build an invoice terms cost estimator for a revenue automation brand with inputs for invoice amount, payment terms, delay days, cost of capital, and invoice volume, then show carrying cost and DSO impact.",
+			].join("\n"),
+		});
+
+		const result = await suggestToolsForBrand("https://stripe.com");
+
+		expect(result).toMatchObject({
+			status: "success",
+			requestedUrl: "https://stripe.com",
+		});
+	});
 });
