@@ -27,6 +27,7 @@ interface BuilderTopbarProps {
 	onFocusComposer: () => void;
 	onRefreshRecent: () => void;
 	onReopenRecent: (tool: ToolSummary) => void;
+	onOpenEmbed: () => void;
 }
 
 export function BuilderTopbar({
@@ -43,9 +44,9 @@ export function BuilderTopbar({
 	onFocusComposer,
 	onRefreshRecent,
 	onReopenRecent,
+	onOpenEmbed,
 }: BuilderTopbarProps) {
 	const currentLabel = projectName.trim() || activeTool?.projectName || "New tool";
-	const publishHref = activeTool ? `/t/${activeTool.id}` : undefined;
 
 	return (
 		<div className="border-b border-brand/10 bg-white/95 px-4 py-3 backdrop-blur sm:px-6">
@@ -195,24 +196,14 @@ export function BuilderTopbar({
 					>
 						<MoreHorizontal className="size-4" />
 					</Button>
-					{publishHref ? (
-						<Button
-							asChild
-							className="rounded-full bg-primary px-5 text-primary-foreground hover:bg-primary/90"
-						>
-							<a href={publishHref} target="_blank" rel="noreferrer">
-								Publish
-							</a>
-						</Button>
-					) : (
-						<Button
-							type="button"
-							className="rounded-full bg-primary px-5 text-primary-foreground hover:bg-primary/90"
-							disabled
-						>
-							Publish
-						</Button>
-					)}
+					<Button
+						type="button"
+						className="rounded-full bg-primary px-5 text-primary-foreground hover:bg-primary/90"
+						disabled={!activeTool}
+						onClick={onOpenEmbed}
+					>
+						Publish
+					</Button>
 				</div>
 			</div>
 		</div>

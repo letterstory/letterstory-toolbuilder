@@ -1,3 +1,4 @@
+import Image from "next/image";
 import { useMemo, type RefObject } from "react";
 import {
 	AlertCircle,
@@ -12,6 +13,7 @@ import {
 import { formatDuration } from "@/components/tools/builder-activity";
 import type {
 	BuilderActivityStep,
+	BuilderBrandSummary,
 	BuilderConversationMessage,
 	BuilderGenerationRun,
 	GenerationTelemetry,
@@ -32,6 +34,7 @@ interface BuilderChatPanelProps {
 	requestState: RequestState;
 	statusMessage: StatusMessage;
 	activeBrandName: string | null;
+	brandSummary: BuilderBrandSummary | null;
 	activitySteps: BuilderActivityStep[];
 	activeRun: BuilderGenerationRun | null;
 	telemetry: GenerationTelemetry | null;
@@ -51,6 +54,7 @@ export function BuilderChatPanel({
 	requestState,
 	statusMessage,
 	activeBrandName,
+	brandSummary,
 	activitySteps,
 	activeRun,
 	telemetry,
@@ -112,18 +116,92 @@ export function BuilderChatPanel({
 							variant="secondary"
 							className="rounded-full border border-brand/10 bg-brand-light/35 text-brand-text"
 						>
-							Live orchestration UI
+							Brand ingestion + hosted iframe
 						</Badge>
 						<span>
 							{activeBrandName
 								? `Current brand context: ${activeBrandName}`
-								: "Optional brand site will drive logo, colors, and font extraction."}
+								: "Optional brand site will drive logo, colors, fonts, and hosted embed output."}
 						</span>
 					</div>
 				</div>
 			</div>
 
 			<div className="flex-1 space-y-6 overflow-y-auto px-4 py-5 sm:px-5">
+				{brandSummary ? <BrandSummaryCard summary={brandSummary} /> : null}
+
+				<section className="rounded-[28px] border border-brand/10 bg-white p-4 shadow-sm">
+					<div className="flex items-start justify-between gap-3">
+						<div>
+							<p className="text-sm font-semibold text-foreground">
+								{brandSummary ? "Brand ingestion & generation pipeline" : "Generation pipeline"}
+							</p>
+							<p className="text-xs text-muted-foreground">
+								{telemetry?.totalMs
+									? `Completed in ${formatDuration(telemetry.totalMs)}${telemetry.attemptsSummary ? ` · ${telemetry.attemptsSummary}` : ""}`
+									: activeRun
+										? "Estimated step timing while the backend request is in flight."
+										: brandSummary
+											? "This thread shows the real brand-ingestion path the tool used."
+											: "Add a brand site to expose logo, color, and font extraction before generation."}
+							</p>
+						</div>
+						<div className="flex items-center gap-2 text-xs text-muted-foreground">
+							{telemetry ? (
+								<Badge variant="outline" className="border-brand/15 text-brand-text">
+									Observed
+								</Badge>
+							) : (
+								<Badge
+									variant="secondary"
+									className="border border-brand/10 bg-brand-light/35 text-brand-text"
+								>
+									Estimated live
+								</Badge>
+							)}
+							<ChevronDown className="size-4 text-brand-text/60" />
+						</div>
+					</div>
+					<div className="mt-4 space-y-3">
+						{activitySteps.length > 0 ? (
+							activitySteps.map((step) => (
+								<div
+									key={step.key}
+									className="flex items-start gap-3 rounded-2xl bg-brand-light/12 px-3 py-3"
+								>
+									<StepIcon status={step.status} />
+									<div className="min-w-0 flex-1">
+										<div className="flex flex-wrap items-center gap-2">
+											<p className="text-sm font-medium text-foreground">{step.title}</p>
+											<Badge
+												variant="outline"
+												className="rounded-full border-brand/10 bg-white text-muted-foreground"
+											>
+												{step.status === "complete"
+													? "Done"
+													: step.status === "active"
+														? "In progress"
+														: "Queued"}
+											</Badge>
+										</div>
+										<p className="mt-1 text-xs leading-5 text-muted-foreground">
+											{step.description}
+										</p>
+										{step.detail ? (
+											<p className="mt-2 text-xs font-medium text-brand-text/80">{step.detail}</p>
+										) : null}
+									</div>
+								</div>
+							))
+						) : (
+							<div className="rounded-2xl bg-brand-light/12 px-4 py-4 text-sm text-muted-foreground">
+								No run yet. Your first build will show the brand-ingestion and HTML generation
+								stages here.
+							</div>
+						)}
+					</div>
+				</section>
+
 				{messages.length === 0 ? (
 					<div className="rounded-[28px] border border-dashed border-brand/15 bg-white/80 px-5 py-6 text-sm text-muted-foreground">
 						Your first prompt becomes the opening chat message. After the first build, use this
@@ -159,75 +237,6 @@ export function BuilderChatPanel({
 						</div>
 					</div>
 				))}
-
-				{activitySteps.length > 0 ? (
-					<details open className="rounded-[28px] border border-brand/10 bg-white p-4 shadow-sm">
-						<summary className="flex cursor-pointer list-none items-center justify-between gap-3">
-							<div>
-								<p className="text-sm font-semibold text-foreground">
-									{isRunning
-										? requestState === "updating"
-											? "Updating tool…"
-											: "Building tool…"
-										: "Latest pipeline activity"}
-								</p>
-								<p className="text-xs text-muted-foreground">
-									{telemetry?.totalMs
-										? `Completed in ${formatDuration(telemetry.totalMs)}${telemetry.attemptsSummary ? ` · ${telemetry.attemptsSummary}` : ""}`
-										: activeRun
-											? "Estimated step timing while the backend request is in flight."
-											: statusMessage.description}
-								</p>
-							</div>
-							<div className="flex items-center gap-2 text-xs text-muted-foreground">
-								{telemetry ? (
-									<Badge variant="outline" className="border-brand/15 text-brand-text">
-										Observed
-									</Badge>
-								) : (
-									<Badge
-										variant="secondary"
-										className="border border-brand/10 bg-brand-light/35 text-brand-text"
-									>
-										Estimated live
-									</Badge>
-								)}
-								<ChevronDown className="size-4 text-brand-text/60" />
-							</div>
-						</summary>
-						<div className="mt-4 space-y-3">
-							{activitySteps.map((step) => (
-								<div
-									key={step.key}
-									className="flex items-start gap-3 rounded-2xl bg-brand-light/12 px-3 py-3"
-								>
-									<StepIcon status={step.status} />
-									<div className="min-w-0 flex-1">
-										<div className="flex flex-wrap items-center gap-2">
-											<p className="text-sm font-medium text-foreground">{step.title}</p>
-											<Badge
-												variant="outline"
-												className="rounded-full border-brand/10 bg-white text-muted-foreground"
-											>
-												{step.status === "complete"
-													? "Done"
-													: step.status === "active"
-														? "In progress"
-														: "Queued"}
-											</Badge>
-										</div>
-										<p className="mt-1 text-xs leading-5 text-muted-foreground">
-											{step.description}
-										</p>
-										{step.detail ? (
-											<p className="mt-2 text-xs font-medium text-brand-text/80">{step.detail}</p>
-										) : null}
-									</div>
-								</div>
-							))}
-						</div>
-					</details>
-				) : null}
 			</div>
 
 			<div className="border-t border-brand/10 bg-white px-4 py-4 sm:px-5">
@@ -341,4 +350,89 @@ function StepIcon({ status }: { status: BuilderActivityStep["status"] }) {
 	if (status === "active")
 		return <LoaderCircle className="mt-0.5 size-4 animate-spin text-brand" />;
 	return <div className="mt-1 size-3 rounded-full bg-brand/25" />;
+}
+
+function BrandSummaryCard({ summary }: { summary: BuilderBrandSummary }) {
+	const colorEntries = Object.entries(summary.colors).slice(0, 4);
+	const fonts = summary.fonts.slice(0, 2);
+
+	return (
+		<section className="rounded-[28px] border border-brand/15 bg-white p-4 shadow-sm">
+			<div className="flex items-start justify-between gap-3">
+				<div>
+					<p className="text-sm font-semibold text-foreground">Detected brand context</p>
+					<p className="text-xs text-muted-foreground">
+						Brand ingestion is part of the build, not hidden AI filler.
+					</p>
+				</div>
+				<Badge
+					variant="secondary"
+					className="rounded-full border border-brand/10 bg-brand-light/35 text-brand-text"
+				>
+					Brand applied
+				</Badge>
+			</div>
+			<div className="mt-4 flex items-start gap-4">
+				<div className="flex size-14 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-brand/10 bg-brand-light/10">
+					{summary.logoDataUri ? (
+						<Image
+							src={summary.logoDataUri}
+							alt={`${summary.brandName ?? "Brand"} logo`}
+							width={40}
+							height={40}
+							unoptimized
+							className="max-h-10 max-w-10 object-contain"
+						/>
+					) : (
+						<span className="text-sm font-semibold text-brand-text">
+							{summary.brandName?.slice(0, 2).toUpperCase() ?? "BR"}
+						</span>
+					)}
+				</div>
+				<div className="min-w-0 flex-1 space-y-3">
+					<div>
+						<p className="text-sm font-medium text-foreground">
+							{summary.brandName ?? "Brand context loaded"}
+						</p>
+						<p className="truncate text-xs text-muted-foreground">
+							{summary.siteUrl ?? "No source URL saved"}
+						</p>
+					</div>
+					<div className="flex flex-wrap gap-2">
+						{colorEntries.length ? (
+							colorEntries.map(([name, value]) => (
+								<div
+									key={name}
+									className="inline-flex items-center gap-2 rounded-full border border-brand/10 bg-brand-light/12 px-2.5 py-1 text-xs text-brand-text"
+								>
+									<span
+										className="size-3 rounded-full border border-black/10"
+										style={{ backgroundColor: value }}
+									/>
+									<span>{name}</span>
+								</div>
+							))
+						) : (
+							<span className="text-xs text-muted-foreground">No color tokens captured.</span>
+						)}
+					</div>
+					<div className="flex flex-wrap gap-2">
+						{fonts.length ? (
+							fonts.map((font) => (
+								<Badge
+									key={font}
+									variant="outline"
+									className="rounded-full border-brand/10 text-brand-text"
+								>
+									{font}
+								</Badge>
+							))
+						) : (
+							<span className="text-xs text-muted-foreground">No font families captured.</span>
+						)}
+					</div>
+				</div>
+			</div>
+		</section>
+	);
 }

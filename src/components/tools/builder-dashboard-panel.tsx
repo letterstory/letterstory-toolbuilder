@@ -12,9 +12,10 @@ interface BuilderDashboardPanelProps {
 	recentTools: ToolSummary[];
 	embedSnippet: string;
 	fullEmbedSnippet: string;
-	copiedTarget: "iframe" | "full" | null;
+	hostedUrl: string;
+	copiedTarget: "iframe" | "full" | "url" | null;
 	requestState: RequestState;
-	onCopy: (target: "iframe" | "full", text: string) => void;
+	onCopy: (target: "iframe" | "full" | "url", text: string) => void;
 	onRollback: (version: number) => void;
 	onReopenRecent: (tool: ToolSummary) => void;
 }
@@ -25,6 +26,7 @@ export function BuilderDashboardPanel({
 	recentTools,
 	embedSnippet,
 	fullEmbedSnippet,
+	hostedUrl,
 	copiedTarget,
 	requestState,
 	onCopy,
@@ -37,48 +39,36 @@ export function BuilderDashboardPanel({
 				<p className="text-sm font-semibold text-foreground">Dashboard</p>
 				<p className="mt-1 text-sm text-muted-foreground">
 					{activeTool
-						? "Embed snippets, brand tokens, version history, and warnings live here so the preview canvas can stay uncluttered."
-						: "Generate or reopen a tool to inspect embed code, brand details, and version history."}
+						? "Brand proof, hosted iframe delivery, version history, and warnings live here so the preview canvas can stay uncluttered."
+						: "Generate or reopen a tool to inspect hosted embed code, brand details, and version history."}
 				</p>
 			</div>
 
 			{activeTool ? (
 				<>
-					<section className="rounded-[28px] bg-white p-5 shadow-sm">
-						<div className="flex flex-wrap items-center gap-2">
-							<Badge variant="secondary">{activeTool.model}</Badge>
-							<Badge variant="secondary">v{activeTool.version}</Badge>
-							{activeTool.brandSnapshot?.brandName ? (
-								<Badge variant="secondary">{activeTool.brandSnapshot.brandName}</Badge>
-							) : null}
-							{activeTool.brandFidelity ? (
-								<Badge variant={brandFidelityBadgeVariant(activeTool.brandFidelity.verdict)}>
-									Brand fidelity: {activeTool.brandFidelity.verdict}
-								</Badge>
-							) : null}
-						</div>
-						{activeTool.copy ? (
-							<div className="mt-4 rounded-3xl bg-brand-light/12 p-4">
-								<p className="text-sm font-semibold text-foreground">{activeTool.copy.headline}</p>
-								<p className="mt-2 text-sm leading-6 text-brand-text">
-									{activeTool.copy.supportingCopy}
-								</p>
-							</div>
-						) : null}
-						{activeTool.brandFidelity?.notes ? (
-							<p className="mt-3 text-xs text-muted-foreground">{activeTool.brandFidelity.notes}</p>
-						) : null}
-					</section>
-
-					<section className="rounded-[28px] bg-white p-5 shadow-sm">
+					<section id="builder-embed-section" className="rounded-[28px] bg-white p-5 shadow-sm">
 						<div className="flex flex-wrap items-center justify-between gap-3">
 							<div>
-								<p className="text-sm font-semibold text-foreground">Embed snippet</p>
+								<p className="text-sm font-semibold text-foreground">Embed & hosted iframe</p>
 								<p className="text-sm text-muted-foreground">
-									Copy the iframe snippet alone or include supporting copy above it.
+									Toolbuilder hosts the generated tool for you at a stable iframe URL. Copy the
+									hosted link or the full embed snippet below.
 								</p>
 							</div>
 							<div className="flex flex-wrap items-center gap-2">
+								<Button
+									type="button"
+									variant="outline"
+									size="sm"
+									onClick={() => onCopy("url", hostedUrl)}
+								>
+									{copiedTarget === "url" ? (
+										<Check className="size-4" />
+									) : (
+										<Copy className="size-4" />
+									)}
+									{copiedTarget === "url" ? "Copied" : "Copy hosted URL"}
+								</Button>
 								<Button
 									type="button"
 									variant="outline"
@@ -109,9 +99,41 @@ export function BuilderDashboardPanel({
 								) : null}
 							</div>
 						</div>
+						<div className="mt-4 rounded-2xl border border-brand/10 bg-brand-light/12 p-4">
+							<p className="text-xs font-medium uppercase tracking-[0.14em] text-brand-text/60">
+								Hosted iframe URL
+							</p>
+							<p className="mt-2 break-all text-sm text-brand-text">{hostedUrl}</p>
+						</div>
 						<pre className="mt-4 min-w-0 overflow-x-auto rounded-[24px] border border-brand/10 bg-brand-light/12 p-4 text-xs [overflow-wrap:anywhere] whitespace-pre-wrap">
 							{fullEmbedSnippet || embedSnippet}
 						</pre>
+					</section>
+
+					<section className="rounded-[28px] bg-white p-5 shadow-sm">
+						<div className="flex flex-wrap items-center gap-2">
+							<Badge variant="secondary">{activeTool.model}</Badge>
+							<Badge variant="secondary">v{activeTool.version}</Badge>
+							{activeTool.brandSnapshot?.brandName ? (
+								<Badge variant="secondary">{activeTool.brandSnapshot.brandName}</Badge>
+							) : null}
+							{activeTool.brandFidelity ? (
+								<Badge variant={brandFidelityBadgeVariant(activeTool.brandFidelity.verdict)}>
+									Brand fidelity: {activeTool.brandFidelity.verdict}
+								</Badge>
+							) : null}
+						</div>
+						{activeTool.copy ? (
+							<div className="mt-4 rounded-3xl bg-brand-light/12 p-4">
+								<p className="text-sm font-semibold text-foreground">{activeTool.copy.headline}</p>
+								<p className="mt-2 text-sm leading-6 text-brand-text">
+									{activeTool.copy.supportingCopy}
+								</p>
+							</div>
+						) : null}
+						{activeTool.brandFidelity?.notes ? (
+							<p className="mt-3 text-xs text-muted-foreground">{activeTool.brandFidelity.notes}</p>
+						) : null}
 					</section>
 
 					<section className="grid gap-4 xl:grid-cols-2">

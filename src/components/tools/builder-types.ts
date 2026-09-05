@@ -18,6 +18,14 @@ export interface BuilderConversationMessage {
 	meta?: string;
 }
 
+export interface BuilderBrandSummary {
+	brandName: string | null;
+	siteUrl: string | null;
+	logoDataUri: string | null;
+	colors: Record<string, string>;
+	fonts: string[];
+}
+
 // The recent-tools list only ever needs metadata to render cards and link to
 // /t/[id] — the API route omits the (potentially large) html body and full
 // version history (which itself carries full past HTML bodies).

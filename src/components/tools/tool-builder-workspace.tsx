@@ -18,6 +18,7 @@ import { BuilderDashboardPanel } from "@/components/tools/builder-dashboard-pane
 import { BuilderPreviewCanvas } from "@/components/tools/builder-preview-canvas";
 import { BuilderTopbar } from "@/components/tools/builder-topbar";
 import type {
+	BuilderBrandSummary,
 	BuilderConversationMessage,
 	BuilderGenerationRun,
 	BuilderView,
@@ -45,7 +46,7 @@ export function ToolBuilderWorkspace() {
 	const [requestState, setRequestState] = useState<RequestState>("idle");
 	const [statusMessage, setStatusMessage] = useState<StatusMessage>(INITIAL_STATUS);
 	const [activeView, setActiveView] = useState<BuilderView>("preview");
-	const [copiedTarget, setCopiedTarget] = useState<"iframe" | "full" | null>(null);
+	const [copiedTarget, setCopiedTarget] = useState<"iframe" | "full" | "url" | null>(null);
 	const [activeTool, setActiveTool] = useState<ToolSummary | null>(null);
 	const [toolHistory, setToolHistory] = useState<ToolHistoryEntry[]>([]);
 	const [recentTools, setRecentTools] = useState<ToolSummary[]>([]);
@@ -71,6 +72,19 @@ export function ToolBuilderWorkspace() {
 			setRecentLoading(false);
 		}
 	}, []);
+
+	function handleOpenEmbed() {
+		if (!activeTool) return;
+		setActiveView("dashboard");
+		if (typeof window !== "undefined") {
+			window.requestAnimationFrame(() => {
+				document.getElementById("builder-embed-section")?.scrollIntoView({
+					behavior: "smooth",
+					block: "start",
+				});
+			});
+		}
+	}
 
 	const loadToolHistory = useCallback(async (id: string) => {
 		try {
@@ -124,6 +138,16 @@ export function ToolBuilderWorkspace() {
 				].join("\n")
 			: "";
 	const activeBrandName = activeTool?.brandSnapshot?.brandName ?? null;
+	const brandSummary: BuilderBrandSummary | null = activeTool?.brandSnapshot
+		? {
+				brandName: activeTool.brandSnapshot.brandName ?? null,
+				siteUrl: activeTool.siteUrl ?? null,
+				logoDataUri: activeTool.brandSnapshot.logoDataUri,
+				colors: activeTool.brandSnapshot.colors,
+				fonts: activeTool.brandSnapshot.fonts,
+			}
+		: null;
+	const hostedUrl = activeTool ? `${origin}/t/${activeTool.id}` : "";
 
 	function toSummary(tool: GeneratedToolRecord): ToolSummary {
 		return {
@@ -355,7 +379,7 @@ export function ToolBuilderWorkspace() {
 		}
 	}
 
-	async function handleCopyEmbed(target: "iframe" | "full", text: string) {
+	async function handleCopyEmbed(target: "iframe" | "full" | "url", text: string) {
 		try {
 			await navigator.clipboard.writeText(text);
 			setCopiedTarget(target);
@@ -387,6 +411,7 @@ export function ToolBuilderWorkspace() {
 					onFocusComposer={() => composerRef.current?.focus()}
 					onRefreshRecent={() => void loadRecentTools()}
 					onReopenRecent={handleReopenRecent}
+					onOpenEmbed={handleOpenEmbed}
 				/>
 			</div>
 			<div className="grid lg:grid-cols-[minmax(320px,28rem)_minmax(0,1fr)]">
@@ -398,6 +423,7 @@ export function ToolBuilderWorkspace() {
 					requestState={requestState}
 					statusMessage={statusMessage}
 					activeBrandName={activeBrandName}
+					brandSummary={brandSummary}
 					activitySteps={observedSteps}
 					activeRun={activeRun}
 					telemetry={telemetry}
@@ -425,6 +451,7 @@ export function ToolBuilderWorkspace() {
 							recentTools={recentTools}
 							embedSnippet={embedSnippet}
 							fullEmbedSnippet={fullEmbedSnippet}
+							hostedUrl={hostedUrl}
 							copiedTarget={copiedTarget}
 							requestState={requestState}
 							onCopy={(target, text) => void handleCopyEmbed(target, text)}
