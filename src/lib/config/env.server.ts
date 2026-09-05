@@ -11,6 +11,9 @@ export const envServer = {
 	get CONTEXT_DEV_BASE_URL() {
 		return process.env.CONTEXT_DEV_BASE_URL?.trim() || "https://api.context.dev/v1";
 	},
+	get TOOLBUILDER_BASE_URL() {
+		return process.env.TOOLBUILDER_BASE_URL?.trim() ?? "";
+	},
 	get PORTER_API_TOKEN() {
 		return process.env.PORTER_API_TOKEN?.trim() ?? "";
 	},

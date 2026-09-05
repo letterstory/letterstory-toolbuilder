@@ -26,6 +26,7 @@ This repository starts with the shared platform pieces that Phase 1 needs first:
 - `src/lib/generation/` — tool-generation orchestration contract stubs
 - `src/lib/deploy/porter/` — Porter deployment stubs with config gating
 - `src/lib/platform/` — shared scaffold status helpers surfaced in the app
+- [`COMMANDS.md`](./COMMANDS.md) — cross-surface REST + MCP + CLI command index
 - `scripts/test-brand-ingestion.ts` — live Context.dev probe for a small set of representative sites
 - `tests/unit/` — focused unit tests for the platform contracts
 

@@ -88,4 +88,58 @@ describe("fileToolStore", () => {
 			history: [expect.objectContaining({ version: 1, prompt: "v1" })],
 		});
 	});
+
+	it("rolls back to a prior saved version and preserves newer history", async () => {
+		mkdirMock.mockRejectedValue(Object.assign(new Error("read only file system"), { code: "EROFS" }));
+
+		const { fileToolStore } = await import("../../src/lib/generation/store.file");
+		await fileToolStore.saveGeneratedTool({
+			projectName: "Calc",
+			prompt: "v1",
+			siteUrl: null,
+			brandSnapshot: null,
+			html: "<!doctype html><html><body>v1</body></html>",
+			copy: { headline: "V1", supportingCopy: "First version." },
+			brandFidelity: null,
+			model: "claude-sonnet-4-6",
+			warnings: [],
+		});
+		await fileToolStore.updateGeneratedTool("tool-123", {
+			projectName: "Calc",
+			prompt: "v2",
+			siteUrl: null,
+			brandSnapshot: null,
+			html: "<!doctype html><html><body>v2</body></html>",
+			copy: { headline: "V2", supportingCopy: "Second version." },
+			brandFidelity: null,
+			model: "claude-sonnet-4-6",
+			warnings: ["second"],
+		});
+		await fileToolStore.updateGeneratedTool("tool-123", {
+			projectName: "Calc",
+			prompt: "v3",
+			siteUrl: null,
+			brandSnapshot: null,
+			html: "<!doctype html><html><body>v3</body></html>",
+			copy: { headline: "V3", supportingCopy: "Third version." },
+			brandFidelity: null,
+			model: "claude-sonnet-4-6",
+			warnings: ["third"],
+		});
+
+		const rolledBack = await fileToolStore.rollbackGeneratedTool("tool-123", 1);
+
+		expect(rolledBack).toMatchObject({
+			id: "tool-123",
+			version: 4,
+			prompt: "v1",
+			html: "<!doctype html><html><body>v1</body></html>",
+			copy: { headline: "V1", supportingCopy: "First version." },
+			history: [
+				expect.objectContaining({ version: 3, prompt: "v3" }),
+				expect.objectContaining({ version: 2, prompt: "v2" }),
+				expect.objectContaining({ version: 1, prompt: "v1" }),
+			],
+		});
+	});
 });
