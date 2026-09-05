@@ -25,6 +25,7 @@ interface CliOptions {
 	baseUrl: string;
 	timeoutMs: number;
 	jsonOutPath: string | null;
+	screenshotDir: string | null;
 }
 
 interface ServerTimingEntry {
@@ -59,6 +60,7 @@ interface DomainTestResult {
 	errorMessage: string | null;
 	generationResponsePreview: string;
 	iframeResponsePreview: string;
+	screenshotPath: string | null;
 	attempts: AttemptRecord[];
 }
 
@@ -121,6 +123,7 @@ function parseArgs(argv: string[]): CliOptions {
 	let baseUrl = DEFAULT_BASE_URL;
 	let timeoutMs = DEFAULT_TIMEOUT_MS;
 	let jsonOutPath: string | null = null;
+	let screenshotDir: string | null = null;
 
 	for (const arg of argv) {
 		if (arg.startsWith("--base-url=")) {
@@ -133,6 +136,10 @@ function parseArgs(argv: string[]): CliOptions {
 		}
 		if (arg.startsWith("--json-out=")) {
 			jsonOutPath = arg.slice("--json-out=".length).trim() || null;
+			continue;
+		}
+		if (arg.startsWith("--screenshot-dir=")) {
+			screenshotDir = arg.slice("--screenshot-dir=".length).trim() || null;
 		}
 	}
 
@@ -144,7 +151,12 @@ function parseArgs(argv: string[]): CliOptions {
 		baseUrl: baseUrl.replace(/\/$/, ""),
 		timeoutMs,
 		jsonOutPath,
+		screenshotDir,
 	};
+}
+
+function toDomainSlug(domain: string): string {
+	return domain.replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase();
 }
 
 function truncate(value: string, limit = RESPONSE_PREVIEW_LIMIT): string {
@@ -244,7 +256,33 @@ async function ensureParentDir(filePath: string) {
 	await mkdir(parent, { recursive: true });
 }
 
-async function runDomainCase(baseUrl: string, timeoutMs: number, domainCase: DomainCase): Promise<DomainTestResult> {
+async function captureIframeScreenshot(iframeUrl: string, outputPath: string): Promise<void> {
+	const { chromium } = await import("playwright");
+	await ensureParentDir(outputPath);
+
+	const browser = await chromium.launch({ headless: true });
+	try {
+		const page = await browser.newPage({
+			viewport: { width: 1440, height: 1600 },
+			deviceScaleFactor: 1,
+		});
+		await page.goto(iframeUrl, { waitUntil: "networkidle", timeout: 60_000 });
+		await page.evaluate(async () => {
+			await document.fonts?.ready;
+			await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+		});
+		await page.screenshot({ path: outputPath, fullPage: true });
+	} finally {
+		await browser.close();
+	}
+}
+
+async function runDomainCase(
+	baseUrl: string,
+	timeoutMs: number,
+	domainCase: DomainCase,
+	screenshotDir: string | null
+): Promise<DomainTestResult> {
 	const generateUrl = `${baseUrl}/api/tools/generate`;
 	const startedAt = performance.now();
 	const attempts: AttemptRecord[] = [];
@@ -294,6 +332,7 @@ async function runDomainCase(baseUrl: string, timeoutMs: number, domainCase: Dom
 		let resizeScriptFound = false;
 		let nonTrivialHtml = false;
 		let iframeResponsePreview = "";
+		let screenshotPath: string | null = null;
 		let errorMessage =
 			generationBody && generationBody.status !== "success" ? generationBody.message ?? "Unknown generation error." : null;
 		const brandNote =
@@ -334,6 +373,11 @@ async function runDomainCase(baseUrl: string, timeoutMs: number, domainCase: Dom
 				errorMessage = "Resize reporter script markers were missing from /t/[id] HTML.";
 			} else if (!nonTrivialHtml) {
 				errorMessage = "Embed HTML looked too small or malformed.";
+			} else if (screenshotDir) {
+				const relativeScreenshotPath = path.join(screenshotDir, `${toDomainSlug(domainCase.domain)}.png`);
+				const absoluteScreenshotPath = path.resolve(relativeScreenshotPath);
+				await captureIframeScreenshot(iframeUrl, absoluteScreenshotPath);
+				screenshotPath = relativeScreenshotPath.split(path.sep).join("/");
 			}
 		} else if (!errorMessage && !generateResponse.ok) {
 			errorMessage = `Generation returned ${generateResponse.status}.`;
@@ -380,6 +424,7 @@ async function runDomainCase(baseUrl: string, timeoutMs: number, domainCase: Dom
 			errorMessage,
 			generationResponsePreview: truncate(generationRawBody),
 			iframeResponsePreview,
+			screenshotPath,
 			attempts,
 		};
 	} catch (error) {
@@ -408,21 +453,23 @@ async function runDomainCase(baseUrl: string, timeoutMs: number, domainCase: Dom
 			errorMessage: message,
 			generationResponsePreview: "",
 			iframeResponsePreview: "",
+			screenshotPath: null,
 			attempts,
 		};
 	}
 }
 
 async function main() {
-	const { baseUrl, timeoutMs, jsonOutPath } = parseArgs(process.argv.slice(2));
+	const { baseUrl, timeoutMs, jsonOutPath, screenshotDir } = parseArgs(process.argv.slice(2));
 	assertEmbedContractInvariant(baseUrl);
 
 	console.log(`Running ${DOMAIN_CASES.length} sequential domain checks against ${baseUrl}`);
 	console.log(`timeoutMs=${timeoutMs}`);
+	if (screenshotDir) console.log(`screenshotDir=${screenshotDir}`);
 
 	const results: DomainTestResult[] = [];
 	for (const domainCase of DOMAIN_CASES) {
-		results.push(await runDomainCase(baseUrl, timeoutMs, domainCase));
+		results.push(await runDomainCase(baseUrl, timeoutMs, domainCase, screenshotDir));
 	}
 
 	const passed = results.filter((result) => result.statusLabel === "pass").length;
