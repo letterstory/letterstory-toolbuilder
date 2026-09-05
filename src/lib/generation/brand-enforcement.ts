@@ -614,7 +614,7 @@ async function resolveBrandFontPlan(
 function buildCtaOrderEnforcementStyle(): string {
 	return [
 		'[data-letterstory-brand-cta="true"], [data-role="brand-cta"] {',
-		"  display: block;",
+		"  display: none;",
 		"  margin-top: 1.5rem;",
 		"}",
 	].join("\n");
@@ -624,17 +624,28 @@ function buildCtaOrderEnforcementScript(): string {
 	return [
 		"(() => {",
 		"  const pick = (selectors) => selectors.map((selector) => document.querySelector(selector)).find(Boolean);",
-		"  const tool = pick(['[data-letterstory-tool=\"true\"]', '[data-role=\"tool\"]']);",
 		"  const result = pick(['[data-letterstory-result=\"true\"]', '[data-role=\"tool-result\"]']);",
 		"  const cta = pick(['[data-letterstory-brand-cta=\"true\"]', '[data-role=\"brand-cta\"]']);",
 		"  if (!(result instanceof HTMLElement) || !(cta instanceof HTMLElement)) return;",
-		"  const anchor = tool instanceof HTMLElement ? tool : result;",
+		"  const anchor = result;",
 		"  const desiredParent = anchor.parentElement ?? result.parentElement;",
 		"  if (!desiredParent) return;",
-		"  const relation = anchor.compareDocumentPosition(cta);",
-		"  const isAlreadyAfter = Boolean(relation & Node.DOCUMENT_POSITION_FOLLOWING) && cta.parentElement === desiredParent;",
-		"  if (!isAlreadyAfter) desiredParent.insertBefore(cta, anchor.nextSibling);",
-		"  cta.setAttribute('data-letterstory-cta-ordered', 'true');",
+		"  const sync = () => {",
+		"    const relation = anchor.compareDocumentPosition(cta);",
+		"    const isAlreadyAfter = Boolean(relation & Node.DOCUMENT_POSITION_FOLLOWING) && cta.parentElement === desiredParent;",
+		"    if (!isAlreadyAfter) desiredParent.insertBefore(cta, anchor.nextSibling);",
+		"    const computed = window.getComputedStyle(result);",
+		"    const resultVisible = !result.hidden && computed.display !== 'none' && computed.visibility !== 'hidden';",
+		"    cta.style.display = resultVisible ? 'block' : 'none';",
+		"    cta.setAttribute('data-letterstory-cta-ordered', resultVisible ? 'visible' : 'waiting');",
+		"  };",
+		"  sync();",
+		"  new MutationObserver(sync).observe(result, {",
+		"    attributes: true,",
+		"    childList: true,",
+		"    subtree: true,",
+		"    attributeFilter: ['class', 'style', 'hidden', 'aria-hidden'],",
+		"  });",
 		"})();",
 	].join("\n");
 }

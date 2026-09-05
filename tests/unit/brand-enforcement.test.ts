@@ -206,9 +206,11 @@ describe("enforceBrandPresentation", () => {
 		const ctaScript = extractManagedScript(finalHtml, "data-letterstory-cta-order");
 
 		expect(ctaStyle).toContain('[data-letterstory-brand-cta="true"], [data-role="brand-cta"]');
-		expect(ctaScript).toContain('data-letterstory-tool="true"');
+		expect(ctaStyle).toContain("display: none;");
 		expect(ctaScript).toContain('data-letterstory-result="true"');
 		expect(ctaScript).toContain('data-letterstory-brand-cta="true"');
+		expect(ctaScript).toContain("new MutationObserver(sync).observe(result");
+		expect(ctaScript).toContain("cta.style.display = resultVisible ? 'block' : 'none';");
 	});
 
 	it("treats Robinhood's Martina Plantijn heading as serif when self-hosting is unavailable", async () => {
