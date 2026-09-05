@@ -16,6 +16,7 @@
 //     separate follow-up once the generation quality/contract is proven out.
 
 import { envServer } from "@/lib/config/env.server";
+import { requestAnthropicText } from "@/lib/anthropic/messages";
 import { isBrandIngestionConfigured, pullBrandProfile, type BrandProfile } from "@/lib/brand";
 import { enforceBrandPresentation } from "@/lib/generation/brand-enforcement";
 import {
@@ -766,37 +767,14 @@ async function requestAdvisoryText(opts: {
 	userContent: string;
 	maxTokens: number;
 }): Promise<string | null> {
-	const apiKey = envServer.ANTHROPIC_API_KEY;
-	if (!apiKey) return null;
-	const model = envServer.ANTHROPIC_MODEL || DEFAULT_ANTHROPIC_MODEL;
-
 	try {
-		const response = await fetch("https://api.anthropic.com/v1/messages", {
-			method: "POST",
-			headers: {
-				"x-api-key": apiKey,
-				"anthropic-version": "2023-06-01",
-				"content-type": "application/json",
-			},
-			body: JSON.stringify({
-				model,
-				max_tokens: opts.maxTokens,
-				system: opts.system,
-				messages: [{ role: "user", content: opts.userContent }],
-			}),
-			signal: AbortSignal.timeout(ADVISORY_TIMEOUT_MS),
+		const response = await requestAnthropicText({
+			system: opts.system,
+			userContent: opts.userContent,
+			maxTokens: opts.maxTokens,
+			timeoutMs: ADVISORY_TIMEOUT_MS,
 		});
-
-		const body = (await response.json().catch(() => ({}))) as AnthropicMessagesResponse;
-		if (!response.ok) return null;
-
-		const text = body.content
-			?.filter((block) => block.type === "text")
-			.map((block) => block.text ?? "")
-			.join("\n")
-			.trim();
-
-		return text || null;
+		return response.text;
 	} catch {
 		return null;
 	}

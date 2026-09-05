@@ -5,6 +5,8 @@ const generateToolRateLimitedMock = vi.hoisted(() => vi.fn());
 const getGeneratedToolSurfaceMock = vi.hoisted(() => vi.fn());
 const listGeneratedToolsSurfaceMock = vi.hoisted(() => vi.fn());
 const rollbackGeneratedToolSurfaceMock = vi.hoisted(() => vi.fn());
+const suggestToolsSurfaceMock = vi.hoisted(() => vi.fn());
+const suggestToolsRateLimitedMock = vi.hoisted(() => vi.fn());
 const getGeneratedToolMock = vi.hoisted(() => vi.fn());
 const checkRateLimitMock = vi.hoisted(() => vi.fn());
 const getClientIpMock = vi.hoisted(() => vi.fn());
@@ -20,6 +22,8 @@ vi.mock("@/lib/surfaces/tools", () => ({
 	getGeneratedToolSurface: getGeneratedToolSurfaceMock,
 	listGeneratedToolsSurface: listGeneratedToolsSurfaceMock,
 	rollbackGeneratedToolSurface: rollbackGeneratedToolSurfaceMock,
+	suggestToolsSurface: suggestToolsSurfaceMock,
+	suggestToolsRateLimited: suggestToolsRateLimitedMock,
 }));
 
 vi.mock("@/lib/generation/store", () => ({
@@ -27,6 +31,7 @@ vi.mock("@/lib/generation/store", () => ({
 }));
 
 import { POST as generatePost } from "../../src/app/api/tools/generate/route";
+import { POST as suggestPost } from "../../src/app/api/tools/suggest/route";
 import { GET as toolsListGet } from "../../src/app/api/tools/route";
 import { GET as toolDetailGet } from "../../src/app/api/tools/[id]/route";
 import { POST as toolRollbackPost } from "../../src/app/api/tools/[id]/rollback/route";
@@ -40,6 +45,8 @@ beforeEach(() => {
 	getGeneratedToolSurfaceMock.mockReset();
 	listGeneratedToolsSurfaceMock.mockReset();
 	rollbackGeneratedToolSurfaceMock.mockReset();
+	suggestToolsSurfaceMock.mockReset();
+	suggestToolsRateLimitedMock.mockReset();
 	getGeneratedToolMock.mockReset();
 
 	getClientIpMock.mockReturnValue("203.0.113.10");
@@ -142,6 +149,111 @@ describe("POST /api/tools/generate", () => {
 		await expect(response.json()).resolves.toMatchObject({
 			status: "not_configured",
 			message: "Set ANTHROPIC_API_KEY before generating tools.",
+		});
+	});
+
+	describe("POST /api/tools/suggest", () => {
+		it("returns 400 for an invalid suggest payload", async () => {
+			suggestToolsSurfaceMock.mockResolvedValueOnce({
+				statusCode: 400,
+				body: { status: "error", requestedUrl: "", message: "Provide a siteUrl string." },
+			});
+
+			const response = await suggestPost(
+				new Request("http://localhost/api/tools/suggest", {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({ siteUrl: "" }),
+				})
+			);
+
+			expect(response.status).toBe(400);
+			await expect(response.json()).resolves.toMatchObject({
+				status: "error",
+				message: "Provide a siteUrl string.",
+			});
+		});
+
+		it("proxies tool suggestion responses", async () => {
+			suggestToolsSurfaceMock.mockResolvedValueOnce({
+				statusCode: 200,
+				body: {
+					status: "success",
+					requestedUrl: "https://stripe.com",
+					brand: {
+						siteUrl: "https://stripe.com",
+						brandName: "Stripe",
+						industry: "Fintech",
+						businessSummary: "Stripe helps businesses accept payments.",
+					},
+					suggestions: [
+						{
+							title: "Payment Fee Calculator",
+							description: "Estimate payment processing fees.",
+							prompt: "Build a payment fee calculator.",
+						},
+						{
+							title: "Subscription Revenue Forecaster",
+							description: "Project recurring revenue.",
+							prompt: "Build a subscription revenue forecaster.",
+						},
+						{
+							title: "Invoice Terms Cost Estimator",
+							description: "Compare invoice cash-flow scenarios.",
+							prompt: "Build an invoice cost estimator.",
+						},
+					],
+					model: "claude-sonnet-4-6",
+				},
+			});
+
+			const response = await suggestPost(
+				new Request("http://localhost/api/tools/suggest", {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({ siteUrl: "https://stripe.com" }),
+				})
+			);
+
+			expect(suggestToolsSurfaceMock).toHaveBeenCalledWith({ siteUrl: "https://stripe.com" });
+			expect(response.status).toBe(200);
+			const body = await response.json();
+			expect(body).toMatchObject({
+				status: "success",
+				brand: { industry: "Fintech" },
+			});
+			expect(body.suggestions).toEqual(
+				expect.arrayContaining([expect.objectContaining({ title: "Payment Fee Calculator" })])
+			);
+		});
+
+		it("returns 429 for a rate-limited suggestion caller", async () => {
+			checkRateLimitMock.mockResolvedValueOnce({
+				allowed: false,
+				limit: 15,
+				remaining: 0,
+				retryAfterSeconds: 24,
+			});
+			suggestToolsRateLimitedMock.mockReturnValueOnce({
+				statusCode: 429,
+				headers: { "Retry-After": "24" },
+				body: {
+					status: "error",
+					requestedUrl: "",
+					message: "Too many suggestion requests — please wait a bit and try again.",
+				},
+			});
+
+			const response = await suggestPost(
+				new Request("http://localhost/api/tools/suggest", {
+					method: "POST",
+					body: JSON.stringify({ siteUrl: "https://stripe.com" }),
+				})
+			);
+
+			expect(response.status).toBe(429);
+			expect(response.headers.get("Retry-After")).toBe("24");
+			expect(suggestToolsSurfaceMock).not.toHaveBeenCalled();
 		});
 	});
 

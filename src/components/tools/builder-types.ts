@@ -26,6 +26,18 @@ export interface BuilderBrandSummary {
 	fonts: string[];
 }
 
+export interface BuilderToolSuggestion {
+	title: string;
+	description: string;
+	prompt: string;
+}
+
+export interface BuilderSuggestionBrandContext {
+	brandName: string | null;
+	industry: string;
+	businessSummary: string;
+}
+
 // The recent-tools list only ever needs metadata to render cards and link to
 // /t/[id] — the API route omits the (potentially large) html body and full
 // version history (which itself carries full past HTML bodies).

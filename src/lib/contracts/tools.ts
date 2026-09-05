@@ -101,6 +101,36 @@ export const generateToolInputSchema = z.object({
 	toolId: z.string().optional(),
 });
 
+export const suggestToolsInputSchema = z.object({
+	siteUrl: z.string(),
+});
+
+export const toolSuggestionSchema = z.object({
+	title: z.string(),
+	description: z.string(),
+	prompt: z.string(),
+});
+
+export const suggestToolsOutputSchema = z.union([
+	z.object({
+		status: z.literal("success"),
+		requestedUrl: z.string(),
+		brand: z.object({
+			siteUrl: z.string(),
+			brandName: z.string().nullable(),
+			industry: z.string(),
+			businessSummary: z.string(),
+		}),
+		suggestions: z.array(toolSuggestionSchema).min(3).max(5),
+		model: z.string(),
+	}),
+	z.object({
+		status: z.enum(["not_configured", "error"]),
+		requestedUrl: z.string(),
+		message: z.string(),
+	}),
+]);
+
 export const generateToolOutputSchema = z.union([
 	z.object({
 		status: z.literal("success"),

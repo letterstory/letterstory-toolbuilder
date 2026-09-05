@@ -18,6 +18,12 @@ export const TOOLS_GENERATE_RATE_LIMIT: RateLimitRule = {
 	windowSeconds: 600,
 };
 
+export const TOOLS_SUGGEST_RATE_LIMIT: RateLimitRule = {
+	bucket: "tools.suggest",
+	max: 15,
+	windowSeconds: 600,
+};
+
 export const MCP_RATE_LIMIT_RULES = {
 	ingest_brand_context: BRAND_INGEST_RATE_LIMIT,
 	validate_brand_fidelity: BRAND_VALIDATE_RATE_LIMIT,

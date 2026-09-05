@@ -13,6 +13,8 @@ import type {
 	BuilderBrandSummary,
 	BuilderConversationMessage,
 	BuilderGenerationRun,
+	BuilderSuggestionBrandContext,
+	BuilderToolSuggestion,
 	GenerationTelemetry,
 	RequestState,
 	StatusMessage,
@@ -32,6 +34,10 @@ interface BuilderChatPanelProps {
 	statusMessage: StatusMessage;
 	activeBrandName: string | null;
 	brandSummary: BuilderBrandSummary | null;
+	suggestionBrandContext: BuilderSuggestionBrandContext | null;
+	suggestions: BuilderToolSuggestion[];
+	suggestionsLoading: boolean;
+	suggestionsError: string | null;
 	activitySteps: BuilderActivityStep[];
 	activeRun: BuilderGenerationRun | null;
 	telemetry: GenerationTelemetry | null;
@@ -40,6 +46,8 @@ interface BuilderChatPanelProps {
 	onNormalizeSiteUrl: () => void;
 	onPromptChange: (value: string) => void;
 	onSubmit: () => void;
+	onRequestSuggestions: () => void;
+	onSelectSuggestion: (suggestion: BuilderToolSuggestion) => void;
 	composerRef: RefObject<HTMLTextAreaElement | null>;
 }
 
@@ -52,6 +60,10 @@ export function BuilderChatPanel({
 	statusMessage,
 	activeBrandName,
 	brandSummary,
+	suggestionBrandContext,
+	suggestions,
+	suggestionsLoading,
+	suggestionsError,
 	activitySteps,
 	activeRun,
 	telemetry,
@@ -60,9 +72,12 @@ export function BuilderChatPanel({
 	onNormalizeSiteUrl,
 	onPromptChange,
 	onSubmit,
+	onRequestSuggestions,
+	onSelectSuggestion,
 	composerRef,
 }: BuilderChatPanelProps) {
 	const isRunning = requestState !== "idle";
+	const showSuggestionPanel = Boolean(siteUrl.trim()) && !prompt.trim() && messages.length === 0;
 	const composerPlaceholder = useMemo(() => {
 		if (isRunning) return "Generation in progress…";
 		if (messages.length > 0) return "Describe the change you'd like to make to this tool…";
@@ -203,6 +218,77 @@ export function BuilderChatPanel({
 						Your first prompt becomes the opening chat message. After the first build, use this
 						thread to request revisions and the existing tool will update in place.
 					</div>
+				) : null}
+
+				{showSuggestionPanel ? (
+					<section className="rounded-[28px] border border-brand/10 bg-white p-4 shadow-sm">
+						<div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+							<div className="space-y-1">
+								<p className="text-sm font-semibold text-foreground">
+									Suggest a tool for this brand
+								</p>
+								<p className="text-xs text-muted-foreground">
+									Use the brand site to infer what utility tool would actually help this business.
+								</p>
+								{suggestionBrandContext ? (
+									<p className="text-xs text-brand-text/70">
+										{suggestionBrandContext.brandName ?? "This brand"} appears to be in{" "}
+										<span className="font-medium text-foreground">
+											{suggestionBrandContext.industry}
+										</span>
+										. {suggestionBrandContext.businessSummary}
+									</p>
+								) : null}
+							</div>
+							<Button
+								type="button"
+								variant="outline"
+								size="sm"
+								onClick={onRequestSuggestions}
+								disabled={suggestionsLoading}
+								className="shrink-0"
+							>
+								{suggestionsLoading ? (
+									<LoaderCircle className="size-4 animate-spin" />
+								) : null}
+								{suggestions.length ? "Refresh suggestions" : "Suggest a tool for this brand"}
+							</Button>
+						</div>
+						{suggestionsError ? (
+							<div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-900">
+								{suggestionsError}
+							</div>
+						) : null}
+						{suggestions.length ? (
+							<div className="mt-4 grid gap-3">
+								{suggestions.map((suggestion) => (
+									<button
+										key={suggestion.title}
+										type="button"
+										onClick={() => onSelectSuggestion(suggestion)}
+										className="rounded-[22px] border border-brand/10 bg-brand-light/10 p-4 text-left transition hover:border-brand/25 hover:bg-white"
+									>
+										<div className="flex items-start justify-between gap-3">
+											<div>
+												<p className="text-sm font-semibold text-foreground">
+													{suggestion.title}
+												</p>
+												<p className="mt-1 text-sm text-muted-foreground">
+													{suggestion.description}
+												</p>
+											</div>
+											<Badge
+												variant="secondary"
+												className="rounded-full border border-brand/10 bg-white text-brand-text"
+											>
+												Use prompt
+											</Badge>
+										</div>
+									</button>
+								))}
+							</div>
+						) : null}
+					</section>
 				) : null}
 
 				{messages.map((message) => (

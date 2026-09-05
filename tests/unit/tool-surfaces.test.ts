@@ -4,6 +4,7 @@ const generateToolMock = vi.hoisted(() => vi.fn());
 const getGeneratedToolMock = vi.hoisted(() => vi.fn());
 const listGeneratedToolsMock = vi.hoisted(() => vi.fn());
 const rollbackGeneratedToolMock = vi.hoisted(() => vi.fn());
+const suggestToolsForBrandMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/generation", () => ({
 	generateTool: generateToolMock,
@@ -15,8 +16,17 @@ vi.mock("@/lib/generation/store", () => ({
 	rollbackGeneratedTool: rollbackGeneratedToolMock,
 }));
 
+vi.mock("@/lib/tools/suggestions", () => ({
+	suggestToolsForBrand: suggestToolsForBrandMock,
+}));
+
 import { buildEmbedSnippet } from "../../src/lib/embed/contract";
-import { generateToolSurface, getGeneratedToolSurface, listGeneratedToolsSurface } from "../../src/lib/surfaces/tools";
+import {
+	generateToolSurface,
+	getGeneratedToolSurface,
+	listGeneratedToolsSurface,
+	suggestToolsSurface,
+} from "../../src/lib/surfaces/tools";
 
 const originalEnv = {
 	TOOLBUILDER_BASE_URL: process.env.TOOLBUILDER_BASE_URL,
@@ -150,5 +160,63 @@ describe("tool surfaces embed snippet parity", () => {
 
 		expect(response.statusCode).toBe(200);
 		expect(response.body.tools[0]).not.toHaveProperty("embedSnippet");
+	});
+
+	it("returns brand-aware suggestion payloads", async () => {
+		suggestToolsForBrandMock.mockResolvedValue({
+			status: "success",
+			requestedUrl: "https://stripe.com",
+			brand: {
+				siteUrl: "https://stripe.com",
+				brandName: "Stripe",
+				industry: "Fintech",
+				businessSummary: "Stripe helps businesses accept payments.",
+			},
+			suggestions: [
+				{
+					title: "Payment Fee Calculator",
+					description: "Estimate payment processing fees.",
+					prompt: "Build a payment fee calculator.",
+				},
+				{
+					title: "Subscription Revenue Forecaster",
+					description: "Project recurring revenue.",
+					prompt: "Build a subscription revenue forecaster.",
+				},
+				{
+					title: "Invoice Terms Cost Estimator",
+					description: "Compare invoice cash-flow scenarios.",
+					prompt: "Build an invoice cost estimator.",
+				},
+			],
+			model: "claude-sonnet-4-6",
+		});
+
+		const response = await suggestToolsSurface({ siteUrl: "https://stripe.com" });
+
+		expect(response.statusCode).toBe(200);
+		expect(suggestToolsForBrandMock).toHaveBeenCalledWith("https://stripe.com");
+		expect(response.body).toMatchObject({
+			status: "success",
+			brand: {
+				industry: "Fintech",
+			},
+			suggestions: [
+				{ title: "Payment Fee Calculator" },
+				{ title: "Subscription Revenue Forecaster" },
+				{ title: "Invoice Terms Cost Estimator" },
+			],
+		});
+	});
+
+	it("rejects blank site URLs before calling suggestToolsForBrand", async () => {
+		const response = await suggestToolsSurface({ siteUrl: "  " });
+
+		expect(response.statusCode).toBe(400);
+		expect(response.body).toMatchObject({
+			status: "error",
+			message: "Provide a siteUrl string.",
+		});
+		expect(suggestToolsForBrandMock).not.toHaveBeenCalled();
 	});
 });

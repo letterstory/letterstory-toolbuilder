@@ -21,6 +21,8 @@ import type {
 	BuilderBrandSummary,
 	BuilderConversationMessage,
 	BuilderGenerationRun,
+	BuilderSuggestionBrandContext,
+	BuilderToolSuggestion,
 	BuilderView,
 	GenerationTelemetry,
 	RequestState,
@@ -53,6 +55,11 @@ export function ToolBuilderWorkspace() {
 	const [recentLoading, setRecentLoading] = useState(false);
 	const [recentOpen, setRecentOpen] = useState(false);
 	const [messages, setMessages] = useState<BuilderConversationMessage[]>([]);
+	const [suggestions, setSuggestions] = useState<BuilderToolSuggestion[]>([]);
+	const [suggestionBrandContext, setSuggestionBrandContext] =
+		useState<BuilderSuggestionBrandContext | null>(null);
+	const [suggestionsLoading, setSuggestionsLoading] = useState(false);
+	const [suggestionsError, setSuggestionsError] = useState<string | null>(null);
 	const [activeRun, setActiveRun] = useState<BuilderGenerationRun | null>(null);
 	const [activitySteps, setActivitySteps] = useState(
 		() => [] as ReturnType<typeof estimateActivitySteps>
@@ -171,6 +178,9 @@ export function ToolBuilderWorkspace() {
 		setProjectName(item.projectName);
 		setSiteUrl(item.siteUrl ?? "");
 		setPrompt("");
+		setSuggestions([]);
+		setSuggestionBrandContext(null);
+		setSuggestionsError(null);
 	}
 
 	function appendConversation(message: BuilderConversationMessage) {
@@ -305,6 +315,10 @@ export function ToolBuilderWorkspace() {
 		setSiteUrl("");
 		setPrompt("");
 		setMessages([]);
+		setSuggestions([]);
+		setSuggestionBrandContext(null);
+		setSuggestionsLoading(false);
+		setSuggestionsError(null);
 		setActiveRun(null);
 		setActivitySteps([]);
 		setTelemetry(null);
@@ -331,6 +345,62 @@ export function ToolBuilderWorkspace() {
 			tone: "info",
 		});
 		setRecentOpen(false);
+	}
+
+	async function handleRequestSuggestions() {
+		const normalizedSiteUrl = normalizeSiteUrl(siteUrl);
+		if (!normalizedSiteUrl.trim()) {
+			setSuggestionsError("Enter a brand site first to get tailored suggestions.");
+			return;
+		}
+
+		setSiteUrl(normalizedSiteUrl);
+		setSuggestionsLoading(true);
+		setSuggestionsError(null);
+		try {
+			const response = await fetch("/api/tools/suggest", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ siteUrl: normalizedSiteUrl }),
+			});
+			const data = (await response.json()) as
+				| {
+						status: "success";
+						brand: BuilderSuggestionBrandContext;
+						suggestions: BuilderToolSuggestion[];
+				  }
+				| { status: "not_configured" | "error"; message: string };
+			if (data.status === "success") {
+				setSuggestionBrandContext(data.brand);
+				setSuggestions(data.suggestions);
+				return;
+			}
+			setSuggestions([]);
+			setSuggestionBrandContext(null);
+			setSuggestionsError(data.message);
+		} catch (error) {
+			setSuggestions([]);
+			setSuggestionBrandContext(null);
+			setSuggestionsError(
+				error instanceof Error
+					? error.message
+					: "Could not load suggestions right now. You can still write your own prompt."
+			);
+		} finally {
+			setSuggestionsLoading(false);
+		}
+	}
+
+	function handleSelectSuggestion(suggestion: BuilderToolSuggestion) {
+		setProjectName(suggestion.title);
+		setPrompt(suggestion.prompt);
+		setSuggestionsError(null);
+		setStatusMessage({
+			title: "Suggestion loaded",
+			description: `Loaded ${suggestion.title}. Review or edit the prompt before building.`,
+			tone: "info",
+		});
+		window.requestAnimationFrame(() => composerRef.current?.focus());
 	}
 
 	async function handleRollback(version: number) {
@@ -424,14 +494,25 @@ export function ToolBuilderWorkspace() {
 					statusMessage={statusMessage}
 					activeBrandName={activeBrandName}
 					brandSummary={brandSummary}
+					suggestionBrandContext={suggestionBrandContext}
+					suggestions={suggestions}
+					suggestionsLoading={suggestionsLoading}
+					suggestionsError={suggestionsError}
 					activitySteps={observedSteps}
 					activeRun={activeRun}
 					telemetry={telemetry}
 					onProjectNameChange={setProjectName}
-					onSiteUrlChange={setSiteUrl}
+					onSiteUrlChange={(value) => {
+						setSiteUrl(value);
+						setSuggestions([]);
+						setSuggestionBrandContext(null);
+						setSuggestionsError(null);
+					}}
 					onNormalizeSiteUrl={() => setSiteUrl((current) => normalizeSiteUrl(current))}
 					onPromptChange={setPrompt}
 					onSubmit={handleSubmit}
+					onRequestSuggestions={() => void handleRequestSuggestions()}
+					onSelectSuggestion={handleSelectSuggestion}
 					composerRef={composerRef}
 				/>
 				<div className="border-t border-[#e4e4e7] bg-slate-50 p-4 lg:border-t-0 lg:border-l lg:p-5">

@@ -1,6 +1,7 @@
 import { envServer } from "@/lib/config/env.server";
 import { generateTool } from "@/lib/generation";
 import { getGeneratedTool, listGeneratedTools, rollbackGeneratedTool } from "@/lib/generation/store";
+import { suggestToolsForBrand } from "@/lib/tools/suggestions";
 import { buildEmbedSnippet } from "@/lib/embed/contract";
 import {
 	generateToolInputSchema,
@@ -12,6 +13,8 @@ import {
 	listGeneratedToolsOutputSchema,
 	rollbackGeneratedToolInputSchema,
 	rollbackGeneratedToolOutputSchema,
+	suggestToolsInputSchema,
+	suggestToolsOutputSchema,
 } from "@/lib/contracts/tools";
 import type { GeneratedToolRecord } from "@/lib/generation/store";
 import type { SurfaceHttpResult } from "./brand";
@@ -239,6 +242,28 @@ export async function generateToolSurface(
 	};
 }
 
+export async function suggestToolsSurface(
+	body: unknown
+): Promise<SurfaceHttpResult<ReturnType<typeof suggestToolsOutputSchema.parse>>> {
+	const parsed = suggestToolsInputSchema.safeParse(body);
+	if (!parsed.success || !parsed.data.siteUrl.trim()) {
+		return {
+			statusCode: 400,
+			body: suggestToolsOutputSchema.parse({
+				status: "error",
+				requestedUrl: "",
+				message: "Provide a siteUrl string.",
+			}),
+		};
+	}
+
+	const result = await suggestToolsForBrand(parsed.data.siteUrl);
+	return {
+		statusCode: result.status === "success" ? 200 : 400,
+		body: suggestToolsOutputSchema.parse(result),
+	};
+}
+
 export function generateToolRateLimited(retryAfterSeconds: number) {
 	return {
 		statusCode: 429,
@@ -248,6 +273,18 @@ export function generateToolRateLimited(retryAfterSeconds: number) {
 		}),
 		headers: { "Retry-After": String(retryAfterSeconds) },
 	} satisfies SurfaceHttpResult<ReturnType<typeof generateToolOutputSchema.parse>>;
+}
+
+export function suggestToolsRateLimited(retryAfterSeconds: number) {
+	return {
+		statusCode: 429,
+		body: suggestToolsOutputSchema.parse({
+			status: "error",
+			requestedUrl: "",
+			message: "Too many suggestion requests — please wait a bit and try again.",
+		}),
+		headers: { "Retry-After": String(retryAfterSeconds) },
+	} satisfies SurfaceHttpResult<ReturnType<typeof suggestToolsOutputSchema.parse>>;
 }
 
 export async function rollbackGeneratedToolSurface(
