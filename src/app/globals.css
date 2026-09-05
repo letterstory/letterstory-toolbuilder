@@ -131,6 +131,92 @@ body {
 	-moz-osx-font-smoothing: grayscale;
 }
 
+@keyframes builder-phase-shimmer {
+	0% {
+		background-position: 100% 50%;
+	}
+	100% {
+		background-position: 0% 50%;
+	}
+}
+
+@keyframes builder-loading-mark {
+	0%,
+	100% {
+		transform: scale(1);
+		box-shadow: 0 18px 40px -24px color-mix(in oklab, var(--brand) 22%, transparent);
+	}
+	50% {
+		transform: scale(1.03);
+		box-shadow: 0 22px 48px -22px color-mix(in oklab, var(--brand) 30%, transparent);
+	}
+}
+
+@keyframes builder-loading-dot {
+	0%,
+	100% {
+		transform: scale(0.9);
+		opacity: 0.5;
+	}
+	50% {
+		transform: scale(1.2);
+		opacity: 1;
+	}
+}
+
+@keyframes builder-loading-dots {
+	0%,
+	20% {
+		clip-path: inset(0 100% 0 0);
+	}
+	40% {
+		clip-path: inset(0 66% 0 0);
+	}
+	60% {
+		clip-path: inset(0 33% 0 0);
+	}
+	80%,
+	100% {
+		clip-path: inset(0 0 0 0);
+	}
+}
+
+.builder-phase-shimmer {
+	background-image: linear-gradient(
+		90deg,
+		color-mix(in oklab, var(--brand-text) 58%, white) 0%,
+		var(--brand) 50%,
+		color-mix(in oklab, var(--brand-text) 58%, white) 100%
+	);
+	background-size: 200% 100%;
+	-webkit-background-clip: text;
+	background-clip: text;
+	color: transparent;
+	animation: builder-phase-shimmer 1.6s linear infinite;
+}
+
+.builder-loading-mark {
+	animation: builder-loading-mark 2.2s ease-in-out infinite;
+}
+
+.builder-loading-dot {
+	animation: builder-loading-dot 1.2s ease-in-out infinite;
+}
+
+.builder-loading-dots {
+	animation: builder-loading-dots 1.2s steps(3, end) infinite;
+}
+
+.builder-progress-line {
+	opacity: 0.4;
+	background: linear-gradient(
+		90deg,
+		color-mix(in oklab, var(--brand-light) 30%, white),
+		var(--brand),
+		color-mix(in oklab, var(--brand-light) 30%, white)
+	);
+}
+
 @layer base {
 	* {
 		@apply border-border outline-ring/50;

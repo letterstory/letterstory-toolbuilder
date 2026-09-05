@@ -82,8 +82,8 @@ export function BuilderChatPanel({
 			: "Start with a name, optional brand site, and your build prompt.";
 
 	return (
-		<div className="flex min-h-[72vh] flex-col bg-brand-light/8 lg:min-h-[calc(100vh-16rem)]">
-			<div className="border-b border-brand/10 bg-white px-4 py-4 sm:px-5">
+		<div className="flex min-h-[72vh] flex-col bg-[#f8f6f4] lg:min-h-[calc(100vh-16rem)]">
+			<div className="border-b border-brand/10 bg-[#f8f6f4] px-4 py-4 shadow-[0_2px_4px_rgba(15,14,14,0.05)] sm:px-5">
 				<div className="grid gap-3">
 					<div className="grid gap-3 sm:grid-cols-2">
 						<label className="space-y-2">
@@ -165,17 +165,14 @@ export function BuilderChatPanel({
 					<div className="mt-4 space-y-3">
 						{activitySteps.length > 0 ? (
 							activitySteps.map((step) => (
-								<div
-									key={step.key}
-									className="flex items-start gap-3 rounded-2xl bg-brand-light/12 px-3 py-3"
-								>
-									<StepIcon status={step.status} />
-									<div className="min-w-0 flex-1">
-										<div className="flex flex-wrap items-center gap-2">
-											<p className="text-sm font-medium text-foreground">{step.title}</p>
+								<div key={step.key} className="rounded-xl border border-transparent p-1">
+									<div className="flex min-h-[34px] items-center gap-2 rounded-md bg-transparent p-1 text-sm">
+										<StepIcon status={step.status} />
+										<div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+											<StepLabel title={step.title} />
 											<Badge
 												variant="outline"
-												className="rounded-full border-brand/10 bg-white text-muted-foreground"
+												className="h-5 rounded-md border-brand/10 bg-white px-2 text-[11px] text-muted-foreground"
 											>
 												{step.status === "complete"
 													? "Done"
@@ -184,13 +181,15 @@ export function BuilderChatPanel({
 														: "Queued"}
 											</Badge>
 										</div>
-										<p className="mt-1 text-xs leading-5 text-muted-foreground">
-											{step.description}
-										</p>
-										{step.detail ? (
-											<p className="mt-2 text-xs font-medium text-brand-text/80">{step.detail}</p>
-										) : null}
 									</div>
+									<p className="ml-8 mt-1 text-xs leading-5 text-muted-foreground">
+										{step.description}
+									</p>
+									{step.detail ? (
+										<p className="ml-8 mt-2 text-xs font-medium text-brand-text/80">
+											{step.detail}
+										</p>
+									) : null}
 								</div>
 							))
 						) : (
@@ -239,9 +238,16 @@ export function BuilderChatPanel({
 				))}
 			</div>
 
-			<div className="border-t border-brand/10 bg-white px-4 py-4 sm:px-5">
+			<div className="border-t border-brand/10 bg-[#f8f6f4] px-4 py-4 sm:px-5">
 				<div className="mb-3 flex items-center justify-between gap-3">
-					<p className="text-sm font-medium text-brand-text">{statusLine}</p>
+					<p
+						className={cn(
+							"text-sm font-medium",
+							isRunning ? "builder-phase-shimmer" : "text-brand-text"
+						)}
+					>
+						{statusLine}
+					</p>
 					<StatusChip requestState={requestState} statusMessage={statusMessage} />
 				</div>
 				<form
@@ -249,7 +255,7 @@ export function BuilderChatPanel({
 						event.preventDefault();
 						onSubmit();
 					}}
-					className="rounded-[28px] border border-brand/15 bg-brand-light/12 p-3 shadow-sm"
+					className="rounded-lg border border-brand/15 bg-[#fcfcfc] p-3 shadow-[0_10px_20px_0_rgba(15,14,14,0.05),0_0_4px_0_rgba(15,14,14,0.05)]"
 				>
 					<Textarea
 						ref={composerRef}
@@ -266,12 +272,12 @@ export function BuilderChatPanel({
 								type="button"
 								variant="ghost"
 								size="icon"
-								className="rounded-full text-brand-text hover:bg-brand-light/35 hover:text-brand-text"
+								className="rounded-md text-brand-text hover:bg-brand-light/35 hover:text-brand-text"
 								onClick={onNormalizeSiteUrl}
 							>
 								<Paperclip className="size-4" />
 							</Button>
-							<span className="inline-flex items-center gap-2 rounded-full border border-brand/10 bg-white px-3 py-1.5 text-xs font-medium text-brand-text shadow-sm">
+							<span className="inline-flex items-center gap-2 rounded-md border border-brand/10 bg-transparent px-2 py-1 text-xs font-medium text-brand-text">
 								<Target className="size-3.5" />
 								Auto
 							</span>
@@ -282,7 +288,7 @@ export function BuilderChatPanel({
 								type="button"
 								variant="ghost"
 								size="icon"
-								className="rounded-full text-brand-text"
+								className="rounded-md text-brand-text"
 								disabled
 							>
 								<Mic className="size-4" />
@@ -291,7 +297,7 @@ export function BuilderChatPanel({
 						<Button
 							type="submit"
 							disabled={isRunning}
-							className="size-11 rounded-2xl bg-primary text-primary-foreground hover:bg-primary/90"
+							className="size-[30px] rounded-md bg-foreground p-0 text-background hover:bg-foreground/92 disabled:bg-[#ebebeb] disabled:text-[#929292]"
 							aria-label={messages.length > 0 ? "Update tool" : "Build tool"}
 						>
 							{isRunning ? (
@@ -346,10 +352,25 @@ function StatusChip({
 }
 
 function StepIcon({ status }: { status: BuilderActivityStep["status"] }) {
-	if (status === "complete") return <CheckCircle2 className="mt-0.5 size-4 text-emerald-600" />;
-	if (status === "active")
-		return <LoaderCircle className="mt-0.5 size-4 animate-spin text-brand" />;
-	return <div className="mt-1 size-3 rounded-full bg-brand/25" />;
+	if (status === "complete") return <CheckCircle2 className="size-4 text-emerald-600" />;
+	if (status === "active") return <LoaderCircle className="size-4 animate-spin text-brand" />;
+	return <div className="size-3 rounded-full bg-brand/25" />;
+}
+
+function StepLabel({ title }: { title: string }) {
+	const [verb, ...rest] = title.split(" ");
+	const subject = rest.join(" ");
+
+	return (
+		<div className="flex min-w-0 items-center gap-2 text-sm text-muted-foreground">
+			<span className="shrink-0">{verb}</span>
+			{subject ? (
+				<span className="inline-flex h-5 min-w-0 max-w-full items-center rounded-[4px] border border-brand/10 bg-brand-light/18 px-1.5 text-xs font-medium text-foreground">
+					<span className="truncate">{subject}</span>
+				</span>
+			) : null}
+		</div>
+	);
 }
 
 function BrandSummaryCard({ summary }: { summary: BuilderBrandSummary }) {

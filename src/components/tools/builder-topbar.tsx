@@ -49,21 +49,22 @@ export function BuilderTopbar({
 	const currentLabel = projectName.trim() || activeTool?.projectName || "New tool";
 
 	return (
-		<div className="border-b border-brand/10 bg-white/95 px-4 py-3 backdrop-blur sm:px-6">
-			<div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+		<div className="border-b border-brand/10 bg-[#f8f6f4] px-4 py-2.5 backdrop-blur sm:px-5">
+			<div className="flex min-h-[52px] flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
 				<div className="flex min-w-0 flex-wrap items-center gap-3">
 					<div className="relative">
 						<button
 							type="button"
 							onClick={onToggleRecent}
-							className="flex items-center gap-3 rounded-full border border-brand/15 bg-white px-3 py-2 text-left shadow-sm transition hover:border-brand/25 hover:bg-brand-light/20"
+							className="flex h-[30px] items-center gap-2 rounded-md border border-brand/15 bg-white px-2.5 text-left shadow-sm transition hover:border-brand/25 hover:bg-brand-light/20"
 						>
-							<div className="flex size-9 items-center justify-center rounded-full bg-brand text-xs font-semibold text-brand-foreground">
+							<div className="flex size-6 items-center justify-center rounded-md bg-brand text-[11px] font-semibold text-brand-foreground">
 								T
 							</div>
+							<div className="h-[18px] w-px bg-brand/15" />
 							<div className="min-w-0">
-								<p className="truncate text-sm font-semibold text-foreground">{currentLabel}</p>
-								<p className="truncate text-xs text-brand-text/70">
+								<p className="truncate text-xs font-medium text-foreground">{currentLabel}</p>
+								<p className="truncate text-[11px] text-brand-text/70">
 									{activeTool
 										? `v${activeTool.version} · ${formatTimestamp(activeTool.updatedAt)}`
 										: "LetterStory Toolbuilder"}
@@ -124,7 +125,7 @@ export function BuilderTopbar({
 						) : null}
 					</div>
 
-					<div className="inline-flex items-center rounded-full bg-brand-light/35 p-1">
+					<div className="inline-flex h-[30px] items-center rounded-md bg-brand-light/28 p-1">
 						<TabButton active={activeView === "preview"} onClick={() => onSetView("preview")}>
 							Preview
 						</TabButton>
@@ -139,6 +140,7 @@ export function BuilderTopbar({
 						size="sm"
 						disabled={!activeTool}
 						onClick={onFocusComposer}
+						className="h-[30px] rounded-md"
 					>
 						<Pencil className="size-4" />
 						Edit
@@ -148,14 +150,14 @@ export function BuilderTopbar({
 						variant="ghost"
 						size="icon"
 						onClick={onToggleRecent}
-						className="text-brand-text hover:bg-brand-light/35 hover:text-brand-text"
+						className="size-[30px] rounded-md text-brand-text hover:bg-brand-light/35 hover:text-brand-text"
 						aria-label="Open recent tools"
 					>
 						<LayoutGrid className="size-4" />
 					</Button>
-					<div className="inline-flex items-center gap-2 rounded-full border border-brand/15 bg-brand-light/12 px-3 py-2 text-sm text-brand-text/80">
+					<div className="inline-flex h-[30px] items-center gap-2 rounded-md border border-brand/15 bg-white px-3 text-sm text-brand-text/80">
 						<Monitor className="size-4" />
-						<span className="font-medium text-foreground">Home</span>
+						<span className="text-sm font-medium text-foreground">Home</span>
 						<Send className="size-4 text-brand-text/50" />
 					</div>
 				</div>
@@ -166,12 +168,12 @@ export function BuilderTopbar({
 						variant="ghost"
 						size="icon"
 						onClick={onFocusComposer}
-						className="text-brand-text hover:bg-brand-light/35 hover:text-brand-text"
+						className="size-[30px] rounded-md text-brand-text hover:bg-brand-light/35 hover:text-brand-text"
 						aria-label="Focus chat composer"
 					>
 						<MessageSquareText className="size-4" />
 					</Button>
-					<div className="flex size-9 items-center justify-center rounded-full bg-brand text-sm font-semibold text-brand-foreground">
+					<div className="flex size-[30px] items-center justify-center rounded-md bg-brand text-xs font-semibold text-brand-foreground">
 						M
 					</div>
 					<Button
@@ -180,7 +182,7 @@ export function BuilderTopbar({
 						size="icon"
 						disabled={requestState !== "idle"}
 						onClick={onStartNew}
-						className="text-brand-text hover:bg-brand-light/35 hover:text-brand-text"
+						className="size-[30px] rounded-md text-brand-text hover:bg-brand-light/35 hover:text-brand-text"
 						aria-label="Start new tool"
 					>
 						<Plus className="size-4" />
@@ -191,14 +193,14 @@ export function BuilderTopbar({
 						size="icon"
 						onClick={onRefreshRecent}
 						disabled={recentLoading}
-						className="text-brand-text hover:bg-brand-light/35 hover:text-brand-text"
+						className="size-[30px] rounded-md text-brand-text hover:bg-brand-light/35 hover:text-brand-text"
 						aria-label="Refresh recent tools"
 					>
 						<MoreHorizontal className="size-4" />
 					</Button>
 					<Button
 						type="button"
-						className="rounded-full bg-primary px-5 text-primary-foreground hover:bg-primary/90"
+						className="h-[30px] rounded-md bg-foreground px-4 text-background hover:bg-foreground/92"
 						disabled={!activeTool}
 						onClick={onOpenEmbed}
 					>
@@ -224,7 +226,7 @@ function TabButton({
 			type="button"
 			onClick={onClick}
 			className={cn(
-				"rounded-full px-4 py-2 text-sm font-medium transition",
+				"h-[22px] rounded-[4px] px-3 text-sm font-medium transition",
 				active
 					? "bg-primary text-primary-foreground shadow-sm"
 					: "text-brand-text/70 hover:text-brand-text"

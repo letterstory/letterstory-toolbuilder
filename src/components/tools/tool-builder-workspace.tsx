@@ -414,7 +414,7 @@ export function ToolBuilderWorkspace() {
 					onOpenEmbed={handleOpenEmbed}
 				/>
 			</div>
-			<div className="grid lg:grid-cols-[minmax(320px,28rem)_minmax(0,1fr)]">
+			<div className="grid lg:grid-cols-[360px_minmax(0,1fr)]">
 				<BuilderChatPanel
 					projectName={projectName}
 					siteUrl={siteUrl}
@@ -434,7 +434,7 @@ export function ToolBuilderWorkspace() {
 					onSubmit={handleSubmit}
 					composerRef={composerRef}
 				/>
-				<div className="border-t border-brand/10 bg-brand-light/15 p-4 lg:border-t-0 lg:border-l lg:p-5">
+				<div className="border-t border-[#e4e4e7] bg-slate-50 p-4 lg:border-t-0 lg:border-l lg:p-5">
 					{activeView === "preview" ? (
 						<BuilderPreviewCanvas
 							activeTool={activeTool}
