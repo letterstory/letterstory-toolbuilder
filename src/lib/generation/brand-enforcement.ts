@@ -11,6 +11,9 @@ const SYSTEM_SANS_STACK =
 	'-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
 const SYSTEM_SERIF_STACK =
 	'"Iowan Old Style", Georgia, Cambria, "Times New Roman", Times, serif';
+const BRAND_LOCKUP_SURFACE = "#FFFFFF";
+const MIN_LOCKUP_TEXT_CONTRAST = 4.5;
+const BRAND_ENFORCEMENT_STYLE_TAG = "data-letterstory-brand-enforcement";
 
 interface EmbeddedFontSource {
 	url: string;
@@ -59,6 +62,7 @@ const KNOWN_SERIF_FAMILY_TOKENS = [
 	"libre baskerville",
 	"eb garamond",
 	"crimson",
+	"martina plantijn",
 ];
 
 const KNOWN_SANS_FAMILY_TOKENS = [
@@ -161,6 +165,63 @@ function dedupeStrings(values: Array<string | null | undefined>): string[] {
 		seen.add(value);
 	}
 	return [...seen];
+}
+
+function normalizeHexColor(value: string | null | undefined): string | null {
+	if (!value) return null;
+	const trimmed = value.trim();
+	const shortHexMatch = trimmed.match(/^#([0-9a-f]{3})$/i);
+	if (shortHexMatch) {
+		const [r, g, b] = shortHexMatch[1].split("");
+		return `#${r}${r}${g}${g}${b}${b}`.toUpperCase();
+	}
+	const longHexMatch = trimmed.match(/^#([0-9a-f]{6})$/i);
+	return longHexMatch ? `#${longHexMatch[1].toUpperCase()}` : null;
+}
+
+function hexChannelToLinear(channelHex: string): number {
+	const srgb = Number.parseInt(channelHex, 16) / 255;
+	if (srgb <= 0.04045) return srgb / 12.92;
+	return ((srgb + 0.055) / 1.055) ** 2.4;
+}
+
+function relativeLuminance(hex: string): number {
+	const normalized = normalizeHexColor(hex);
+	if (!normalized) return 0;
+	const r = hexChannelToLinear(normalized.slice(1, 3));
+	const g = hexChannelToLinear(normalized.slice(3, 5));
+	const b = hexChannelToLinear(normalized.slice(5, 7));
+	return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+function contrastRatio(left: string, right: string): number {
+	const lighter = Math.max(relativeLuminance(left), relativeLuminance(right));
+	const darker = Math.min(relativeLuminance(left), relativeLuminance(right));
+	return (lighter + 0.05) / (darker + 0.05);
+}
+
+function selectWordmarkColor(brandSnapshot: GeneratedToolBrandSnapshot): string {
+	const candidates = dedupeStrings([
+		brandSnapshot.colors.text,
+		brandSnapshot.colors.primary,
+		brandSnapshot.colors.secondary,
+		brandSnapshot.colors.accent,
+		"#111111",
+		"#000000",
+	]).map((value) => normalizeHexColor(value));
+	const normalizedCandidates = candidates.filter((value): value is string => Boolean(value));
+	if (!normalizedCandidates.length) return "#111111";
+
+	const accessible = normalizedCandidates.find(
+		(candidate) => contrastRatio(candidate, BRAND_LOCKUP_SURFACE) >= MIN_LOCKUP_TEXT_CONTRAST
+	);
+	if (accessible) return accessible;
+
+	return normalizedCandidates.reduce((best, candidate) =>
+		contrastRatio(candidate, BRAND_LOCKUP_SURFACE) > contrastRatio(best, BRAND_LOCKUP_SURFACE)
+			? candidate
+			: best
+	);
 }
 
 function isGoogleSelfHostable(face: GeneratedToolBrandFontFace | null | undefined): boolean {
@@ -349,14 +410,20 @@ function buildDeterministicHeaderHtml(
 	].join("\n");
 }
 
-function appendCss(html: string, css: string): string {
-	if (/<\/style>/i.test(html)) {
-		return html.replace(/<\/style>/i, `${css}\n</style>`);
+function upsertBrandEnforcementStyleTag(html: string, css: string): string {
+	const styleTag = `<style ${BRAND_ENFORCEMENT_STYLE_TAG}="true">\n${css}\n</style>`;
+	const existingStyleTag = new RegExp(
+		`<style\\b[^>]*\\b${BRAND_ENFORCEMENT_STYLE_TAG}=["']true["'][^>]*>[\\s\\S]*?<\\/style>\\s*`,
+		"gi"
+	);
+	const withoutExisting = html.replace(existingStyleTag, "");
+	if (/<\/head>/i.test(withoutExisting)) {
+		return withoutExisting.replace(/<\/head>/i, `${styleTag}\n</head>`);
 	}
-	if (/<\/head>/i.test(html)) {
-		return html.replace(/<\/head>/i, `<style>${css}</style></head>`);
+	if (/<body([^>]*)>/i.test(withoutExisting)) {
+		return withoutExisting.replace(/<body([^>]*)>/i, `${styleTag}\n<body$1>`);
 	}
-	return html;
+	return `${styleTag}\n${withoutExisting}`;
 }
 
 function rewriteHeader(html: string, headerHtml: string): string {
@@ -405,6 +472,7 @@ function buildEnforcementCss(
 		brandSnapshot.colors.accent ?? brandSnapshot.colors.secondary ?? brandColor;
 	const backgroundColor = brandSnapshot.colors.background ?? "#FFFFFF";
 	const textColor = brandSnapshot.colors.text ?? "#111111";
+	const wordmarkColor = selectWordmarkColor(brandSnapshot);
 
 	return [
 		plan.css,
@@ -434,8 +502,9 @@ function buildEnforcementCss(
 		"  gap: 0.75rem;",
 		"  min-width: 0;",
 		"}",
-		".ls-brand-lockup--exact_asset {",
-		"  background: #FFFFFF;",
+		".ls-brand-lockup--exact_asset,",
+		".ls-brand-lockup--text_only {",
+		`  background: ${BRAND_LOCKUP_SURFACE};`,
 		"  padding: 0.5rem 0.75rem;",
 		"  border-radius: 0.75rem;",
 		"  border: 1px solid rgba(17, 17, 17, 0.08);",
@@ -450,7 +519,7 @@ function buildEnforcementCss(
 		"}",
 		".ls-brand-lockup__wordmark {",
 		"  display: inline-block;",
-		`  color: ${brandColor};`,
+		`  color: ${wordmarkColor};`,
 		"  font-size: clamp(1.15rem, 2vw, 1.5rem);",
 		"  font-weight: 700;",
 		"  letter-spacing: -0.02em;",
@@ -523,7 +592,7 @@ export async function enforceBrandPresentation(opts: {
 	html = stripHeaderBrandGraphics(html);
 	html = rewriteHeader(html, buildDeterministicHeaderHtml(opts.projectName, opts.brandSnapshot));
 	html = rewriteFontFamilies(html, plan);
-	html = appendCss(html, `\n${buildEnforcementCss(opts.brandSnapshot, plan)}\n`);
+	html = upsertBrandEnforcementStyleTag(html, buildEnforcementCss(opts.brandSnapshot, plan));
 
 	return {
 		sanitized: sanitizeGeneratedHtml(html),

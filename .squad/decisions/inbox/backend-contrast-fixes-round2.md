@@ -1,0 +1,9 @@
+### 2026-09-05: Brand lockup contrast enforcement is now deterministic for both exact logos and text-only wordmarks
+**By:** Backend
+**What:** Brand enforcement now emits its own dedicated `<style data-letterstory-brand-enforcement="true">` block after model-authored CSS, instead of appending rules into the model's existing `<style>` tag. Both `.ls-brand-lockup--exact_asset` and `.ls-brand-lockup--text_only` now share the same neutral white lockup surface, and text-only wordmarks pick a color that reaches at least 4.5:1 contrast against that surface when a suitable brand color exists, otherwise falling back to a dark neutral.
+**Why:** Tester's second sweep showed two failure modes: exact-asset lockups could still land directly on dark headers in some live outputs, and text-only wordmarks could become invisible when the same brand token drove both header background and wordmark text. Moving enforcement into a separate deterministic style tag makes the final HTML self-contained and override-safe regardless of what the model generated, while the shared surface treatment fixes both contrast bugs with one rule set.
+
+### 2026-09-05: Robinhood heading-font miss was a missing serif-family-name classification, not ambiguous upstream metadata
+**By:** Backend
+**What:** Robinhood's sweep artifact reported `headingFont="Martina Plantijn"` and `bodyFont="Capsule Sans Text"`. The serif-safe fallback classifier did not recognize `Martina Plantijn`, so heading fallback dropped to the default sans stack; the known-serif token list now includes `martina plantijn`.
+**Why:** The stored artifact already carried a specific heading family name rather than a generic/ambiguous token, so this was a straightforward gap in our static serif-name map. A targeted classifier addition is safer than inventing broader heuristics because it fixes the confirmed miss without changing unrelated brand-font behavior.
