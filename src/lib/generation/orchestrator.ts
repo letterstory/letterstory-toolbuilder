@@ -20,6 +20,7 @@ import { requestAnthropicText } from "@/lib/anthropic/messages";
 import { isBrandIngestionConfigured, pullBrandProfile, type BrandProfile } from "@/lib/brand";
 import { buildCompetitorContextForBrand } from "@/lib/brand/competitor-context";
 import { enforceBrandPresentation } from "@/lib/generation/brand-enforcement";
+import { buildPendingVisualCongruence } from "@/lib/generation/visual-congruence";
 import {
 	looksLikeHtmlDocument,
 	sanitizeGeneratedHtml,
@@ -32,6 +33,7 @@ import {
 	type GeneratedToolBrandFidelity,
 	type GeneratedToolBrandSnapshot,
 	type GeneratedToolCopy,
+	type GeneratedToolVisualCongruence,
 	type GeneratedToolRecord,
 } from "@/lib/generation/store";
 
