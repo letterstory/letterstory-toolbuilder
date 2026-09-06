@@ -1,23 +1,40 @@
 import { envServer } from "@/lib/config/env.server";
+import { looksLikeHtmlDocument, sanitizeGeneratedHtml } from "@/lib/generation/sanitize";
 import { isSafeHttpsUrl } from "@/lib/net/ssrf";
 import { normalizeSiteUrl } from "@/lib/utils";
 import {
 	getGeneratedTool,
+	updateGeneratedToolIfVersionMatches,
 	updateGeneratedToolVisualCongruence,
+	type GeneratedToolContent,
 	type GeneratedToolRecord,
 	type GeneratedToolVisualCongruence,
 } from "@/lib/generation/store";
 
 const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-6";
 const VISUAL_CONGRUENCE_TIMEOUT_MS = 45_000;
+const VISUAL_CONGRUENCE_REPAIR_TIMEOUT_MS = 45_000;
 const VIEWPORT = { width: 1440, height: 1280 };
 const SETTLE_DELAY_MS = 1_500;
 const VISUAL_WARNING_PREFIX = "Visual brand match";
+const VISUAL_REPAIR_WARNING_PREFIX = "Visual congruence auto-repair";
+
+type RequestToolHtml = (opts: {
+	projectName: string;
+	prompt: string;
+	brandSnapshot: GeneratedToolRecord["brandSnapshot"];
+	maxTokens: number;
+	timeoutMs: number;
+	existingHtml?: string;
+}) => Promise<string>;
 
 interface FinalizeVisualCongruenceDeps {
 	getTool: typeof getGeneratedTool;
 	analyze: typeof analyzeVisualCongruence;
 	save: typeof updateGeneratedToolVisualCongruence;
+	saveRepairedTool: typeof updateGeneratedToolIfVersionMatches;
+	requestHtml: RequestToolHtml;
+	htmlGenerationMaxTokens: number;
 }
 
 interface AnthropicImageSource {
@@ -352,6 +369,67 @@ function logVisualCongruenceStep(event: string, details: Record<string, unknown>
 	console.info("[tool-generation]", JSON.stringify({ event, ...details }));
 }
 
+function appendUniqueWarnings(warnings: string[], additions: string[]): string[] {
+	const next = [...warnings];
+	for (const addition of additions) {
+		const trimmed = addition.trim();
+		if (!trimmed || next.includes(trimmed)) continue;
+		next.push(trimmed);
+	}
+	return next;
+}
+
+function buildVisualCongruenceRepairPrompt(
+	tool: GeneratedToolRecord,
+	assessment: GeneratedToolVisualCongruence
+): string {
+	const feedback = [
+		assessment.notes,
+		...assessment.risks,
+	].map((entry) => entry.trim()).filter(Boolean);
+
+	return [
+		"Visual brand congruence correction only.",
+		`Brand: ${tool.brandSnapshot?.brandName ?? "Unknown"}.`,
+		"Keep the existing tool logic, fields, calculations, copy, and overall functionality intact.",
+		"Do not rebuild the tool from scratch. Make the smallest set of HTML/CSS/UI edits needed so the rendered result feels like it belongs to the same brand as the reference site.",
+		"Prioritize overall gestalt, especially layout structure, spacing rhythm, typography scale/weight, surface treatment, card/button chrome, contrast discipline, and polish level.",
+		"Address the screenshot-based critique below:",
+		...feedback.map((entry) => `- ${entry}`),
+	].join("\n");
+}
+
+function toolContentFromRecord(
+	tool: GeneratedToolRecord,
+	overrides: Partial<GeneratedToolContent>
+): GeneratedToolContent {
+	return {
+		projectName: tool.projectName,
+		prompt: tool.prompt,
+		siteUrl: tool.siteUrl,
+		brandSnapshot: tool.brandSnapshot,
+		html: tool.html,
+		copy: tool.copy,
+		brandFidelity: tool.brandFidelity,
+		visualCongruence: tool.visualCongruence,
+		logic: tool.logic,
+		model: tool.model,
+		warnings: tool.warnings,
+		...overrides,
+	};
+}
+
+async function loadRepairGenerationDeps(): Promise<{
+	requestHtml: RequestToolHtml;
+	htmlGenerationMaxTokens: number;
+}> {
+	const { requestToolHtml, HTML_GENERATION_MAX_TOKENS } = await import("@/lib/generation/orchestrator");
+	return {
+		requestHtml: requestToolHtml,
+		htmlGenerationMaxTokens: HTML_GENERATION_MAX_TOKENS,
+	};
+}
+
 export async function finalizeVisualCongruenceForTool(opts: {
 	toolId: string;
 	expectedVersion: number;
@@ -359,6 +437,7 @@ export async function finalizeVisualCongruenceForTool(opts: {
 	const getTool = deps.getTool ?? getGeneratedTool;
 	const analyze = deps.analyze ?? analyzeVisualCongruence;
 	const save = deps.save ?? updateGeneratedToolVisualCongruence;
+	const saveRepairedTool = deps.saveRepairedTool ?? updateGeneratedToolIfVersionMatches;
 	const tool = await getTool(opts.toolId);
 	if (!tool || !shouldAnalyzeTool(tool, opts.expectedVersion) || !tool.siteUrl) return;
 
@@ -387,6 +466,121 @@ export async function finalizeVisualCongruenceForTool(opts: {
 			durationMs: Date.now() - startedAt,
 			error: visualCongruence.notes,
 		});
+	}
+
+	if (visualCongruence.status === "completed" && visualCongruence.verdict === "fail") {
+		const current = await getTool(opts.toolId);
+		if (!current || current.version !== opts.expectedVersion || !current.siteUrl) {
+			logVisualCongruenceStep("visual_congruence_repair_skipped", {
+				toolId: opts.toolId,
+				expectedVersion: opts.expectedVersion,
+				reason: "version_mismatch",
+				currentVersion: current?.version ?? null,
+			});
+			return;
+		}
+
+		const repairStartedAt = Date.now();
+		logVisualCongruenceStep("visual_congruence_repair_attempted", {
+			toolId: opts.toolId,
+			expectedVersion: opts.expectedVersion,
+			congruenceScore: visualCongruence.congruenceScore,
+			riskCount: visualCongruence.risks.length,
+		});
+
+		const repairDeps = deps.requestHtml && deps.htmlGenerationMaxTokens
+			? {
+					requestHtml: deps.requestHtml,
+					htmlGenerationMaxTokens: deps.htmlGenerationMaxTokens,
+				}
+			: await loadRepairGenerationDeps();
+		try {
+			const repairedRawHtml = await repairDeps.requestHtml({
+				projectName: current.projectName,
+				prompt: buildVisualCongruenceRepairPrompt(current, visualCongruence),
+				brandSnapshot: current.brandSnapshot,
+				existingHtml: current.html,
+				maxTokens: repairDeps.htmlGenerationMaxTokens,
+				timeoutMs: VISUAL_CONGRUENCE_REPAIR_TIMEOUT_MS,
+			});
+			const repaired = sanitizeGeneratedHtml(repairedRawHtml);
+			if (!looksLikeHtmlDocument(repaired.html)) {
+				throw new Error("returned invalid HTML");
+			}
+
+			const repairedVisualCongruence = await analyze({
+				html: repaired.html,
+				siteUrl: current.siteUrl,
+				brandName: current.brandSnapshot?.brandName ?? null,
+			});
+			logVisualCongruenceStep("visual_congruence_reanalysis_completed", {
+				toolId: opts.toolId,
+				expectedVersion: opts.expectedVersion,
+				durationMs: Date.now() - repairStartedAt,
+				verdict: repairedVisualCongruence.verdict,
+				congruenceScore: repairedVisualCongruence.congruenceScore,
+				status: repairedVisualCongruence.status,
+			});
+
+			if (repairedVisualCongruence.verdict === "fail") {
+				logVisualCongruenceStep("visual_congruence_repair_did_not_resolve", {
+					toolId: opts.toolId,
+					expectedVersion: opts.expectedVersion,
+					congruenceScore: repairedVisualCongruence.congruenceScore,
+				});
+			}
+
+			const repairedWarnings = mergeVisualCongruenceWarnings(
+				appendUniqueWarnings(current.warnings, repaired.warnings),
+				repairedVisualCongruence
+			);
+			const repairedTool = await saveRepairedTool(
+				opts.toolId,
+				opts.expectedVersion,
+				toolContentFromRecord(current, {
+					html: repaired.html,
+					visualCongruence: repairedVisualCongruence,
+					warnings: repairedWarnings,
+				})
+			);
+			if (!repairedTool) {
+				logVisualCongruenceStep("visual_congruence_save_skipped", {
+					toolId: opts.toolId,
+					expectedVersion: opts.expectedVersion,
+				});
+				return;
+			}
+
+			logVisualCongruenceStep("visual_congruence_repair_succeeded", {
+				toolId: opts.toolId,
+				expectedVersion: opts.expectedVersion,
+				durationMs: Date.now() - repairStartedAt,
+				newVersion: repairedTool.version,
+				verdict: repairedVisualCongruence.verdict,
+				congruenceScore: repairedVisualCongruence.congruenceScore,
+			});
+			return;
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			logVisualCongruenceStep("visual_congruence_repair_failed", {
+				toolId: opts.toolId,
+				expectedVersion: opts.expectedVersion,
+				durationMs: Date.now() - repairStartedAt,
+				error: message,
+			});
+			const warnings = mergeVisualCongruenceWarnings(
+				appendUniqueWarnings(tool.warnings, [`${VISUAL_REPAIR_WARNING_PREFIX} failed: ${message}`]),
+				visualCongruence
+			);
+			const saved = await save(opts.toolId, opts.expectedVersion, visualCongruence, warnings);
+			if (!saved) {
+				logVisualCongruenceStep("visual_congruence_save_skipped", {
+					toolId: opts.toolId,
+					expectedVersion: opts.expectedVersion,
+				});
+			}
+			return;
+		}
 	}
 
 	const warnings = mergeVisualCongruenceWarnings(tool.warnings, visualCongruence);

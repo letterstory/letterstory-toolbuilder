@@ -95,6 +95,66 @@ describe("fileToolStore", () => {
 		});
 	});
 
+	it("bumps version with history only when the expected version still matches", async () => {
+		mkdirMock.mockRejectedValue(Object.assign(new Error("read only file system"), { code: "EROFS" }));
+
+		const { fileToolStore } = await import("../../src/lib/generation/store.file");
+		await fileToolStore.saveGeneratedTool({
+			projectName: "Calc",
+			prompt: "v1",
+			siteUrl: "https://stripe.com",
+			brandSnapshot: null,
+			html: "<!doctype html><html><body>v1</body></html>",
+			copy: null,
+			brandFidelity: null,
+			visualCongruence: null,
+			model: "claude-sonnet-4-6",
+			warnings: [],
+		});
+
+		const skipped = await fileToolStore.updateGeneratedToolIfVersionMatches("tool-123", 2, {
+			projectName: "Calc",
+			prompt: "v2",
+			siteUrl: "https://stripe.com",
+			brandSnapshot: null,
+			html: "<!doctype html><html><body>v2</body></html>",
+			copy: null,
+			brandFidelity: null,
+			visualCongruence: null,
+			model: "claude-sonnet-4-6",
+			warnings: ["warn"],
+		});
+		expect(skipped).toBeNull();
+
+		const updated = await fileToolStore.updateGeneratedToolIfVersionMatches("tool-123", 1, {
+			projectName: "Calc",
+			prompt: "v2",
+			siteUrl: "https://stripe.com",
+			brandSnapshot: null,
+			html: "<!doctype html><html><body>v2</body></html>",
+			copy: null,
+			brandFidelity: null,
+			visualCongruence: {
+				status: "completed",
+				congruenceScore: 4,
+				verdict: "warn",
+				notes: "Closer",
+				risks: [],
+				referenceUrl: "https://stripe.com",
+				analyzedAt: "2026-09-06T00:00:00.000Z",
+			},
+			model: "claude-sonnet-4-6",
+			warnings: ["warn"],
+		});
+
+		expect(updated).toMatchObject({
+			id: "tool-123",
+			version: 2,
+			html: "<!doctype html><html><body>v2</body></html>",
+			history: [expect.objectContaining({ version: 1, html: "<!doctype html><html><body>v1</body></html>" })],
+		});
+	});
+
 	it("does not create a brand-new forward version when rolling back", async () => {
 		mkdirMock.mockRejectedValue(Object.assign(new Error("read only file system"), { code: "EROFS" }));
 

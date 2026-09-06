@@ -179,6 +179,37 @@ async function updateGeneratedTool(
 	return record;
 }
 
+async function updateGeneratedToolIfVersionMatches(
+	id: string,
+	expectedVersion: number,
+	updates: GeneratedToolContent
+): Promise<GeneratedToolRecord | null> {
+	const existing = await getGeneratedTool(id);
+	if (!existing || existing.version !== expectedVersion) return null;
+
+	const previousSnapshot = buildHistoryEntry(existing);
+	const record: GeneratedToolRecord = {
+		...updates,
+		id: existing.id,
+		createdAt: existing.createdAt,
+		updatedAt: new Date().toISOString(),
+		version: existing.version + 1,
+		history: [previousSnapshot, ...existing.history].slice(0, MAX_HISTORY_ENTRIES),
+	};
+	if (storageMode === "memory") {
+		memoryRecords.set(id, record);
+		return record;
+	}
+	try {
+		await writeFile(recordPath(id), JSON.stringify(record, null, 2), "utf8");
+	} catch (error) {
+		if (!shouldFallbackToMemory(error)) throw error;
+		activateMemoryFallback(error);
+		memoryRecords.set(id, record);
+	}
+	return record;
+}
+
 async function updateGeneratedToolVisualCongruence(
 	id: string,
 	expectedVersion: number,
@@ -332,6 +363,7 @@ export const fileToolStore: ToolStoreBackend = {
 	saveGeneratedTool,
 	getGeneratedTool,
 	updateGeneratedTool,
+	updateGeneratedToolIfVersionMatches,
 	updateGeneratedToolCompetitorContext,
 	updateGeneratedToolVisualCongruence,
 	rollbackGeneratedTool,

@@ -125,6 +125,11 @@ export interface ToolStoreBackend {
 	saveGeneratedTool(input: GeneratedToolContent, options?: SaveGeneratedToolOptions): Promise<GeneratedToolRecord>;
 	getGeneratedTool(id: string): Promise<GeneratedToolRecord | null>;
 	updateGeneratedTool(id: string, updates: GeneratedToolContent): Promise<GeneratedToolRecord | null>;
+	updateGeneratedToolIfVersionMatches(
+		id: string,
+		expectedVersion: number,
+		updates: GeneratedToolContent
+	): Promise<GeneratedToolRecord | null>;
 	updateGeneratedToolCompetitorContext(
 		id: string,
 		expectedVersion: number,

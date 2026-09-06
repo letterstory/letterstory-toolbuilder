@@ -58,6 +58,14 @@ export async function updateGeneratedTool(
 	return backend().updateGeneratedTool(id, updates);
 }
 
+export async function updateGeneratedToolIfVersionMatches(
+	id: string,
+	expectedVersion: number,
+	updates: GeneratedToolContent
+): Promise<GeneratedToolRecord | null> {
+	return backend().updateGeneratedToolIfVersionMatches(id, expectedVersion, updates);
+}
+
 export async function updateGeneratedToolCompetitorContext(
 	id: string,
 	expectedVersion: number,

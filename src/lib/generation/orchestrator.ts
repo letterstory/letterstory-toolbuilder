@@ -878,7 +878,7 @@ function shouldRequireExactLogoAsset(profile: BrandProfile): boolean {
 	return true;
 }
 
-async function requestToolHtml(opts: {
+export async function requestToolHtml(opts: {
 	projectName: string;
 	prompt: string;
 	brandSnapshot: GeneratedToolBrandSnapshot | null;

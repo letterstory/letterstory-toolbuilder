@@ -74,16 +74,22 @@ const getSupabaseClientMock = vi.hoisted(() =>
 						(candidate) =>
 							Object.entries(filters).every(([field, value]) => candidate[field as keyof ToolRow] === value)
 					);
-					return { data: row ? clone(row) : null, error: null };
+					if (!row) return { data: null, error: null };
+					if (!updatePayload) return { data: clone(row), error: null };
+					const nextRow = { ...row, ...clone(updatePayload) };
+					rows.set(row.id, nextRow);
+					return { data: clone(nextRow), error: null };
 				},
 				async single() {
-					const id = String(filters.id ?? "");
-					const row = rows.get(id);
+					const row = [...rows.values()].find(
+						(candidate) =>
+							Object.entries(filters).every(([field, value]) => candidate[field as keyof ToolRow] === value)
+					);
 					if (!row || !updatePayload) {
 						return { data: null, error: { message: "not found" } };
 					}
 					const nextRow = { ...row, ...clone(updatePayload) };
-					rows.set(id, nextRow);
+					rows.set(row.id, nextRow);
 					return { data: clone(nextRow), error: null };
 				},
 			};
@@ -170,5 +176,46 @@ describe("supabaseToolStore", () => {
 
 		await expect(supabaseToolStore.deleteGeneratedTool("tool-123")).resolves.toBe(true);
 		expect(rows.has("tool-123")).toBe(false);
+	});
+
+	it("bumps version with history only when the expected version still matches", async () => {
+		const { supabaseToolStore } = await import("../../src/lib/generation/store.supabase");
+
+		const skipped = await supabaseToolStore.updateGeneratedToolIfVersionMatches("tool-123", 2, {
+			projectName: "Calc",
+			prompt: "repair",
+			siteUrl: "https://stripe.com",
+			brandSnapshot: null,
+			html: "<!doctype html><html><body>repair</body></html>",
+			copy: { headline: "Repair", supportingCopy: "Updated version." },
+			brandFidelity: null,
+			visualCongruence: null,
+			model: "claude-sonnet-4-6",
+			warnings: ["repair"],
+		});
+		expect(skipped).toBeNull();
+
+		const updated = await supabaseToolStore.updateGeneratedToolIfVersionMatches("tool-123", 3, {
+			projectName: "Calc",
+			prompt: "repair",
+			siteUrl: "https://stripe.com",
+			brandSnapshot: null,
+			html: "<!doctype html><html><body>repair</body></html>",
+			copy: { headline: "Repair", supportingCopy: "Updated version." },
+			brandFidelity: null,
+			visualCongruence: null,
+			model: "claude-sonnet-4-6",
+			warnings: ["repair"],
+		});
+
+		expect(updated).toMatchObject({
+			id: "tool-123",
+			version: 4,
+			html: "<!doctype html><html><body>repair</body></html>",
+		});
+		expect(updated?.history[0]).toMatchObject({
+			version: 3,
+			html: "<!doctype html><html><body>v3</body></html>",
+		});
 	});
 });

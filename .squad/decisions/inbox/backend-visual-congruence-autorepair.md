@@ -1,0 +1,4 @@
+### 2026-09-06: Bound visual congruence auto-repair to one verified retry
+**By:** Backend
+**What:** A visual congruence `"fail"` now triggers exactly one background HTML repair attempt using the screenshot critique as revision instructions. If that repair returns valid HTML, the pipeline immediately re-runs the screenshot-based congruence analysis on the repaired result before persisting it as a new version; if the repair fails, times out, produces invalid HTML, or the tool version has moved on, the original HTML and original fail verdict remain in place.
+**Why:** The screenshot comparison is the only signal that can see full-layout gestalt issues, so it should be able to request a targeted fix, but an unbounded retry loop would waste model budget and risk racing against later manual revisions. Re-analysis makes the repair evidence-based instead of assuming the first edited HTML actually improved brand congruence.
