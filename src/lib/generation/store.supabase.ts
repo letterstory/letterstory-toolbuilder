@@ -155,6 +155,33 @@ async function updateGeneratedTool(
 	return rowToRecord(data as ToolRow);
 }
 
+async function updateGeneratedToolIfVersionMatches(
+	id: string,
+	expectedVersion: number,
+	updates: GeneratedToolContent
+): Promise<GeneratedToolRecord | null> {
+	const existing = await getGeneratedTool(id);
+	if (!existing || existing.version !== expectedVersion) return null;
+
+	const previousSnapshot = buildHistoryEntry(existing);
+	const nextHistory = [previousSnapshot, ...existing.history].slice(0, MAX_HISTORY_ENTRIES);
+
+	const { data, error } = await getSupabaseClient()
+		.from(TABLE)
+		.update({
+			...contentToRow(updates),
+			updated_at: new Date().toISOString(),
+			version: existing.version + 1,
+			history: nextHistory,
+		})
+		.eq("id", id)
+		.eq("version", expectedVersion)
+		.select()
+		.maybeSingle();
+	if (error || !data) return null;
+	return rowToRecord(data as ToolRow);
+}
+
 async function rollbackGeneratedTool(id: string, toVersion: number): Promise<GeneratedToolRecord | null> {
 	const existing = await getGeneratedTool(id);
 	if (!existing) return null;
@@ -244,6 +271,7 @@ export const supabaseToolStore: ToolStoreBackend = {
 	saveGeneratedTool,
 	getGeneratedTool,
 	updateGeneratedTool,
+	updateGeneratedToolIfVersionMatches,
 	updateGeneratedToolCompetitorContext,
 	updateGeneratedToolVisualCongruence,
 	rollbackGeneratedTool,
