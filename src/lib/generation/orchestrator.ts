@@ -157,10 +157,10 @@ export function isToolGenerationConfigured(): boolean {
 
 export async function generateTool(request: ToolGenerationRequest): Promise<ToolGenerationResult> {
 	const startedAt = Date.now();
-	if (!request.projectName.trim()) {
+	if (!request.toolId && !request.siteUrl.trim()) {
 		return {
 			status: "error",
-			message: "Enter a tool name before generating this tool.",
+			message: "Enter a brand site before generating this tool.",
 			diagnostics: emptyDiagnostics(Date.now() - startedAt),
 		};
 	}

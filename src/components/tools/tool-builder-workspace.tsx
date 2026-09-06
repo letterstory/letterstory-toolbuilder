@@ -38,7 +38,7 @@ import { normalizeSiteUrl } from "@/lib/utils";
 const INITIAL_STATUS: StatusMessage = {
 	title: "Ready to build",
 	description:
-		"Describe a branded micro-tool, optionally point at a brand site, and Toolbuilder will generate a real embeddable preview.",
+		"Describe a branded micro-tool, add a brand site, and Toolbuilder will generate a real embeddable preview. Leave the tool name blank if you want us to title it.",
 	tone: "info",
 };
 
@@ -256,15 +256,7 @@ export function ToolBuilderWorkspace() {
 		brandUpdateInput?: BuilderBrandUpdateInput;
 	}) {
 		const trimmedProjectName = projectName.trim();
-		if (!trimmedProjectName) {
-			setStatusMessage({
-				title: "Tool name required",
-				description: "Enter a tool name before generating or updating this tool.",
-				tone: "destructive",
-			});
-			return;
-		}
-
+		const normalizedSiteUrl = normalizeSiteUrl(siteUrl);
 		const trimmedPrompt = promptText.trim();
 		if (!trimmedPrompt) {
 			setStatusMessage({
@@ -277,8 +269,17 @@ export function ToolBuilderWorkspace() {
 			return;
 		}
 
+		if (!toolId && !normalizedSiteUrl) {
+			setSiteUrl(normalizedSiteUrl);
+			setStatusMessage({
+				title: "Brand site required",
+				description: "Enter a brand site before generating this tool.",
+				tone: "destructive",
+			});
+			return;
+		}
+
 		setProjectName(trimmedProjectName);
-		const normalizedSiteUrl = normalizeSiteUrl(siteUrl);
 		setSiteUrl(normalizedSiteUrl);
 		setRequestState(toolId ? "updating" : "generating");
 		setCopiedTarget(null);
@@ -297,13 +298,12 @@ export function ToolBuilderWorkspace() {
 		setActiveRun(currentRun);
 		setActivitySteps(estimateActivitySteps(currentRun));
 		setProgress(estimateProgress(currentRun));
+		const requestMetaBase = toolId ? "Update request" : "Build request";
 		appendConversation({
 			id: crypto.randomUUID(),
 			role: "user",
 			content: trimmedPrompt,
-			meta: toolId
-				? `Update request · ${trimmedProjectName}`
-				: `Build request · ${trimmedProjectName}`,
+			meta: trimmedProjectName ? `${requestMetaBase} · ${trimmedProjectName}` : requestMetaBase,
 		});
 		setStatusMessage({
 			title: toolId ? "Updating tool" : "Generating tool",

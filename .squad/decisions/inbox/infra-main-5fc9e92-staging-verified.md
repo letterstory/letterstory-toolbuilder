@@ -1,0 +1,4 @@
+### 2026-09-06: Verified main commit 5fc9e92 reached Porter staging via auto-triggered GitHub Actions deploy
+**By:** Infra
+**What:** Confirmed the `Deploy to letterstory-toolbuilder` GitHub Actions workflow auto-triggered on `main` push for commit `5fc9e92551463e53db915bc57146ecba7812733f` (run `34052239526`), watched it complete successfully, then verified the live Porter staging app at `https://web-22301-57c6c7ab-4p0z458q.onporter.run` by generating a fresh Gymshark BMI tool (`457e6aae-c973-412b-9a78-b3d9585f0380`). The live `/t/457e6aae-c973-412b-9a78-b3d9585f0380` HTML contains exactly one `<h1>`, and its text is `BMI Calculator`.
+**Why:** The repo’s deploy workflow is configured to trigger automatically on pushes to `main`, so re-dispatching would have been redundant. Successful live generation plus a single matching `<h1>` on the hosted tool is direct evidence that the duplicate project-name heading fix from `5fc9e92` is present in staging.

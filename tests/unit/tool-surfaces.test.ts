@@ -170,19 +170,50 @@ describe("tool surfaces embed snippet parity", () => {
 		});
 	});
 
-	it("rejects blank project names before calling generateTool", async () => {
+	it("rejects missing site urls for new tools before calling generateTool", async () => {
 		const response = await generateToolSurface({
-			projectName: "   ",
-			siteUrl: "https://stripe.com",
+			projectName: "BMI Calculator",
+			siteUrl: "   ",
 			prompt: "Build a BMI calculator",
 		});
 
 		expect(response.statusCode).toBe(400);
 		expect(response.body).toMatchObject({
 			status: "error",
-			message: "Enter a tool name before generating this tool.",
+			message: "Enter a brand site before generating this tool.",
 		});
 		expect(generateToolMock).not.toHaveBeenCalled();
+	});
+
+	it("allows blank project names for new tools and passes an empty string downstream", async () => {
+		generateToolMock.mockResolvedValue({
+			status: "success",
+			tool: {
+				...baseTool,
+				projectName: "Untitled tool",
+			},
+		});
+
+		const response = await generateToolSurface({
+			projectName: "   ",
+			siteUrl: "https://stripe.com",
+			prompt: "Build a BMI calculator",
+		});
+
+		expect(response.statusCode).toBe(200);
+		expect(generateToolMock).toHaveBeenCalledWith({
+			projectName: "",
+			siteUrl: "https://stripe.com",
+			prompt: "Build a BMI calculator",
+			toolId: undefined,
+			brandOverrides: undefined,
+		});
+		expect(response.body).toMatchObject({
+			status: "success",
+			tool: {
+				projectName: "Untitled tool",
+			},
+		});
 	});
 
 	it("keeps list-generated-tools summaries free of embedSnippet", async () => {

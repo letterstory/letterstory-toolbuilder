@@ -88,7 +88,7 @@ export function BuilderPreviewCanvas({
 	}, [activeTool]);
 
 	if (showGenerationTakeover) {
-		const label = activeRun?.brandName || activeRun?.projectName || "your";
+		const label = activeRun?.brandName || activeRun?.projectName || "";
 		const tip = activeRun?.siteUrl
 			? "Refine the prompt in chat to steer layout, copy, and interactions while brand ingestion runs."
 			: "Add a brand site on the left if you want Toolbuilder to ingest logo, colors, fonts, and host the final iframe.";
@@ -96,7 +96,7 @@ export function BuilderPreviewCanvas({
 			<div className="flex h-full min-h-[72vh] flex-col items-center justify-center border border-brand/10 bg-[linear-gradient(180deg,_white_0%,_color-mix(in_oklab,var(--brand-light)_18%,white)_100%)] px-6 text-center lg:min-h-[calc(100vh-16rem)]">
 				<LoadingMark />
 				<h2 className="mt-10 text-balance font-serif text-3xl font-medium leading-[1.2] tracking-tight text-slate-800 sm:text-[2rem]">
-					Building your {label} tool
+					Building your {label ? `${label} ` : ""}tool
 					<span
 						className="builder-loading-dots ml-1 inline-block w-6 text-left text-brand"
 						aria-hidden

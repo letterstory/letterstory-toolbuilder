@@ -134,14 +134,22 @@ describe("generateTool", () => {
 	it("reports not_configured when ANTHROPIC_API_KEY is unset", async () => {
 		delete process.env.ANTHROPIC_API_KEY;
 
-		const result = await generateTool({ projectName: "Calc", siteUrl: "", prompt: "a calculator" });
+		const result = await generateTool({
+			projectName: "Calc",
+			siteUrl: "https://stripe.com",
+			prompt: "a calculator",
+		});
 
 		expect(result.status).toBe("not_configured");
 		expect(isToolGenerationConfigured()).toBe(false);
 	});
 
 	it("rejects an empty prompt without calling Anthropic", async () => {
-		const result = await generateTool({ projectName: "Calc", siteUrl: "", prompt: "   " });
+		const result = await generateTool({
+			projectName: "Calc",
+			siteUrl: "https://stripe.com",
+			prompt: "   ",
+		});
 
 		expect(result.status).toBe("error");
 		if (result.status === "error") {
@@ -149,27 +157,58 @@ describe("generateTool", () => {
 		}
 	});
 
-	it("rejects an empty project name without calling Anthropic", async () => {
-		const result = await generateTool({ projectName: "   ", siteUrl: "", prompt: "a calculator" });
+	it("rejects a missing site url for new tools without calling Anthropic", async () => {
+		const result = await generateTool({
+			projectName: "Calc",
+			siteUrl: "   ",
+			prompt: "a calculator",
+		});
 
 		expect(result.status).toBe("error");
 		if (result.status === "error") {
-			expect(result.message).toMatch(/enter a tool name/i);
+			expect(result.message).toMatch(/enter a brand site/i);
 		}
 		expect(global.fetch).toBe(originalFetch);
 	});
 
-	it("generates successfully without brand context when no siteUrl is given", async () => {
+	it("defaults a blank project name to Untitled tool for new tools", async () => {
 		mockAnthropicSuccess("<!doctype html><html><body>hi</body></html>");
 
-		const result = await generateTool({ projectName: "Calc", siteUrl: "", prompt: "a calculator" });
+		const result = await generateTool({
+			projectName: "   ",
+			siteUrl: "https://stripe.com",
+			prompt: "a calculator",
+		});
+
+		expect(result.status).toBe("success");
+		if (result.status === "success") {
+			expect(result.tool.projectName).toBe("Untitled tool");
+		}
+		expect(saveGeneratedToolMock).toHaveBeenCalledWith(
+			expect.objectContaining({
+				projectName: "Untitled tool",
+				siteUrl: "https://stripe.com",
+			})
+		);
+	});
+
+	it("generates successfully without brand context when siteUrl ingestion is unavailable", async () => {
+		mockAnthropicSuccess("<!doctype html><html><body>hi</body></html>");
+
+		const result = await generateTool({
+			projectName: "Calc",
+			siteUrl: "https://stripe.com",
+			prompt: "a calculator",
+		});
 
 		expect(pullBrandProfileMock).not.toHaveBeenCalled();
 		expect(result.status).toBe("success");
 		if (result.status === "success") {
 			expect(result.tool.brandSnapshot).toBeNull();
 			expect(result.tool.html).toContain("<!doctype html>");
-			expect(result.tool.warnings).toEqual([]);
+			expect(result.tool.warnings).toEqual([
+				"Context.dev isn't configured, so this tool was generated without brand context.",
+			]);
 		}
 	});
 
@@ -222,7 +261,7 @@ describe("generateTool", () => {
 
 		const result = await generateTool({
 			projectName: "Invoice Late Fee Calculator",
-			siteUrl: "",
+			siteUrl: "https://ramp.com",
 			prompt: "estimate late fees for overdue invoices",
 		});
 
@@ -1074,7 +1113,11 @@ describe("generateTool", () => {
 	it("generates supporting headline/copy alongside the tool", async () => {
 		mockAnthropicSuccess("<!doctype html><html><body>hi</body></html>");
 
-		const result = await generateTool({ projectName: "Calc", siteUrl: "", prompt: "a calculator" });
+		const result = await generateTool({
+			projectName: "Calc",
+			siteUrl: "https://stripe.com",
+			prompt: "a calculator",
+		});
 
 		expect(result.status).toBe("success");
 		if (result.status === "success") {
@@ -1104,7 +1147,11 @@ describe("generateTool", () => {
 			);
 		}) as unknown as typeof fetch;
 
-		const result = await generateTool({ projectName: "Calc", siteUrl: "", prompt: "a calculator" });
+		const result = await generateTool({
+			projectName: "Calc",
+			siteUrl: "https://stripe.com",
+			prompt: "a calculator",
+		});
 
 		expect(result.status).toBe("success");
 		if (result.status === "success") {
@@ -1793,7 +1840,11 @@ describe("generateTool", () => {
 					new Response(JSON.stringify({ error: { message: "rate limited" } }), { status: 429 })
 			) as unknown as typeof fetch;
 
-		const result = await generateTool({ projectName: "Calc", siteUrl: "", prompt: "a calculator" });
+		const result = await generateTool({
+			projectName: "Calc",
+			siteUrl: "https://stripe.com",
+			prompt: "a calculator",
+		});
 
 		expect(result.status).toBe("error");
 		if (result.status === "error") {
@@ -1808,7 +1859,11 @@ describe("generateTool", () => {
 			.mockRejectedValueOnce(new Error("The operation was aborted due to timeout"));
 		global.fetch = fetchMock as unknown as typeof fetch;
 
-		const result = await generateTool({ projectName: "Calc", siteUrl: "", prompt: "a calculator" });
+		const result = await generateTool({
+			projectName: "Calc",
+			siteUrl: "https://stripe.com",
+			prompt: "a calculator",
+		});
 
 		expect(fetchMock).toHaveBeenCalledTimes(1);
 		expect(result.status).toBe("error");
@@ -1834,7 +1889,11 @@ describe("generateTool", () => {
 			.mockResolvedValue(advisoryFallbackResponse());
 		global.fetch = fetchMock as unknown as typeof fetch;
 
-		const result = await generateTool({ projectName: "Calc", siteUrl: "", prompt: "a calculator" });
+		const result = await generateTool({
+			projectName: "Calc",
+			siteUrl: "https://stripe.com",
+			prompt: "a calculator",
+		});
 
 		expect(fetchMock).toHaveBeenCalledTimes(3);
 		expect(result.status).toBe("success");
@@ -1849,7 +1908,11 @@ describe("generateTool", () => {
 			);
 		mockAnthropicSuccess("<!doctype html><html><body>hi</body></html>");
 
-		const result = await generateTool({ projectName: "Calc", siteUrl: "", prompt: "a calculator" });
+		const result = await generateTool({
+			projectName: "Calc",
+			siteUrl: "https://stripe.com",
+			prompt: "a calculator",
+		});
 
 		expect(result.status).toBe("success");
 		expect(timeoutSpy).toHaveBeenNthCalledWith(1, 210000);
@@ -1860,7 +1923,11 @@ describe("generateTool", () => {
 	it("returns an error result when Anthropic returns no text content at all", async () => {
 		mockAnthropicSuccess("");
 
-		const result = await generateTool({ projectName: "Calc", siteUrl: "", prompt: "a calculator" });
+		const result = await generateTool({
+			projectName: "Calc",
+			siteUrl: "https://stripe.com",
+			prompt: "a calculator",
+		});
 
 		expect(result.status).toBe("error");
 		expect(saveGeneratedToolMock).not.toHaveBeenCalled();
@@ -1888,7 +1955,11 @@ describe("generateTool", () => {
 			.mockResolvedValue(advisoryFallbackResponse());
 		global.fetch = fetchMock as unknown as typeof fetch;
 
-		const result = await generateTool({ projectName: "Calc", siteUrl: "", prompt: "a calculator" });
+		const result = await generateTool({
+			projectName: "Calc",
+			siteUrl: "https://stripe.com",
+			prompt: "a calculator",
+		});
 
 		// 2 attempts for the main HTML generation + 1 advisory supporting-copy call.
 		expect(fetchMock).toHaveBeenCalledTimes(3);
@@ -1910,7 +1981,11 @@ describe("generateTool", () => {
 		);
 		global.fetch = fetchMock as unknown as typeof fetch;
 
-		const result = await generateTool({ projectName: "Calc", siteUrl: "", prompt: "a calculator" });
+		const result = await generateTool({
+			projectName: "Calc",
+			siteUrl: "https://stripe.com",
+			prompt: "a calculator",
+		});
 
 		expect(fetchMock).toHaveBeenCalledTimes(2);
 		expect(result.status).toBe("error");
@@ -2016,6 +2091,26 @@ describe("generateTool — revisions (toolId set)", () => {
 		expect(updateGeneratedToolMock).toHaveBeenCalledWith(
 			"tool-123",
 			expect.objectContaining({ html: expect.stringContaining("revised") })
+		);
+	});
+
+	it("allows revisions to proceed without a site url in the request", async () => {
+		getGeneratedToolMock.mockResolvedValue(existingTool);
+		mockAnthropicSuccess("<!doctype html><html><body>revised</body></html>");
+
+		const result = await generateTool({
+			projectName: "Mileage Calculator",
+			siteUrl: "   ",
+			prompt: "tighten the copy",
+			toolId: "tool-123",
+		});
+
+		expect(result.status).toBe("success");
+		expect(updateGeneratedToolMock).toHaveBeenCalledWith(
+			"tool-123",
+			expect.objectContaining({
+				siteUrl: existingTool.siteUrl,
+			})
 		);
 	});
 

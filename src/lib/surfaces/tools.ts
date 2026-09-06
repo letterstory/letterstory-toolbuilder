@@ -210,24 +210,25 @@ export async function generateToolSurface(
 			}),
 		};
 	}
-	if (!parsed.data.projectName?.trim()) {
+	const toolId =
+		typeof parsed.data.toolId === "string" && parsed.data.toolId.trim()
+			? parsed.data.toolId.trim()
+			: undefined;
+	if (!toolId && !parsed.data.siteUrl?.trim()) {
 		return {
 			statusCode: 400,
 			body: generateToolOutputSchema.parse({
 				status: "error",
-				message: "Enter a tool name before generating this tool.",
+				message: "Enter a brand site before generating this tool.",
 			}),
 		};
 	}
 
 	const result = await generateTool({
-		projectName: parsed.data.projectName,
+		projectName: parsed.data.projectName?.trim() || "",
 		siteUrl: typeof parsed.data.siteUrl === "string" ? parsed.data.siteUrl : "",
 		prompt: parsed.data.prompt,
-		toolId:
-			typeof parsed.data.toolId === "string" && parsed.data.toolId.trim()
-				? parsed.data.toolId.trim()
-				: undefined,
+		toolId,
 		brandOverrides: parsed.data.brandOverrides,
 	});
 	const { diagnostics, ...responseBody } = result;

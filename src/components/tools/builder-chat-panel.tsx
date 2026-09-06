@@ -85,6 +85,7 @@ export function BuilderChatPanel({
 	onRollback,
 	composerRef,
 }: BuilderChatPanelProps) {
+	const isNewTool = !activeTool;
 	const isRunning = requestState !== "idle";
 	const showSuggestionPanel = Boolean(siteUrl.trim()) && !prompt.trim() && messages.length === 0;
 	const [revisionSuggestionsExpanded, setRevisionSuggestionsExpanded] = useState(true);
@@ -109,7 +110,9 @@ export function BuilderChatPanel({
 				: "Building your tool…"
 		: messages.length > 0
 			? "Continue the conversation to refine this tool."
-			: "Start with a name, optional brand site, and your build prompt.";
+			: isNewTool
+				? "Start with a brand site, optional tool name, and your build prompt."
+				: "Continue refining the name, brand site, or prompt for this tool.";
 
 	useEffect(() => {
 		setRevisionSuggestionsExpanded(true);
@@ -167,25 +170,25 @@ export function BuilderChatPanel({
 					<div className="grid gap-3 sm:grid-cols-2">
 						<label className="space-y-2">
 							<span className="text-xs font-medium uppercase tracking-[0.16em] text-brand-text/70">
-								Tool name *
+								Tool name
 							</span>
 							<Input
 								value={projectName}
 								onChange={(event) => onProjectNameChange(event.target.value)}
-								placeholder="Stripe pricing estimator"
-								required
+								placeholder="Optional — e.g. Stripe pricing estimator"
 								className="h-11 rounded-2xl border-brand/10 bg-brand-light/12 px-4 shadow-none focus-visible:border-brand/30 focus-visible:ring-brand/20"
 							/>
 						</label>
 						<label className="space-y-2">
 							<span className="text-xs font-medium uppercase tracking-[0.16em] text-brand-text/70">
-								Brand site
+								Brand site{isNewTool ? " *" : ""}
 							</span>
 							<Input
 								value={siteUrl}
 								onChange={(event) => onSiteUrlChange(event.target.value)}
 								onBlur={onNormalizeSiteUrl}
 								placeholder="https://stripe.com"
+								required={isNewTool}
 								className="h-11 rounded-2xl border-brand/10 bg-brand-light/12 px-4 shadow-none focus-visible:border-brand/30 focus-visible:ring-brand/20"
 							/>
 						</label>
@@ -200,7 +203,9 @@ export function BuilderChatPanel({
 						<span>
 							{activeBrandName
 								? `Current brand context: ${activeBrandName}`
-								: "Optional brand site will drive logo, colors, fonts, and hosted embed output."}
+								: isNewTool
+									? "Brand site drives logo, colors, fonts, and hosted embed output — required to generate a tool. Leave the name blank and we'll title it for you."
+									: "Brand site drives logo, colors, fonts, and hosted embed output."}
 						</span>
 					</div>
 				</div>
