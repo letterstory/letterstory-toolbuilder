@@ -1,4 +1,5 @@
 import { envServer } from "@/lib/config/env.server";
+import { captureFirecrawlScreenshotUrl } from "@/lib/brand/firecrawl-screenshot";
 import { resolveCanonicalLogo, type CanonicalLogoResult } from "@/lib/brand/logo";
 import {
 	contextRetrieveBrand,
@@ -224,6 +225,22 @@ interface AnthropicMessageBlock {
 	text?: string;
 }
 
+interface AnthropicImageSource {
+	type: "base64";
+	media_type: "image/png" | "image/jpeg" | "image/webp";
+	data: string;
+}
+
+interface AnthropicImageBlock {
+	type: "image";
+	source: AnthropicImageSource;
+}
+
+interface AnthropicTextBlock {
+	type: "text";
+	text: string;
+}
+
 interface AnthropicMessagesResponse {
 	content?: AnthropicMessageBlock[];
 	error?: {
@@ -237,6 +254,25 @@ const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-6";
 const MAX_MARKDOWN_CHARS_FOR_VALIDATION = 6_000;
 const MIN_BRAND_SATURATION = 0.15;
 const MIN_SWATCH_DISTANCE = 40;
+const SCREENSHOT_DOWNLOAD_TIMEOUT_MS = 20_000;
+const SCREENSHOT_COLOR_MISMATCH_DISTANCE = MIN_SWATCH_DISTANCE * 1.5;
+const MAX_SCREENSHOT_BYTES_FOR_VISION = 5_000_000;
+
+interface ValidationScreenshotImage {
+	base64: string;
+	mediaType: AnthropicImageSource["media_type"];
+}
+
+interface ScreenshotColorCheck {
+	observedColors: string[];
+	confidence: BrandValidationConfidence;
+	summary: string;
+}
+
+interface AnthropicAssessmentResult {
+	assessment: BrandFidelityAssessment;
+	screenshotColorCheck: ScreenshotColorCheck | null;
+}
 
 export function isBrandIngestionConfigured(): boolean {
 	return Boolean(envServer.CONTEXT_DEV_API_KEY);
@@ -486,6 +522,137 @@ function normalizeAssessment(value: unknown): BrandFidelityAssessment {
 						.filter((entry): entry is string => Boolean(entry))
 				: [],
 		},
+	};
+}
+
+function normalizeScreenshotColorCheck(value: unknown): ScreenshotColorCheck | null {
+	if (!isRecord(value)) return null;
+
+	const observedColors = Array.isArray(value.observedColors)
+		? dedupeStrings(
+				value.observedColors
+					.map((entry) => normalizeColorHex(readString(entry) ?? ""))
+					.filter((entry): entry is string => Boolean(entry))
+			).slice(0, 5)
+		: [];
+
+	if (!observedColors.length) return null;
+
+	return {
+		observedColors,
+		confidence: normalizeValidationConfidence(value.confidence),
+		summary: readString(value.summary) ?? "Screenshot supplied limited brand-color evidence.",
+	};
+}
+
+function compareGapSeverity(
+	left: BrandValidationGapSeverity,
+	right: BrandValidationGapSeverity
+): BrandValidationGapSeverity {
+	const rank: Record<BrandValidationGapSeverity, number> = {
+		low: 1,
+		medium: 2,
+		high: 3,
+	};
+	return rank[left] >= rank[right] ? left : right;
+}
+
+function pickColorCrossCheckTargets(colors: Record<string, string>): Array<{ label: string; hex: string }> {
+	const selected: Array<{ label: string; hex: string }> = [];
+	const seen = new Set<string>();
+
+	const maybePush = (label: string, value: string | null | undefined) => {
+		const normalized = normalizeColorHex(value ?? "");
+		if (!normalized || seen.has(normalized)) return;
+		seen.add(normalized);
+		selected.push({ label, hex: normalized });
+	};
+
+	for (const key of ["primary", "accent", "secondary"] as const) {
+		maybePush(key, colors[key]);
+	}
+
+	for (const [key, value] of Object.entries(colors)) {
+		if (selected.length >= 2) break;
+		if (key === "background" || key === "text") continue;
+		maybePush(key, value);
+	}
+
+	return selected.slice(0, 2);
+}
+
+function applyScreenshotColorCrossCheck(
+	assessment: BrandFidelityAssessment,
+	profile: BrandProfile,
+	screenshotColorCheck: ScreenshotColorCheck | null
+): BrandFidelityAssessment {
+	if (!screenshotColorCheck || screenshotColorCheck.confidence === "low") {
+		return assessment;
+	}
+
+	const expectedColors = pickColorCrossCheckTargets(profile.colors);
+	if (!expectedColors.length || !screenshotColorCheck.observedColors.length) {
+		return assessment;
+	}
+
+	const mismatches = expectedColors
+		.map((expected) => ({
+			...expected,
+			minDistance: Math.min(
+				...screenshotColorCheck.observedColors.map((observed) => colorDistance(expected.hex, observed))
+			),
+		}))
+		.filter((entry) => entry.minDistance >= SCREENSHOT_COLOR_MISMATCH_DISTANCE);
+
+	if (!mismatches.length) {
+		return assessment;
+	}
+
+	const severity: BrandValidationGapSeverity =
+		screenshotColorCheck.confidence === "high" && mismatches.length === expectedColors.length
+			? "high"
+			: "medium";
+	const expectedSummary = expectedColors.map((entry) => `${entry.label}=${entry.hex}`).join(", ");
+	const observedSummary = screenshotColorCheck.observedColors.join(", ");
+	const screenshotEvidence = `Context.dev colors: ${expectedSummary}. Screenshot-observed colors: ${observedSummary}. ${screenshotColorCheck.summary}`;
+	const screenshotRecommendation =
+		"Review or override the extracted brand-color tokens against the live screenshot before treating them as authoritative.";
+	const existingColorGapIndex = assessment.gaps.findIndex((gap) => gap.field === "colors");
+	const gaps = [...assessment.gaps];
+
+	if (existingColorGapIndex >= 0) {
+		const existing = gaps[existingColorGapIndex];
+		gaps[existingColorGapIndex] = {
+			...existing,
+			severity: compareGapSeverity(existing.severity, severity),
+			issue: existing.issue.includes("Screenshot")
+				? existing.issue
+				: `${existing.issue} Screenshot cross-check suggests the extracted palette diverges from the live site.`,
+			evidence: `${existing.evidence} ${screenshotEvidence}`.trim(),
+			recommendation: dedupeStrings([existing.recommendation, screenshotRecommendation]).join(" "),
+		};
+	} else {
+		gaps.push({
+			field: "colors",
+			severity,
+			issue: "Screenshot cross-check suggests the extracted palette diverges from the live site.",
+			evidence: screenshotEvidence,
+			recommendation: screenshotRecommendation,
+		});
+	}
+
+	const summarySuffix = "Screenshot color cross-check indicates the extracted palette may be off.";
+	return {
+		...assessment,
+		status: assessment.status === "fail" ? "fail" : "warn",
+		similarityScore:
+			assessment.status === "fail"
+				? assessment.similarityScore
+				: Math.max(0, assessment.similarityScore - (severity === "high" ? 15 : 8)),
+		summary: assessment.summary.includes(summarySuffix)
+			? assessment.summary
+			: `${assessment.summary} ${summarySuffix}`.trim(),
+		gaps: gaps.slice(0, 4),
 	};
 }
 
@@ -1386,11 +1553,66 @@ async function fetchSiteReference(
 	};
 }
 
+async function prepareValidationScreenshot(
+	siteUrl: string
+): Promise<ValidationScreenshotImage | null> {
+	const screenshotUrl = await captureFirecrawlScreenshotUrl(siteUrl);
+	if (!screenshotUrl) return null;
+
+	try {
+		const safety = await isSafeHttpsUrl(screenshotUrl);
+		if (!safety.ok) return null;
+
+		const response = await fetch(screenshotUrl, {
+			signal: AbortSignal.timeout(SCREENSHOT_DOWNLOAD_TIMEOUT_MS),
+		});
+		if (!response.ok) return null;
+
+		const contentType = (response.headers.get("content-type") ?? "")
+			.split(";")[0]
+			.trim()
+			.toLowerCase();
+		const supportedContentType =
+			contentType === "image/png" || contentType === "image/jpeg" || contentType === "image/webp"
+				? (contentType as ValidationScreenshotImage["mediaType"])
+				: null;
+		if (!supportedContentType) return null;
+
+		const bytes = Buffer.from(await response.arrayBuffer());
+		if (!bytes.byteLength) return null;
+		if (bytes.byteLength <= MAX_SCREENSHOT_BYTES_FOR_VISION) {
+			return {
+				base64: bytes.toString("base64"),
+				mediaType: supportedContentType,
+			};
+		}
+
+		const sharp = (await import("sharp")).default;
+		const resized = await sharp(bytes)
+			.resize({
+				width: 1600,
+				height: 1600,
+				fit: "inside",
+				withoutEnlargement: true,
+			})
+			.jpeg({ quality: 82 })
+			.toBuffer();
+
+		return {
+			base64: resized.toString("base64"),
+			mediaType: "image/jpeg",
+		};
+	} catch {
+		return null;
+	}
+}
+
 async function requestAnthropicAssessment(
 	profile: BrandProfile,
 	siteUrl: string,
-	referenceMarkdown: string
-): Promise<BrandFidelityAssessment> {
+	referenceMarkdown: string,
+	screenshot: ValidationScreenshotImage | null
+): Promise<AnthropicAssessmentResult> {
 	const apiKey = envServer.ANTHROPIC_API_KEY;
 	if (!apiKey) {
 		throw new Error("Brand validation requires Anthropic (ANTHROPIC_API_KEY is unset)");
@@ -1425,14 +1647,30 @@ async function requestAnthropicAssessment(
 					spacingRhythm: "tight | balanced | airy | null",
 					distinctiveTraits: ["array of strings"],
 				},
+				screenshotColorCheck: {
+					observedColors: ["array of 3-5 approximate #RRGGBB values, or empty array"],
+					confidence: "low | medium | high",
+					summary: "short string",
+				},
 			},
 			null,
 			2
 		),
 		"Judge whether the extracted profile is good enough to guide a generated page so it would still feel like the same brand.",
-		"You are working from Context.dev extraction and rendered homepage markdown, not a screenshot, so call out missing cues conservatively.",
+		screenshot
+			? "You are working from Context.dev extraction, rendered homepage markdown, and a real homepage screenshot. Use the screenshot as an independent pixel-level cross-check for the brand palette."
+			: "You are working from Context.dev extraction and rendered homepage markdown, with no screenshot, so call out missing cues conservatively.",
+		screenshot
+			? "When a screenshot is attached, independently report 3-5 dominant non-neutral brand/UI colors you can actually see in screenshotColorCheck.observedColors. Ignore white/black neutrals unless they are themselves a distinctive brand color."
+			: "Set screenshotColorCheck.observedColors to an empty array when no screenshot is attached.",
 		"Keep the response concise: no more than 4 gaps, short evidence strings, and short recommendations.",
 	].join("\n");
+
+	const userText = [
+		`Site URL: ${siteUrl}`,
+		`Structured brand profile: ${JSON.stringify(createValidationPromptProfile(profile), null, 2)}`,
+		`Homepage markdown excerpt: ${referenceMarkdown.slice(0, MAX_MARKDOWN_CHARS_FOR_VALIDATION)}`,
+	].join("\n\n");
 
 	const response = await fetch("https://api.anthropic.com/v1/messages", {
 		method: "POST",
@@ -1449,10 +1687,23 @@ async function requestAnthropicAssessment(
 				{
 					role: "user",
 					content: [
-						`Site URL: ${siteUrl}`,
-						`Structured brand profile: ${JSON.stringify(createValidationPromptProfile(profile), null, 2)}`,
-						`Homepage markdown excerpt: ${referenceMarkdown.slice(0, MAX_MARKDOWN_CHARS_FOR_VALIDATION)}`,
-					].join("\n\n"),
+						{
+							type: "text",
+							text: userText,
+						} satisfies AnthropicTextBlock,
+						...(screenshot
+							? [
+									{
+										type: "image",
+										source: {
+											type: "base64",
+											media_type: screenshot.mediaType,
+											data: screenshot.base64,
+										},
+									} satisfies AnthropicImageBlock,
+								]
+							: []),
+					],
 				},
 			],
 		}),
@@ -1475,7 +1726,11 @@ async function requestAnthropicAssessment(
 		throw new Error("Anthropic validation returned no text response.");
 	}
 
-	return normalizeAssessment(parseJsonObject(text));
+	const parsed = parseJsonObject<Record<string, unknown>>(text);
+	return {
+		assessment: normalizeAssessment(parsed),
+		screenshotColorCheck: normalizeScreenshotColorCheck(parsed.screenshotColorCheck),
+	};
 }
 
 function normalizeColorHex(value: string): string | null {
@@ -1589,7 +1844,10 @@ export async function validateBrandFidelity(
 			};
 		}
 
-		const reference = await fetchSiteReference(normalizedUrl);
+		const [reference, screenshot] = await Promise.all([
+			fetchSiteReference(normalizedUrl),
+			prepareValidationScreenshot(normalizedUrl),
+		]);
 		const fallbackReferenceText = dedupeStrings([
 			readString(profile.metadata.title),
 			readString(profile.metadata.description),
@@ -1604,7 +1862,17 @@ export async function validateBrandFidelity(
 			};
 		}
 
-		const assessment = await requestAnthropicAssessment(profile, normalizedUrl, referenceMarkdown);
+		const { assessment: rawAssessment, screenshotColorCheck } = await requestAnthropicAssessment(
+			profile,
+			normalizedUrl,
+			referenceMarkdown,
+			screenshot
+		);
+		const assessment = applyScreenshotColorCrossCheck(
+			rawAssessment,
+			profile,
+			screenshotColorCheck
+		);
 		return {
 			status: "success",
 			requestedUrl: siteUrl,

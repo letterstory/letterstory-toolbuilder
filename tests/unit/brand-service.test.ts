@@ -2,9 +2,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import sharp from "sharp";
 
 const isSafeHttpsUrlMock = vi.hoisted(() => vi.fn());
+const captureFirecrawlScreenshotUrlMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/net/ssrf", () => ({
 	isSafeHttpsUrl: isSafeHttpsUrlMock,
+}));
+
+vi.mock("@/lib/brand/firecrawl-screenshot", () => ({
+	captureFirecrawlScreenshotUrl: captureFirecrawlScreenshotUrlMock,
 }));
 
 import {
@@ -22,6 +27,7 @@ const originalEnv = {
 	ANTHROPIC_MODEL: process.env.ANTHROPIC_MODEL,
 	CONTEXT_DEV_API_KEY: process.env.CONTEXT_DEV_API_KEY,
 	CONTEXT_DEV_BASE_URL: process.env.CONTEXT_DEV_BASE_URL,
+	FIRECRAWL_API_KEY: process.env.FIRECRAWL_API_KEY,
 };
 
 describe("brand service", () => {
@@ -29,6 +35,8 @@ describe("brand service", () => {
 		vi.restoreAllMocks();
 		isSafeHttpsUrlMock.mockReset();
 		isSafeHttpsUrlMock.mockResolvedValue({ ok: true });
+		captureFirecrawlScreenshotUrlMock.mockReset();
+		captureFirecrawlScreenshotUrlMock.mockResolvedValue(null);
 		global.fetch = originalFetch;
 
 		for (const [key, value] of Object.entries(originalEnv)) {
@@ -667,6 +675,118 @@ describe("brand service", () => {
 				}),
 			})
 		);
+	});
+
+	it("adds a screenshot-backed color gap when Firecrawl and vision disagree with Context.dev colors", async () => {
+		process.env.CONTEXT_DEV_API_KEY = "configured-key";
+		process.env.ANTHROPIC_API_KEY = "configured-key";
+		process.env.FIRECRAWL_API_KEY = "configured-key";
+		captureFirecrawlScreenshotUrlMock.mockResolvedValue("https://cdn.firecrawl.dev/google.png");
+
+		const profile = {
+			...(await pullProfileFixture()),
+			url: "https://google.com",
+			colors: {
+				primary: "#ED943B",
+				secondary: "#26A1B1",
+				background: "#FFFFFF",
+				text: "#1F1F1F",
+			},
+		};
+		const screenshotBytes = await sharp({
+			create: {
+				width: 1200,
+				height: 900,
+				channels: 4,
+				background: { r: 66, g: 133, b: 244, alpha: 1 },
+			},
+		})
+			.png()
+			.toBuffer();
+
+		global.fetch = vi
+			.fn()
+			.mockResolvedValueOnce(
+				new Response(
+					JSON.stringify({
+						url: "https://google.com",
+						markdown: "# Google\n\nSearch for anything.",
+					}),
+					{ status: 200 }
+				)
+			)
+			.mockResolvedValueOnce(
+				new Response(screenshotBytes, {
+					status: 200,
+					headers: { "Content-Type": "image/png" },
+				})
+			)
+			.mockResolvedValueOnce(
+				new Response(
+					JSON.stringify({
+						content: [
+							{
+								type: "text",
+								text: JSON.stringify({
+									status: "pass",
+									similarityScore: 88,
+									confidence: "high",
+									summary: "The extracted profile generally matches the site.",
+									confirmedSignals: ["clean search-first layout"],
+									gaps: [],
+									derivedSignals: {
+										toneOfVoice: "simple and helpful",
+										imageryStyle: "minimal UI with product accents",
+										typeHierarchy: "balanced",
+										spacingRhythm: "airy",
+										distinctiveTraits: ["wide white space"],
+									},
+									screenshotColorCheck: {
+										observedColors: ["#4285F4", "#EA4335", "#FBBC05", "#34A853"],
+										confidence: "high",
+										summary: "The visible brand accents are Google's blue, red, yellow, and green.",
+									},
+								}),
+							},
+						],
+					}),
+					{ status: 200 }
+				)
+			) as typeof fetch;
+
+		const result = await validateBrandFidelity(profile, "google.com");
+
+		expect(result.status).toBe("success");
+		if (result.status !== "success") return;
+		expect(result.assessment.status).toBe("warn");
+		expect(result.assessment.similarityScore).toBe(73);
+		expect(result.assessment.summary).toContain("Screenshot color cross-check");
+		expect(result.assessment.gaps).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					field: "colors",
+					severity: "high",
+					issue: expect.stringContaining("Screenshot cross-check"),
+					evidence: expect.stringContaining("Context.dev colors: primary=#ED943B, secondary=#26A1B1"),
+				}),
+			])
+		);
+
+		const anthropicCall = vi.mocked(global.fetch).mock.calls[2];
+		const anthropicBody = JSON.parse(
+			String((anthropicCall?.[1] as RequestInit | undefined)?.body ?? "{}")
+		) as {
+			messages?: Array<{
+				content?: Array<{ type?: string; source?: { type?: string; media_type?: string; data?: string } }>;
+			}>;
+		};
+		expect(anthropicBody.messages?.[0]?.content?.[1]).toMatchObject({
+			type: "image",
+			source: {
+				type: "base64",
+				media_type: "image/png",
+			},
+		});
 	});
 
 	it("returns a reference_unavailable error when Context.dev has no usable page content", async () => {

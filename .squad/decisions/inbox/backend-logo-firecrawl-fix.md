@@ -1,0 +1,4 @@
+### 2026-09-06: Relax exact-logo gating for large icon marks and add Firecrawl screenshot color cross-check
+**By:** Backend
+**What:** Generation now keeps a canonical icon logo when Context.dev only returns icon-typed assets but the selected mark is still a reasonably large, square logo asset, and brand-fidelity validation now optionally pulls a Firecrawl screenshot so Claude can cross-check extracted colors against real rendered pixels.
+**Why:** Google exposed two gaps in the Context.dev-only flow: a valid 128x128/512x512 canonical logo was being discarded just because no sibling variant was tagged `type: "logo"`, and incorrect extracted orange/teal brand colors were going unchallenged because validation only saw markdown/text. The new heuristics stay fail-soft, preserve the existing advisory checks, and surface screenshot-backed color drift without reintroducing Firecrawl as a parallel ingestion source.
