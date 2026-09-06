@@ -18,13 +18,13 @@ export const envServer = {
 		return process.env.TOOLBUILDER_BASE_URL?.trim() ?? "";
 	},
 	get PORTER_API_TOKEN() {
-		return process.env.PORTER_API_TOKEN?.trim() ?? "";
+		return process.env.PORTER_API_TOKEN?.trim() ?? process.env.PORTER_TOKEN?.trim() ?? "";
 	},
 	get PORTER_PROJECT_ID() {
-		return process.env.PORTER_PROJECT_ID?.trim() ?? "";
+		return process.env.PORTER_PROJECT_ID?.trim() ?? process.env.PORTER_PROJECT?.trim() ?? "";
 	},
 	get PORTER_CLUSTER_ID() {
-		return process.env.PORTER_CLUSTER_ID?.trim() ?? "";
+		return process.env.PORTER_CLUSTER_ID?.trim() ?? process.env.PORTER_CLUSTER?.trim() ?? "";
 	},
 	get PORTER_ENVIRONMENT() {
 		return process.env.PORTER_ENVIRONMENT?.trim() || "development";
