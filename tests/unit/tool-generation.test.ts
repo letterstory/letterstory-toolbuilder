@@ -1122,12 +1122,16 @@ describe("generateTool", () => {
 			typography: { headingFont: "Inter", bodyFont: "Inter" },
 			images: { logo: { canonicalDataUri: null } },
 		});
+		let completedAdvisoryCalls = 0;
+		let advisoryFinished = false;
 		global.fetch = vi.fn().mockImplementation(async (_url, init) => {
 			const parsedBody = JSON.parse(String((init as RequestInit | undefined)?.body ?? "{}")) as {
 				system?: string;
 			};
 			const system = parsedBody.system ?? "";
 			if (system.includes("VERDICT:")) {
+				completedAdvisoryCalls += 1;
+				advisoryFinished = completedAdvisoryCalls >= 2;
 				return new Response(
 					JSON.stringify({
 						content: [
@@ -1138,6 +1142,8 @@ describe("generateTool", () => {
 				);
 			}
 			if (system.includes("HEADLINE:")) {
+				completedAdvisoryCalls += 1;
+				advisoryFinished = completedAdvisoryCalls >= 2;
 				return new Response(
 					JSON.stringify({
 						content: [{ type: "text", text: "HEADLINE: Test headline\nCOPY: Test copy." }],
@@ -1152,6 +1158,9 @@ describe("generateTool", () => {
 				{ status: 200 }
 			);
 		}) as unknown as typeof fetch;
+		vi.spyOn(Date, "now").mockImplementation(() =>
+			advisoryFinished ? TOOL_GENERATION_TARGET_BUDGET_MS - 4_999 : 0
+		);
 
 		const result = await generateTool({
 			projectName: "Calc",
@@ -1434,6 +1443,99 @@ describe("generateTool", () => {
 		if (result.status === "success") {
 			expect(result.tool.brandFidelity).toEqual({ verdict: "pass", notes: "" });
 			expect(result.tool.warnings.some((w) => w.includes("Brand fidelity check"))).toBe(false);
+		}
+	});
+
+	it("suppresses contradictory color feedback after deterministic color verification succeeds", async () => {
+		isBrandIngestionConfiguredMock.mockReturnValue(true);
+		pullBrandProfileMock.mockResolvedValue({
+			brandName: "Stripe",
+			colors: {
+				primary: "#533AFD",
+				secondary: "#A494FC",
+				accent: "#040404",
+				text: "#000EFF",
+			},
+			fonts: ["sohne-var"],
+			typography: { headingFont: "sohne-var", bodyFont: "sohne-var" },
+			images: { logo: { canonicalDataUri: null } },
+		});
+		let fidelityCallCount = 0;
+		global.fetch = vi.fn().mockImplementation(async (_url, init) => {
+			const parsedBody = JSON.parse(String((init as RequestInit | undefined)?.body ?? "{}")) as {
+				system?: string;
+				messages?: Array<{ content: string }>;
+			};
+			const system = parsedBody.system ?? "";
+			const content = parsedBody.messages?.[0]?.content ?? "";
+			if (system.includes("VERDICT:")) {
+				fidelityCallCount += 1;
+				return new Response(
+					JSON.stringify({
+						content: [
+							{
+								type: "text",
+								text:
+									fidelityCallCount === 1
+										? "VERDICT: fail\nNOTES: body text uses #040404 instead of #000EFF"
+										: "VERDICT: warn\nNOTES: The `font-family` on `body` falls back to system fonts instead of `sohne-var`, and `--text: #000EFF` is defined but never applied as the body text color (body uses `var(--accent)` instead).",
+							},
+						],
+					}),
+					{ status: 200 }
+				);
+			}
+			if (system.includes("HEADLINE:")) {
+				return advisoryFallbackResponse();
+			}
+			if (content.includes("Brand fidelity correction only.")) {
+				return new Response(
+					JSON.stringify({
+						content: [
+							{
+								type: "text",
+								text: "<!doctype html><html><head><style>body{background:#FFFFFF;} .cta{background:#533AFD;color:#000EFF;} .muted{color:#A494FC;} .accent{color:#040404;}</style></head><body><main>fixed</main></body></html>",
+							},
+						],
+					}),
+					{ status: 200 }
+				);
+			}
+			return new Response(
+				JSON.stringify({
+					content: [
+						{
+							type: "text",
+							text: "<!doctype html><html><body><main>initial</main></body></html>",
+						},
+					],
+				}),
+				{ status: 200 }
+			);
+		}) as unknown as typeof fetch;
+
+		const result = await generateTool({
+			projectName: "Calc",
+			siteUrl: "https://stripe.com",
+			prompt: "a calculator",
+		});
+
+		expect(result.status).toBe("success");
+		if (result.status === "success") {
+			expect(result.tool.brandFidelity).toEqual({
+				verdict: "warn",
+				notes: "The `font-family` on `body` falls back to system fonts instead of `sohne-var`",
+			});
+			expect(
+				result.tool.warnings.some((warning) =>
+					warning.includes("body text color") || warning.includes("#040404")
+				)
+			).toBe(false);
+			expect(
+				result.tool.warnings.some((warning) =>
+					warning.includes("font-family") && warning.includes("sohne-var")
+				)
+			).toBe(true);
 		}
 	});
 

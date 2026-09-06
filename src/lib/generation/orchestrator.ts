@@ -107,6 +107,9 @@ export const MAX_REVISION_ANTHROPIC_PIPELINE_WORST_CASE_MS =
 // advisory check instead of resending the whole (possibly large) document.
 const MAX_FIDELITY_HTML_CHARS = 6_000;
 const FIDELITY_ENFORCEMENT_STYLE_TAG = /<style[^>]*data-letterstory-brand-enforcement="true"[^>]*>[\s\S]*?<\/style>/i;
+const BRAND_COLOR_KEYS = ["primary", "secondary", "accent", "background", "text"] as const;
+
+type BrandColorKey = (typeof BRAND_COLOR_KEYS)[number];
 
 interface AnthropicMessagesResponse {
 	content?: Array<{ type: string; text?: string }>;
@@ -476,6 +479,7 @@ async function buildToolContent(opts: {
 	let advisorySkipped = false;
 	let copy: GeneratedToolCopy | null = null;
 	let brandFidelity: GeneratedToolBrandFidelity | null = null;
+	let brandFidelityUnavailableWarning: string | null = null;
 	const remainingBudgetMs = TOOL_GENERATION_TARGET_BUDGET_MS - (Date.now() - opts.requestStartedAt);
 	const advisoryRan = remainingBudgetMs >= ADVISORY_TIMEOUT_MS + MIN_ADVISORY_BUDGET_MS;
 	if (advisoryRan) {
@@ -517,6 +521,7 @@ async function buildToolContent(opts: {
 						"Review the generated styling against the brand and correct any mismatched colors, fonts, logo treatment, or tone.",
 				]
 			: [];
+	const originalBrandFidelity = brandFidelity;
 	if (brandFidelity && fidelityRepairReasons.length) {
 		logGenerationStep("brand_fidelity_repair_requested", {
 			verdict: brandFidelity.verdict,
@@ -553,11 +558,38 @@ async function buildToolContent(opts: {
 			advisoryMs += Date.now() - recheckStartedAt;
 			if (refreshedBrandFidelity) {
 				brandFidelity = refreshedBrandFidelity;
+				const deterministicColorCheck =
+					originalBrandFidelity?.notes && noteDescribesColorIssue(originalBrandFidelity.notes)
+						? verifyBrandColorUsage(
+								sanitized.html,
+								opts.brandSnapshot as GeneratedToolBrandSnapshot,
+								originalBrandFidelity.notes
+						  )
+						: null;
+				if (
+					deterministicColorCheck?.applicable &&
+					deterministicColorCheck.passed &&
+					brandFidelity.notes &&
+					noteDescribesColorIssue(brandFidelity.notes)
+				) {
+					const filteredNotes = filterNegativeColorFeedback(brandFidelity.notes);
+					logGenerationStep("brand_fidelity_color_repair_verified", {
+						relevantKeys: deterministicColorCheck.relevantKeys,
+						missingKeys: deterministicColorCheck.missingKeys,
+						textColorApplied: deterministicColorCheck.textColorApplied,
+						suppressedColorWarning: !filteredNotes,
+					});
+					brandFidelity = filteredNotes
+						? {
+								verdict: brandFidelity.verdict,
+								notes: filteredNotes,
+						  }
+						: { verdict: "pass", notes: "" };
+				}
 			} else {
 				brandFidelity = null;
-				repaired.warnings.push(
-					"Brand repair was applied, but the post-repair brand fidelity check could not be completed."
-				);
+				brandFidelityUnavailableWarning =
+					"Brand repair was applied, but the post-repair brand fidelity check could not be completed.";
 			}
 		} else {
 			logGenerationStep("brand_fidelity_recheck_skipped", {
@@ -565,9 +597,8 @@ async function buildToolContent(opts: {
 				remainingBudgetMs: remainingRecheckBudgetMs,
 			});
 			brandFidelity = null;
-			repaired.warnings.push(
-				"Brand repair was applied, but the post-repair brand fidelity check was skipped to stay within the live request budget."
-			);
+			brandFidelityUnavailableWarning =
+				"Brand repair was applied, but the post-repair brand fidelity check was skipped to stay within the live request budget.";
 		}
 	}
 	const warnings = [
@@ -590,7 +621,10 @@ async function buildToolContent(opts: {
 
 		if (opts.brandSnapshot) {
 			if (!brandFidelity) {
-				warnings.push("Brand fidelity check could not be completed for this tool.");
+				warnings.push(
+					brandFidelityUnavailableWarning ??
+						"Brand fidelity check could not be completed for this tool."
+				);
 			} else if (brandFidelity.verdict !== "pass") {
 				warnings.push(
 					`Brand fidelity check (${brandFidelity.verdict}): ${
@@ -1008,9 +1042,138 @@ function escapeRegex(value: string): string {
 	return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+function normalizeHexColor(value: string | null | undefined): string | null {
+	if (!value) return null;
+	const trimmed = value.trim();
+	const shortHexMatch = trimmed.match(/^#([0-9a-f]{3})$/i);
+	if (shortHexMatch) {
+		const [r, g, b] = shortHexMatch[1].split("");
+		return `#${r}${r}${g}${g}${b}${b}`.toUpperCase();
+	}
+	const longHexMatch = trimmed.match(/^#([0-9a-f]{6})$/i);
+	return longHexMatch ? `#${longHexMatch[1].toUpperCase()}` : null;
+}
+
 function htmlMentionsFontFamily(html: string, family: string | null | undefined): boolean {
 	if (!family) return false;
 	return new RegExp(escapeRegex(family), "i").test(html);
+}
+
+function htmlMentionsColorValue(html: string, color: string | null | undefined): boolean {
+	const normalizedColor = normalizeHexColor(color);
+	if (!normalizedColor) return false;
+	return new RegExp(escapeRegex(normalizedColor), "i").test(html);
+}
+
+function htmlUsesBrandTextColor(
+	html: string,
+	brandSnapshot: GeneratedToolBrandSnapshot
+): boolean {
+	const normalizedTextColor = normalizeHexColor(brandSnapshot.colors.text);
+	if (!normalizedTextColor) return false;
+	return new RegExp(
+		`body\\s*\\{[\\s\\S]{0,800}?color\\s*:\\s*(?:var\\(\\s*--ls-brand-color-text\\s*\\)|${escapeRegex(
+			normalizedTextColor
+		)})`,
+		"i"
+	).test(html);
+}
+
+function noteMentionsColorFeedback(note: string): boolean {
+	return /(color|palette|primary|secondary|accent|background|body text|text token|#[0-9a-f]{3,6})/i.test(
+		note
+	);
+}
+
+function noteHasNegativeFeedbackCue(note: string): boolean {
+	return /(mismatch|different|instead|absent|missing|never used|not used|wrong|deviat|fails|fallback|not applied|omitted)/i.test(
+		note
+	);
+}
+
+function noteDescribesColorIssue(note: string): boolean {
+	return noteMentionsColorFeedback(note) && noteHasNegativeFeedbackCue(note);
+}
+
+function collectRelevantBrandColorKeys(
+	note: string,
+	brandSnapshot: GeneratedToolBrandSnapshot
+): BrandColorKey[] {
+	const declaredKeys = BRAND_COLOR_KEYS.filter((key) =>
+		Boolean(normalizeHexColor(brandSnapshot.colors[key]))
+	);
+	if (!noteMentionsColorFeedback(note)) return [];
+
+	const normalizedNote = note.toLowerCase();
+	if (/(color palette|brand colors|colors\b)/i.test(note) && noteHasNegativeFeedbackCue(note)) {
+		return declaredKeys;
+	}
+
+	const relevantKeys = declaredKeys.filter((key) => normalizedNote.includes(key));
+	for (const key of declaredKeys) {
+		const value = normalizeHexColor(brandSnapshot.colors[key]);
+		if (value && normalizedNote.includes(value.toLowerCase())) {
+			relevantKeys.push(key);
+		}
+	}
+	if (/(body text|text color|text token|--text)/i.test(note)) {
+		relevantKeys.push("text");
+	}
+
+	return [...new Set(relevantKeys)];
+}
+
+function verifyBrandColorUsage(
+	html: string,
+	brandSnapshot: GeneratedToolBrandSnapshot,
+	note: string
+): {
+	applicable: boolean;
+	passed: boolean;
+	relevantKeys: BrandColorKey[];
+	missingKeys: BrandColorKey[];
+	textColorApplied: boolean;
+} {
+	const relevantKeys = collectRelevantBrandColorKeys(note, brandSnapshot);
+	if (!relevantKeys.length) {
+		return {
+			applicable: false,
+			passed: false,
+			relevantKeys: [],
+			missingKeys: [],
+			textColorApplied: false,
+		};
+	}
+
+	const missingKeys = relevantKeys.filter(
+		(key) => !htmlMentionsColorValue(html, brandSnapshot.colors[key])
+	);
+	const textColorApplied = relevantKeys.includes("text")
+		? htmlUsesBrandTextColor(html, brandSnapshot)
+		: true;
+
+	return {
+		applicable: true,
+		passed: missingKeys.length === 0 && textColorApplied,
+		relevantKeys,
+		missingKeys,
+		textColorApplied,
+	};
+}
+
+function splitFeedbackClauses(note: string): string[] {
+	return note
+		.split(
+			/\s*(?:;\s*|,\s*but\s+|\s+but\s+|,\s*while\s+|\s+while\s+|,\s*and\s+|\.\s+)\s*/i
+		)
+		.map((clause) => clause.trim())
+		.filter(Boolean);
+}
+
+function filterNegativeColorFeedback(note: string): string {
+	return splitFeedbackClauses(note)
+		.filter((clause) => noteHasNegativeFeedbackCue(clause) && !noteDescribesColorIssue(clause))
+		.join("; ");
 }
 
 function extractHeaderHtml(html: string): string {
