@@ -6,6 +6,7 @@ export const generatedToolBrandSnapshotSchema = z.object({
 	fonts: z.array(z.string()),
 	headingFont: z.string().nullable().optional(),
 	bodyFont: z.string().nullable().optional(),
+	logoPolicy: z.enum(["exact_asset", "text_only"]).optional(),
 	logoDataUri: z.string().nullable(),
 	competitorContext: z
 		.object({
