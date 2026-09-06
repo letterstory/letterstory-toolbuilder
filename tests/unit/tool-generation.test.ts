@@ -1236,6 +1236,8 @@ describe("generateTool", () => {
 		});
 
 		expect(result.status).toBe("success");
+		expect(repairPrompt).toContain("Authoritative brand colors to apply in rendered CSS/UI");
+		expect(repairPrompt).toContain("- text: #0a2540");
 		expect(repairPrompt).toContain("uses a different color palette");
 		expect(fetchMock).toHaveBeenCalledTimes(4);
 		expect(

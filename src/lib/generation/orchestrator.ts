@@ -1007,9 +1007,19 @@ function buildBrandRepairPrompt(
 	brandSnapshot: GeneratedToolBrandSnapshot,
 	reasons: string[]
 ): string {
+	const colorLines = Object.entries(brandSnapshot.colors)
+		.slice(0, MAX_PROMPT_BRAND_COLORS)
+		.map(([label, value]) => `${label}: ${value}`);
+
 	return [
 		"Brand fidelity correction only.",
 		"Keep the existing calculator logic, input/output behavior, copy, spacing, and overall layout unless a small targeted edit is required for the brand corrections below.",
+		colorLines.length
+			? [
+					"Authoritative brand colors to apply in rendered CSS/UI (do not substitute lookalikes):",
+					...colorLines.map((line) => `- ${line}`),
+			  ].join("\n")
+			: "Authoritative brand colors: none detected.",
 		brandSnapshot.bodyFont
 			? `Primary UI/body font to use: ${brandSnapshot.bodyFont}.`
 			: "Primary UI/body font: none detected.",
@@ -1019,6 +1029,7 @@ function buildBrandRepairPrompt(
 		brandSnapshot.logoPolicy === "exact_asset"
 			? "A real logo asset will be injected into the header programmatically after generation. Leave a clean brand area for it and do not draw, trace, or type a substitute logo."
 			: `Do not draw or invent any icon for the header. If branding is visible, use the exact brand name text only: ${brandSnapshot.brandName ?? "Unknown"}.`,
+		"When a repair reason cites missing or wrong colors, update the actual CSS/custom properties/body text/buttons/cards so those exact tokens are visibly used in the rendered UI.",
 		"Required fixes:",
 		...reasons.map((reason) => `- ${reason}`),
 	].join("\n");
