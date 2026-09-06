@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
 	analyzeVisualCongruence,
+	finalizeVisualCongruenceForTool,
 	mergeVisualCongruenceWarnings,
 	parseVisualCongruenceResponse,
 } from "../../src/lib/generation/visual-congruence";
@@ -87,7 +88,7 @@ describe("analyzeVisualCongruence", () => {
 
 		const result = await analyzeVisualCongruence({
 			html: "<!doctype html><html><body><main>Stripe tool</main></body></html>",
-			siteUrl: "https://stripe.com",
+			siteUrl: "stripe.com",
 			brandName: "Stripe",
 			captureReferenceScreenshot,
 			renderGeneratedScreenshot,
@@ -107,5 +108,63 @@ describe("analyzeVisualCongruence", () => {
 		expect(result.congruenceScore).toBe(5);
 		expect(result.referenceUrl).toBe("https://stripe.com/");
 		expect(result.analyzedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+	});
+});
+
+describe("finalizeVisualCongruenceForTool", () => {
+	it("persists a failed status when analysis throws", async () => {
+		const getTool = vi.fn().mockResolvedValue({
+			id: "tool-123",
+			version: 4,
+			projectName: "Calc",
+			prompt: "Build a calculator",
+			siteUrl: "stripe.com",
+			brandSnapshot: { brandName: "Stripe", colors: {}, fonts: [], logoDataUri: null },
+			html: "<!doctype html><html><body>hi</body></html>",
+			copy: null,
+			brandFidelity: null,
+			visualCongruence: {
+				status: "pending",
+				congruenceScore: null,
+				verdict: null,
+				notes: "Analyzing…",
+				risks: [],
+				referenceUrl: null,
+				analyzedAt: null,
+			},
+			model: "claude-sonnet-4-6",
+			warnings: ["Existing warning"],
+			createdAt: "2026-09-06T00:00:00.000Z",
+			updatedAt: "2026-09-06T00:00:00.000Z",
+			history: [],
+		});
+		const analyze = vi.fn().mockRejectedValue(new Error("invalid url"));
+		const save = vi.fn().mockResolvedValue({
+			id: "tool-123",
+		});
+
+		await finalizeVisualCongruenceForTool(
+			{ toolId: "tool-123", expectedVersion: 4 },
+			{ getTool, analyze, save }
+		);
+
+		expect(analyze).toHaveBeenCalledWith({
+			html: "<!doctype html><html><body>hi</body></html>",
+			siteUrl: "stripe.com",
+			brandName: "Stripe",
+		});
+		expect(save).toHaveBeenCalledWith(
+			"tool-123",
+			4,
+			expect.objectContaining({
+				status: "failed",
+				notes: "invalid url",
+				referenceUrl: "stripe.com",
+			}),
+			[
+				"Existing warning",
+				"Visual brand match could not be completed: invalid url",
+			]
+		);
 	});
 });
