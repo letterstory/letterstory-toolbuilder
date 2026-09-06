@@ -106,6 +106,7 @@ export const MAX_REVISION_ANTHROPIC_PIPELINE_WORST_CASE_MS =
 // signal (colors, fonts, logo <img>) — capping keeps this a cheap, fast
 // advisory check instead of resending the whole (possibly large) document.
 const MAX_FIDELITY_HTML_CHARS = 6_000;
+const FIDELITY_ENFORCEMENT_STYLE_TAG = /<style[^>]*data-letterstory-brand-enforcement="true"[^>]*>[\s\S]*?<\/style>/i;
 
 interface AnthropicMessagesResponse {
 	content?: Array<{ type: string; text?: string }>;
@@ -965,10 +966,7 @@ async function requestBrandFidelityCheck(opts: {
 		`Expected fonts: ${opts.brandSnapshot.fonts.join(", ") || "none detected"}`,
 	].join("\n");
 
-	const truncatedHtml =
-		opts.html.length > MAX_FIDELITY_HTML_CHARS
-			? `${opts.html.slice(0, MAX_FIDELITY_HTML_CHARS)}\n<!-- truncated for review -->`
-			: opts.html;
+	const truncatedHtml = buildBrandFidelityReviewHtml(opts.html);
 
 	const userContent = [brandContext, "", "Generated tool source:", truncatedHtml].join("\n");
 
@@ -985,6 +983,25 @@ async function requestBrandFidelityCheck(opts: {
 	if (verdictRaw !== "pass" && verdictRaw !== "warn" && verdictRaw !== "fail") return null;
 
 	return { verdict: verdictRaw, notes };
+}
+
+function buildBrandFidelityReviewHtml(html: string): string {
+	if (html.length <= MAX_FIDELITY_HTML_CHARS) return html;
+
+	const enforcementStyle = html.match(FIDELITY_ENFORCEMENT_STYLE_TAG)?.[0] ?? "";
+	const trailer = "\n<!-- truncated for review -->";
+	if (!enforcementStyle || html.slice(0, MAX_FIDELITY_HTML_CHARS).includes(enforcementStyle)) {
+		return `${html.slice(0, MAX_FIDELITY_HTML_CHARS)}${trailer}`;
+	}
+
+	const reservedChars = enforcementStyle.length + trailer.length + 32;
+	const prefixBudget = Math.max(0, MAX_FIDELITY_HTML_CHARS - reservedChars);
+	return [
+		html.slice(0, prefixBudget),
+		"\n<!-- managed brand enforcement -->\n",
+		enforcementStyle,
+		trailer,
+	].join("");
 }
 
 function escapeRegex(value: string): string {

@@ -1353,6 +1353,90 @@ describe("generateTool", () => {
 		expect(timeoutSpy).toHaveBeenCalledTimes(5);
 	});
 
+	it("includes managed brand enforcement css in post-repair fidelity rechecks for large html", async () => {
+		isBrandIngestionConfiguredMock.mockReturnValue(true);
+		pullBrandProfileMock.mockResolvedValue({
+			brandName: "Stripe",
+			colors: { primary: "#635bff", text: "#000EFF" },
+			fonts: ["Inter"],
+			typography: { headingFont: "Inter", bodyFont: "Inter" },
+			images: { logo: { canonicalDataUri: null } },
+		});
+		let fidelityCallCount = 0;
+		let recheckSawManagedEnforcement = false;
+		const longCss = ".token{color:#111;}".repeat(500);
+		global.fetch = vi.fn().mockImplementation(async (_url, init) => {
+			const parsedBody = JSON.parse(String((init as RequestInit | undefined)?.body ?? "{}")) as {
+				system?: string;
+				messages?: Array<{ content: string }>;
+			};
+			const system = parsedBody.system ?? "";
+			const content = parsedBody.messages?.[0]?.content ?? "";
+			if (system.includes("VERDICT:")) {
+				fidelityCallCount += 1;
+				if (fidelityCallCount === 2) {
+					recheckSawManagedEnforcement = content.includes(
+						'data-letterstory-brand-enforcement="true"'
+					);
+				}
+				return new Response(
+					JSON.stringify({
+						content: [
+							{
+								type: "text",
+								text:
+									fidelityCallCount === 1
+										? "VERDICT: fail\nNOTES: body text color does not use the brand text token"
+										: "VERDICT: pass\nNOTES:",
+							},
+						],
+					}),
+					{ status: 200 }
+				);
+			}
+			if (system.includes("HEADLINE:")) {
+				return advisoryFallbackResponse();
+			}
+			if (content.includes("Brand fidelity correction only.")) {
+				return new Response(
+					JSON.stringify({
+						content: [
+							{
+								type: "text",
+								text: `<!doctype html><html><head><style>${longCss}</style></head><body><main>fixed</main></body></html>`,
+							},
+						],
+					}),
+					{ status: 200 }
+				);
+			}
+			return new Response(
+				JSON.stringify({
+					content: [
+						{
+							type: "text",
+							text: "<!doctype html><html><body><main>initial</main></body></html>",
+						},
+					],
+				}),
+				{ status: 200 }
+			);
+		}) as unknown as typeof fetch;
+
+		const result = await generateTool({
+			projectName: "Calc",
+			siteUrl: "https://stripe.com",
+			prompt: "a calculator",
+		});
+
+		expect(result.status).toBe("success");
+		expect(recheckSawManagedEnforcement).toBe(true);
+		if (result.status === "success") {
+			expect(result.tool.brandFidelity).toEqual({ verdict: "pass", notes: "" });
+			expect(result.tool.warnings.some((w) => w.includes("Brand fidelity check"))).toBe(false);
+		}
+	});
+
 	it("does not trigger an extra repair pass when brand fidelity already passes", async () => {
 		isBrandIngestionConfiguredMock.mockReturnValue(true);
 		pullBrandProfileMock.mockResolvedValue({
