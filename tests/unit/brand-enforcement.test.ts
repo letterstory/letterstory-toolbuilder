@@ -183,6 +183,68 @@ describe("enforceBrandPresentation", () => {
 		expect(verifiedCopyBlock).toContain("border-radius: 0.75rem;");
 	});
 
+	it("removes a duplicate hero heading when main repeats the project name", async () => {
+		const html = [
+			"<!doctype html>",
+			"<html><head></head><body>",
+			"<main>",
+			'  <section class="hero">',
+			"    <h1>bmi calculator</h1>",
+			"    <p>Find out your Body Mass Index in seconds with a quick, simple check.</p>",
+			"  </section>",
+			'  <section data-letterstory-tool="true"></section>',
+			"</main>",
+			"</body></html>",
+		].join("\n");
+		const brandSnapshot = makeBrandSnapshot({
+			brandName: "Gymshark",
+			colors: {
+				primary: "#000000",
+				background: "#FFFFFF",
+				text: "#111111",
+			},
+			logoPolicy: "text_only",
+		});
+
+		const result = await enforceBrandPresentation({
+			html,
+			projectName: "BMI Calculator",
+			brandSnapshot,
+		});
+
+		const finalHtml = result.sanitized.html;
+		const titleMatches = finalHtml.match(/<h1>\s*BMI Calculator\s*<\/h1>/gi) ?? [];
+		expect(titleMatches).toHaveLength(1);
+		expect(finalHtml).toContain('<header class="ls-brand-verified-header">');
+		expect(finalHtml).toContain(
+			"<p>Find out your Body Mass Index in seconds with a quick, simple check.</p>"
+		);
+		expect(finalHtml).not.toContain('<section class="hero">\n    <h1>bmi calculator</h1>');
+	});
+
+	it("keeps a non-duplicate supporting heading when it adds meaning beyond the project name", async () => {
+		const html = [
+			"<!doctype html>",
+			"<html><head></head><body>",
+			"<main>",
+			'  <section class="hero">',
+			"    <h1>Estimate your BMI in seconds</h1>",
+			"    <p>Use the calculator below to understand your result instantly.</p>",
+			"  </section>",
+			"</main>",
+			"</body></html>",
+		].join("\n");
+
+		const result = await enforceBrandPresentation({
+			html,
+			projectName: "BMI Calculator",
+			brandSnapshot: makeBrandSnapshot({ logoPolicy: "text_only" }),
+		});
+
+		expect(result.sanitized.html).toContain("<h1>Estimate your BMI in seconds</h1>");
+		expect(result.sanitized.html).toContain("<h1>BMI Calculator</h1>");
+	});
+
 	it("forces the brand text token onto body text so repaired tools use the authoritative text color", async () => {
 		const html = [
 			"<!doctype html>",

@@ -110,6 +110,49 @@ function escapeHtml(value: string): string {
 		.replace(/'/g, "&#39;");
 }
 
+function decodeHtmlEntities(value: string): string {
+	return value.replace(/&(#x?[0-9a-f]+|[a-z]+);/gi, (entity, token: string) => {
+		const normalized = token.toLowerCase();
+		switch (normalized) {
+			case "amp":
+				return "&";
+			case "lt":
+				return "<";
+			case "gt":
+				return ">";
+			case "quot":
+				return '"';
+			case "apos":
+			case "#39":
+				return "'";
+			case "nbsp":
+				return " ";
+			default:
+				break;
+		}
+
+		if (normalized.startsWith("#x")) {
+			const codePoint = Number.parseInt(normalized.slice(2), 16);
+			return Number.isFinite(codePoint) ? String.fromCodePoint(codePoint) : entity;
+		}
+
+		if (normalized.startsWith("#")) {
+			const codePoint = Number.parseInt(normalized.slice(1), 10);
+			return Number.isFinite(codePoint) ? String.fromCodePoint(codePoint) : entity;
+		}
+
+		return entity;
+	});
+}
+
+function extractTextContent(htmlFragment: string): string {
+	return decodeHtmlEntities(htmlFragment.replace(/<[^>]+>/g, " "));
+}
+
+function normalizeHeadingText(value: string): string {
+	return value.normalize("NFKC").replace(/\s+/g, " ").trim().toLowerCase();
+}
+
 function normalizeFontFamilyKey(family: string): string {
 	return family
 		.trim()
@@ -478,6 +521,30 @@ function rewriteHeader(html: string, headerHtml: string): string {
 	return html;
 }
 
+function removeDuplicateProjectHeading(html: string, projectName: string): string {
+	const normalizedProjectName = normalizeHeadingText(projectName);
+	if (!normalizedProjectName) return html;
+
+	return html.replace(
+		/(<main\b[^>]*>)([\s\S]*?)(<\/main>)/i,
+		(mainHtml, openingTag, content, closingTag) => {
+			let removed = false;
+			const updatedContent = content.replace(
+				/<h([1-6])\b[^>]*>[\s\S]*?<\/h\1>/gi,
+				(headingHtml: string) => {
+					if (removed) return headingHtml;
+					const headingText = normalizeHeadingText(extractTextContent(headingHtml));
+					if (headingText !== normalizedProjectName) return headingHtml;
+					removed = true;
+					return "";
+				}
+			);
+
+			return removed ? `${openingTag}${updatedContent}${closingTag}` : mainHtml;
+		}
+	);
+}
+
 function stripHeaderBrandGraphics(html: string): string {
 	return html.replace(
 		/(<header\b[\s\S]*?)(<(?:svg|canvas)\b[\s\S]*?<\/(?:svg|canvas)>)([\s\S]*?<\/header>)/gi,
@@ -697,6 +764,7 @@ export async function enforceBrandPresentation(opts: {
 	let html = opts.html;
 	html = stripHeaderBrandGraphics(html);
 	html = rewriteHeader(html, buildDeterministicHeaderHtml(opts.projectName, opts.brandSnapshot));
+	html = removeDuplicateProjectHeading(html, opts.projectName);
 	html = rewriteFontFamilies(html, plan);
 	html = upsertBrandEnforcementStyleTag(html, buildEnforcementCss(opts.brandSnapshot, plan));
 	html = enforceCtaOrdering(html);
