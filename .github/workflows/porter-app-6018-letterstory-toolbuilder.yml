@@ -13,12 +13,11 @@ jobs:
               uses: porter-dev/setup-porter@v0.2.0
             - name: Sync runtime Porter sandbox env
               run: |
-                porter env set --app "$PORTER_APP_NAME" \
+                porter env set --group letterstory-toolbuilder-secrets \
                   -s PORTER_API_TOKEN="$PORTER_TOKEN" \
                   -v PORTER_PROJECT_ID="$PORTER_PROJECT" \
                   -v PORTER_CLUSTER_ID="$PORTER_CLUSTER"
               env:
-                PORTER_APP_NAME: letterstory-toolbuilder
                 PORTER_CLUSTER: "6018"
                 PORTER_DEPLOYMENT_TARGET_ID: 57c6c7ab-370f-43b9-a1e9-f061af782fdf
                 PORTER_HOST: https://dashboard.porter.run
