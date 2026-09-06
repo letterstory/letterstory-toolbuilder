@@ -18,6 +18,7 @@
 import { envServer } from "@/lib/config/env.server";
 import { requestAnthropicText } from "@/lib/anthropic/messages";
 import { buildPendingCompetitorContext } from "@/lib/brand/competitor-context";
+import { MIN_LOGO_EDGE_PX } from "@/lib/brand/logo";
 import { isBrandIngestionConfigured, pullBrandProfile, type BrandProfile } from "@/lib/brand";
 import { enforceBrandPresentation } from "@/lib/generation/brand-enforcement";
 import { buildPendingVisualCongruence } from "@/lib/generation/visual-congruence";
@@ -664,7 +665,19 @@ function resolveGenerationLogoDataUri(profile: BrandProfile): string | null {
 
 function shouldRequireExactLogoAsset(profile: BrandProfile): boolean {
 	if (profile.images.logo.type === "icon") {
-		return (profile.images.logoVariants ?? []).some((variant) => variant.type === "logo");
+		if ((profile.images.logoVariants ?? []).some((variant) => variant.type === "logo")) {
+			return true;
+		}
+
+		const width = profile.images.logo.width ?? 0;
+		const height = profile.images.logo.height ?? 0;
+		const shortEdge = Math.min(width, height);
+		const longEdge = Math.max(width, height);
+		return (
+			shortEdge >= MIN_LOGO_EDGE_PX * 2 &&
+			longEdge > 0 &&
+			longEdge / shortEdge <= 1.33
+		);
 	}
 	return true;
 }
@@ -866,10 +879,11 @@ async function requestSupportingCopy(opts: {
  * Advisory LLM cross-check that the generated tool's actual implementation
  * (colors, fonts, logo usage, tone) is faithful to the brand it was supposed
  * to be built for — the "cross-checks that brand understanding so the
- * output does not look like a different company" requirement. This is a
- * source-level check (no rendered screenshot pipeline exists for
- * locally-hosted generated tools yet), unlike the full Claude-vision
- * screenshot comparison already used for brand-ingestion validation.
+ * output does not look like a different company" requirement. This remains a
+ * source-level check against the generated HTML/CSS itself; the separate
+ * brand-profile validation flow can now do a Firecrawl screenshot color
+ * cross-check, but this tool-level advisory still does not inspect rendered
+ * pixels from the generated tool.
  */
 async function requestBrandFidelityCheck(opts: {
 	html: string;

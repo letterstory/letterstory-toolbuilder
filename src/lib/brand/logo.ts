@@ -17,7 +17,7 @@ const MAX_LOGO_BYTES = 4_000_000;
 // Logos render small; 512px on the long edge is plenty and keeps the data
 // URI from ballooning.
 const MAX_LOGO_EDGE_PX = 512;
-const MIN_LOGO_EDGE_PX = 32;
+export const MIN_LOGO_EDGE_PX = 32;
 
 const RASTER_LOGO_MIMES = new Set(["image/png", "image/jpeg", "image/jpg", "image/webp"]);
 

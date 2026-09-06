@@ -439,7 +439,7 @@ describe("generateTool", () => {
 		expect(htmlCallBody.messages?.[0]?.content).toContain("do not invent, redraw, trace, or type");
 	});
 
-	it("falls back to text-only branding when only icon assets are available", async () => {
+	it("falls back to text-only branding when only underspecified icon assets are available", async () => {
 		isBrandIngestionConfiguredMock.mockReturnValue(true);
 		pullBrandProfileMock.mockResolvedValue({
 			brandName: "DoorDash",
@@ -486,6 +486,51 @@ describe("generateTool", () => {
 		};
 		expect(htmlCallBody.messages?.[0]?.content).not.toContain("icon-asset");
 		expect(htmlCallBody.messages?.[0]?.content).toContain("clean text-only brand-name treatment");
+	});
+
+	it("trusts a large square icon asset when no separate wordmark variant exists", async () => {
+		isBrandIngestionConfiguredMock.mockReturnValue(true);
+		pullBrandProfileMock.mockResolvedValue({
+			brandName: "Google",
+			colors: { primary: "#4285F4", secondary: "#34A853", text: "#1F1F1F" },
+			fonts: ["Google Sans", "Arial"],
+			typography: { headingFont: "Google Sans", bodyFont: "Google Sans" },
+			images: {
+				logo: {
+					type: "icon",
+					width: 128,
+					height: 128,
+					canonicalDataUri: "data:image/png;base64,google-g-mark",
+					url: null,
+				},
+				logoVariants: [
+					{
+						url: "https://example.com/google-icon.png",
+						kind: "url",
+						mode: "light",
+						type: "icon",
+						width: 128,
+						height: 128,
+						colors: ["#4285F4"],
+					},
+				],
+			},
+		});
+		mockAnthropicSuccess("<!doctype html><html><body>hi</body></html>");
+
+		const result = await generateTool({
+			projectName: "Signup Calculator",
+			siteUrl: "https://google.com",
+			prompt: "a calculator",
+		});
+
+		expect(result.status).toBe("success");
+		if (result.status === "success") {
+			expect(result.tool.brandSnapshot).toMatchObject({
+				logoPolicy: "exact_asset",
+				logoDataUri: "data:image/png;base64,google-g-mark",
+			});
+		}
 	});
 
 	it("repairs invented branding when a supplied logo asset is ignored", async () => {
