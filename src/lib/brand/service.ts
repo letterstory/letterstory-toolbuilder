@@ -1790,7 +1790,14 @@ async function resolveCanonicalLogoForBranding(
 			...branding.images.logoVariants.map((variant) => variant.url),
 			...branding.logoUrls,
 			branding.images.faviconUrl,
-		]);
+		], {
+			svgFallbackColor:
+				branding.colors.text ??
+				branding.colors.primary ??
+				branding.colors.secondary ??
+				branding.colors.accent ??
+				null,
+		});
 	} catch {
 		return {
 			dataUri: null,
