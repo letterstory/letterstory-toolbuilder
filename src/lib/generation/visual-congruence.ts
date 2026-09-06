@@ -468,6 +468,16 @@ export async function finalizeVisualCongruenceForTool(opts: {
 		});
 	}
 
+	const warnings = mergeVisualCongruenceWarnings(tool.warnings, visualCongruence);
+	const saved = await save(opts.toolId, opts.expectedVersion, visualCongruence, warnings);
+	if (!saved) {
+		logVisualCongruenceStep("visual_congruence_save_skipped", {
+			toolId: opts.toolId,
+			expectedVersion: opts.expectedVersion,
+		});
+		return;
+	}
+
 	if (visualCongruence.status === "completed" && visualCongruence.verdict === "fail") {
 		const current = await getTool(opts.toolId);
 		if (!current || current.version !== opts.expectedVersion || !current.siteUrl) {
@@ -568,12 +578,17 @@ export async function finalizeVisualCongruenceForTool(opts: {
 				durationMs: Date.now() - repairStartedAt,
 				error: message,
 			});
-			const warnings = mergeVisualCongruenceWarnings(
-				appendUniqueWarnings(tool.warnings, [`${VISUAL_REPAIR_WARNING_PREFIX} failed: ${message}`]),
+			const updatedWarnings = mergeVisualCongruenceWarnings(
+				appendUniqueWarnings(current.warnings, [`${VISUAL_REPAIR_WARNING_PREFIX} failed: ${message}`]),
 				visualCongruence
 			);
-			const saved = await save(opts.toolId, opts.expectedVersion, visualCongruence, warnings);
-			if (!saved) {
+			const savedWithRepairWarning = await save(
+				opts.toolId,
+				opts.expectedVersion,
+				visualCongruence,
+				updatedWarnings
+			);
+			if (!savedWithRepairWarning) {
 				logVisualCongruenceStep("visual_congruence_save_skipped", {
 					toolId: opts.toolId,
 					expectedVersion: opts.expectedVersion,
@@ -581,14 +596,5 @@ export async function finalizeVisualCongruenceForTool(opts: {
 			}
 			return;
 		}
-	}
-
-	const warnings = mergeVisualCongruenceWarnings(tool.warnings, visualCongruence);
-	const saved = await save(opts.toolId, opts.expectedVersion, visualCongruence, warnings);
-	if (!saved) {
-		logVisualCongruenceStep("visual_congruence_save_skipped", {
-			toolId: opts.toolId,
-			expectedVersion: opts.expectedVersion,
-		});
 	}
 }
