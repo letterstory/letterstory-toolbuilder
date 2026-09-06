@@ -73,20 +73,26 @@ const PRIMARY_ANTHROPIC_TIMEOUT_MS = 210_000;
 const INITIAL_RETRY_ANTHROPIC_TIMEOUT_MS = 35_000;
 const REVISION_RETRY_ANTHROPIC_TIMEOUT_MS = 70_000;
 const ADVISORY_TIMEOUT_MS = 15_000;
+// Repair uses the same full-HTML regeneration path as initial tool creation,
+// so it needs a realistic ceiling. The request-budget guard below still caps
+// it to whatever time remains inside TOOL_GENERATION_TARGET_BUDGET_MS.
+const BRAND_REPAIR_TIMEOUT_MS = 180_000;
 const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-6";
 const MAX_TOKENS = 8_000;
 const MAX_GENERATION_ATTEMPTS = 2;
 const MAX_PROMPT_BRAND_COLORS = 4;
 const MAX_PROMPT_BRAND_FONTS = 2;
-const BRAND_REPAIR_TIMEOUT_MS = 15_000;
 const MIN_ADVISORY_BUDGET_MS = 5_000;
 // Worst-case request-budget math for one /api/tools/generate request:
 // - initial generation path:
 //   - primary HTML generation attempt: 210s
 //   - fallback retry (only for malformed HTML / transient 5xx/network failures): 35s
 //   - advisory copy + brand-fidelity checks: 15s max wall time because they run in parallel
-//   - total capped post-brand-fetch wall time = 260s, leaving ~40s inside nginx's
-//     300s budget for brand-context fetching, storage, and Next.js response overhead.
+//   - optional repair pass: bounded by the remaining request budget after those steps,
+//     with an upper ceiling of 180s. In the absolute worst case after a 210s main build
+//     plus 15s advisories, the repair path only gets the ~55s still available inside the
+//     280s app target. When the main build is faster, repair may use more of the leftover
+//     budget, but never enough to exceed the 280s app target or 300s nginx ceiling.
 // - revision path:
 //   - primary HTML generation attempt: 210s
 //   - retry after malformed / transient output: 70s
