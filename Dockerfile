@@ -30,7 +30,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 	openssl \
 	ca-certificates \
 	curl \
-	unzip \
 	fonts-liberation \
 	libasound2 \
 	libatk-bridge2.0-0 \
@@ -59,7 +58,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 	libxrandr2 \
 	libxrender1 \
 	libxshmfence1 \
-	&& curl -fsSL https://install.porter.run | bash \
+	&& arch="$(dpkg --print-architecture)" \
+	&& case "$arch" in amd64|arm64) porter_arch="$arch" ;; *) echo "Unsupported architecture: $arch" >&2; exit 1 ;; esac \
+	&& curl -fsSL "https://install.porter.run/download/v0.69.2/porter_0.69.2_linux_${porter_arch}" -o /usr/local/bin/porter \
+	&& chmod +x /usr/local/bin/porter \
+	&& curl -fsSL "https://install.porter.run/download/v0.69.2/docker-credential-porter_0.69.2_linux_${porter_arch}" -o /usr/local/bin/docker-credential-porter \
+	&& chmod +x /usr/local/bin/docker-credential-porter \
+	&& porter version \
 	&& rm -rf /var/lib/apt/lists/* \
 	&& groupadd --system --gid 1001 nodejs \
 	&& useradd --system --uid 1001 --gid nodejs nextjs
