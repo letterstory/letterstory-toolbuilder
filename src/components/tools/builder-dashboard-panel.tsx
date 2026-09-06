@@ -47,7 +47,7 @@ export function BuilderDashboardPanel({
 								<p className="text-sm font-semibold text-foreground">Embed & hosted iframe</p>
 								<p className="text-sm text-muted-foreground">
 									Toolbuilder hosts the generated tool for you at a stable iframe URL. Copy the
-									hosted link or the full embed snippet below.
+									hosted link, the tool-only embed hook, or the full snippet with starter copy.
 								</p>
 							</div>
 							<div className="flex flex-wrap items-center gap-2">
@@ -75,7 +75,7 @@ export function BuilderDashboardPanel({
 									) : (
 										<Copy className="size-4" />
 									)}
-									{copiedTarget === "iframe" ? "Copied" : "Copy iframe"}
+									{copiedTarget === "iframe" ? "Copied" : "Copy embed hook"}
 								</Button>
 								{fullEmbedSnippet ? (
 									<Button

@@ -46,6 +46,7 @@ describe("buildEmbedIframeTag", () => {
 		const tag = buildEmbedIframeTag({ origin: "https://example.com", toolId: "abc123", projectName: "My Tool" });
 
 		expect(tag).toContain('src="https://example.com/t/abc123"');
+		expect(tag).toContain('loading="lazy"');
 		expect(tag).toContain(`sandbox="${IFRAME_SANDBOX}"`);
 		expect(tag).toContain('id="letterstory-tool-abc123"');
 		expect(tag).toContain('title="My Tool"');
@@ -60,6 +61,7 @@ describe("buildEmbedIframeTag", () => {
 	it("does not set a fixed height, only a min-height fallback", () => {
 		const tag = buildEmbedIframeTag({ origin: "https://example.com", toolId: "abc123", projectName: "My Tool" });
 		expect(tag).toMatch(/min-height:\d+px/);
+		expect(tag).toContain("display:block");
 		expect(tag).not.toMatch(/[^-]height:\d+px/);
 	});
 
@@ -74,22 +76,29 @@ describe("buildEmbedListenerScript", () => {
 	it("matches on source, toolId, and the iframe's own origin", () => {
 		const script = buildEmbedListenerScript("abc123");
 		expect(script).toContain('"letterstory-tool-abc123"');
+		expect(script).toContain('"letterstory-tool-abc123-status"');
 		expect(script).toContain(TOOL_RESIZE_MESSAGE_SOURCE);
 		expect(script).toContain("event.origin");
+		expect(script).toContain("data.version !== 1");
 		expect(script).toContain('"abc123"');
 	});
 
 	it("resizes the iframe only when the message payload matches the contract", () => {
 		const script = buildEmbedListenerScript("abc123");
-		expect(script).toContain("frame.style.height = data.height + \"px\"");
+		expect(script).toContain("frame.style.height = Math.ceil(data.height) + \"px\"");
 		expect(script).toContain(`data.source !== ${JSON.stringify(TOOL_RESIZE_MESSAGE_SOURCE)}`);
+		expect(script).toContain("IntersectionObserver");
+		expect(script).toContain("showStatus");
 	});
 });
 
 describe("buildEmbedSnippet", () => {
-	it("combines the iframe tag and listener script", () => {
+	it("combines the iframe tag, graceful fallback, and listener script", () => {
 		const snippet = buildEmbedSnippet({ origin: "https://example.com", toolId: "abc123", projectName: "My Tool" });
+		expect(snippet).toContain('<div id="letterstory-tool-abc123-shell">');
 		expect(snippet).toContain("<iframe");
+		expect(snippet).toContain("<noscript>");
+		expect(snippet).toContain("Open it in a new tab.");
 		expect(snippet).toContain("<script>");
 		expect(snippet).toContain("letterstory-tool-abc123");
 	});

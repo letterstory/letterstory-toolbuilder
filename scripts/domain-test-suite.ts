@@ -246,8 +246,14 @@ function assertEmbedContractInvariant(baseUrl: string) {
 	if (!iframe.includes(`sandbox="${IFRAME_SANDBOX}"`)) {
 		throw new Error("Embed iframe tag is missing the shared sandbox contract.");
 	}
+	if (!iframe.includes('loading="lazy"')) {
+		throw new Error('Embed iframe tag is missing loading="lazy".');
+	}
 	if (!listener.includes(TOOL_RESIZE_MESSAGE_SOURCE) || !listener.includes("event.origin")) {
 		throw new Error("Embed listener script is missing the resize source or origin guard.");
+	}
+	if (!listener.includes("data.version")) {
+		throw new Error("Embed listener script is missing the resize contract version guard.");
 	}
 }
 
