@@ -6,6 +6,7 @@ export const generatedToolBrandSnapshotSchema = z.object({
 	fonts: z.array(z.string()),
 	headingFont: z.string().nullable().optional(),
 	bodyFont: z.string().nullable().optional(),
+	fontFamilyMode: z.enum(["embedded_only", "named_with_fallback"]).optional(),
 	logoPolicy: z.enum(["exact_asset", "text_only"]).optional(),
 	logoDataUri: z.string().nullable(),
 	competitorContext: z
@@ -156,6 +157,12 @@ export const generateToolInputSchema = z.object({
 	siteUrl: z.string().optional(),
 	prompt: z.string(),
 	toolId: z.string().optional(),
+	brandOverrides: z
+		.object({
+			colors: z.record(z.string(), z.string()).optional(),
+			fontFamily: z.string().optional(),
+		})
+		.optional(),
 });
 
 export const suggestToolsInputSchema = z.object({

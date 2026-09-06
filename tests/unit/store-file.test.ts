@@ -92,7 +92,7 @@ describe("fileToolStore", () => {
 		});
 	});
 
-	it("rolls back to a prior saved version and preserves newer history", async () => {
+	it("does not create a brand-new forward version when rolling back", async () => {
 		mkdirMock.mockRejectedValue(Object.assign(new Error("read only file system"), { code: "EROFS" }));
 
 		const { fileToolStore } = await import("../../src/lib/generation/store.file");
@@ -137,15 +137,11 @@ describe("fileToolStore", () => {
 
 		expect(rolledBack).toMatchObject({
 			id: "tool-123",
-			version: 4,
+			version: 1,
 			prompt: "v1",
 			html: "<!doctype html><html><body>v1</body></html>",
 			copy: { headline: "V1", supportingCopy: "First version." },
-			history: [
-				expect.objectContaining({ version: 3, prompt: "v3" }),
-				expect.objectContaining({ version: 2, prompt: "v2" }),
-				expect.objectContaining({ version: 1, prompt: "v1" }),
-			],
 		});
+		expect(rolledBack?.history.map((entry) => entry.version)).not.toContain(4);
 	});
 });

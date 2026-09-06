@@ -155,7 +155,14 @@ export function buildSuccessReply(
 	isUpdate: boolean
 ): BuilderConversationMessage {
 	const brandName = tool.brandSnapshot?.brandName;
-	const versionNote = isUpdate ? `Version ${tool.version} is ready.` : "The live preview is ready.";
+	const versionNote = isUpdate
+		? `Version ${tool.version} of ${tool.projectName} is ready.`
+		: `${tool.projectName} is ready.`;
+	const summaryNote = tool.copy?.supportingCopy
+		? ensureSentence(tool.copy.supportingCopy)
+		: isUpdate
+			? "Your latest changes are live in the preview."
+			: "You can review it in the live preview now.";
 	const brandNote = brandName
 		? `I used ${brandName}'s brand context${tool.siteUrl ? ` from ${tool.siteUrl}` : ""}.`
 		: tool.siteUrl
@@ -164,12 +171,15 @@ export function buildSuccessReply(
 	const warningNote = tool.warnings.length
 		? ` There ${tool.warnings.length === 1 ? "is" : "are"} ${tool.warnings.length} generation note${tool.warnings.length === 1 ? "" : "s"} in the dashboard tab.`
 		: "";
+	const closingNote = " Want to tweak anything else, or add another feature?";
 
 	return {
 		id: crypto.randomUUID(),
 		role: "assistant",
-		content: `${versionNote} ${brandNote}${warningNote}`,
+		content: `${versionNote} ${summaryNote} ${brandNote}${warningNote}${closingNote}`,
 		meta: isUpdate ? `Updated · v${tool.version}` : "Generated",
+		resultVersion: tool.version,
+		actionSummary: buildMessageActionSummary(tool.projectName, tool.prompt, isUpdate),
 	};
 }
 
@@ -218,6 +228,16 @@ export function formatTimestamp(iso: string): string {
 	}
 }
 
+export function buildMessageActionSummary(
+	projectName: string,
+	prompt: string | null | undefined,
+	isUpdate: boolean
+): string {
+	const label = `${isUpdate ? "Edited" : "Wrote"} ${projectName.trim() || "the tool"}`;
+	const requestSummary = summarizePrompt(prompt);
+	return requestSummary ? `${label} · ${requestSummary}` : label;
+}
+
 export function formatDuration(ms: number | null | undefined): string | null {
 	if (!ms || !Number.isFinite(ms)) return null;
 	if (ms >= 60_000) {
@@ -226,6 +246,11 @@ export function formatDuration(ms: number | null | undefined): string | null {
 		return `${minutes}m ${seconds}s`;
 	}
 	return `${Math.max(1, Math.round(ms / 1_000))}s`;
+}
+
+export function formatThoughtDuration(ms: number | null | undefined): string | null {
+	if (!ms || !Number.isFinite(ms)) return null;
+	return `Thought for ${Math.max(1, Math.round(ms / 1_000))}s`;
 }
 
 function summarizeAttempts(header: string): string {
@@ -238,6 +263,18 @@ function summarizeAttempts(header: string): string {
 			return `Attempt ${attempt} ${outcome.replace(/_/g, " ")} (${duration?.split("/")[0] ?? "?"}ms)`;
 		});
 	return attempts.join(" · ");
+}
+
+function ensureSentence(value: string): string {
+	const trimmed = value.trim();
+	if (!trimmed) return "";
+	return /[.!?]$/.test(trimmed) ? trimmed : `${trimmed}.`;
+}
+
+function summarizePrompt(value: string | null | undefined): string | null {
+	const normalized = value?.trim().replace(/\s+/g, " ");
+	if (!normalized) return null;
+	return normalized.length > 96 ? `${normalized.slice(0, 93).trimEnd()}…` : normalized;
 }
 
 function formatPhaseDetail(input: {

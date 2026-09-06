@@ -2043,6 +2043,111 @@ describe("generateTool — revisions (toolId set)", () => {
 		expect(result.status).toBe("success");
 	});
 
+	it("applies revision brand overrides to the authoritative brand snapshot and persisted HTML", async () => {
+		getGeneratedToolMock.mockResolvedValue({
+			...existingTool,
+			siteUrl: "https://stripe.com",
+			brandSnapshot: {
+				brandName: "Stripe",
+				colors: {
+					primary: "#5A3FF2",
+					accent: "#F97316",
+					background: "#FFF7ED",
+				},
+				fonts: ["Inter"],
+				headingFont: "Inter",
+				bodyFont: "Inter",
+				headingFontFace: {
+					family: "Inter",
+					google: true,
+					category: "sans-serif",
+					files: { "400": "https://fonts.example/inter-400.woff2" },
+					fallbacks: ["Arial", "sans-serif"],
+				},
+				bodyFontFace: {
+					family: "Inter",
+					google: true,
+					category: "sans-serif",
+					files: { "400": "https://fonts.example/inter-400.woff2" },
+					fallbacks: ["Arial", "sans-serif"],
+				},
+				logoDataUri: null,
+			},
+		});
+		mockAnthropicSuccess("<!doctype html><html><head><style>body{background:#ffffff;}</style></head><body>revised</body></html>");
+
+		const result = await generateTool({
+			projectName: "Mileage Calculator",
+			siteUrl: "https://stripe.com",
+			prompt:
+				"Update the color palette to use primary #009966 and background #FFF0C2. Change the primary heading and body font throughout the tool to Merriweather, and apply that font family in the CSS for headings, body copy, inputs, and buttons. Keep all functionality and layout exactly the same.",
+			toolId: "tool-123",
+			brandOverrides: {
+				colors: {
+					primary: "#009966",
+					background: "#FFF0C2",
+				},
+				fontFamily: "Merriweather",
+			},
+		});
+
+		expect(result.status).toBe("success");
+		if (result.status !== "success") return;
+
+		const htmlCall = (global.fetch as ReturnType<typeof vi.fn>).mock.calls.find(([, init]) => {
+			const parsed = JSON.parse(String((init as RequestInit | undefined)?.body ?? "{}")) as {
+				system?: string;
+			};
+			return (
+				!(parsed.system ?? "").includes("VERDICT:") && !(parsed.system ?? "").includes("HEADLINE:")
+			);
+		});
+		const htmlCallBody = JSON.parse(
+			String((htmlCall?.[1] as RequestInit | undefined)?.body ?? "{}")
+		) as {
+			messages?: Array<{ content: string }>;
+		};
+		const revisionMessage = htmlCallBody.messages?.[0]?.content ?? "";
+
+		expect(revisionMessage).toContain("Colors: primary: #009966, accent: #F97316, background: #FFF0C2");
+		expect(revisionMessage).toContain("Fonts: Merriweather, Inter");
+		expect(revisionMessage).toContain("Typography usage: Use Merriweather");
+		expect(revisionMessage).not.toContain("Colors: primary: #5A3FF2");
+		expect(revisionMessage).not.toContain("Fonts: Inter\nTypography usage: Use Inter");
+
+		expect(result.tool.brandSnapshot).toMatchObject({
+			colors: {
+				primary: "#009966",
+				accent: "#F97316",
+				background: "#FFF0C2",
+			},
+			fonts: ["Merriweather", "Inter"],
+			headingFont: "Merriweather",
+			bodyFont: "Merriweather",
+			fontFamilyMode: "named_with_fallback",
+			headingFontFace: null,
+			bodyFontFace: null,
+		});
+		expect(result.tool.html).toContain("--ls-brand-color-primary: #009966;");
+		expect(result.tool.html).toContain("--ls-brand-color-background: #FFF0C2;");
+		expect(result.tool.html).toContain("font-family: Merriweather");
+		expect(updateGeneratedToolMock).toHaveBeenCalledWith(
+			"tool-123",
+			expect.objectContaining({
+				brandSnapshot: expect.objectContaining({
+					colors: expect.objectContaining({
+						primary: "#009966",
+						background: "#FFF0C2",
+					}),
+					fonts: ["Merriweather", "Inter"],
+					fontFamilyMode: "named_with_fallback",
+					headingFontFace: null,
+					bodyFontFace: null,
+				}),
+			})
+		);
+	});
+
 	it("re-pulls brand context on a revision when the site url changes", async () => {
 		getGeneratedToolMock.mockResolvedValue(existingTool);
 		isBrandIngestionConfiguredMock.mockReturnValue(true);

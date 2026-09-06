@@ -239,10 +239,35 @@ async function rollbackGeneratedTool(id: string, toVersion: number): Promise<Gen
 	const existing = await getGeneratedTool(id);
 	if (!existing) return null;
 
+	if (existing.version === toVersion) return existing;
+
 	const target = existing.history.find((entry) => entry.version === toVersion);
 	if (!target) return null;
 
-	return updateGeneratedTool(id, contentFromHistoryEntry(target));
+	const backupSnapshot = buildHistoryEntry(existing);
+	const record: GeneratedToolRecord = {
+		...contentFromHistoryEntry(target),
+		id: existing.id,
+		createdAt: existing.createdAt,
+		updatedAt: new Date().toISOString(),
+		version: toVersion,
+		history: [backupSnapshot, ...existing.history.filter((entry) => entry.version !== toVersion)].slice(
+			0,
+			MAX_HISTORY_ENTRIES
+		),
+	};
+	if (storageMode === "memory") {
+		memoryRecords.set(id, record);
+		return record;
+	}
+	try {
+		await writeFile(recordPath(id), JSON.stringify(record, null, 2), "utf8");
+	} catch (error) {
+		if (!shouldFallbackToMemory(error)) throw error;
+		activateMemoryFallback(error);
+		memoryRecords.set(id, record);
+	}
+	return record;
 }
 
 async function listGeneratedTools(): Promise<GeneratedToolRecord[]> {

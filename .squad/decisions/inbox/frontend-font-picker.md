@@ -1,0 +1,6 @@
+# 2026-09-06
+**By:** Frontend
+
+**What:** Replaced the Brand snapshot editor’s plain font `<select>` with a searchable popover picker in `builder-dashboard-panel.tsx`, backed by an expanded curated catalog in `builder-brand-update.ts`. The catalog now contains **84 options total**: **32 sans-serif, 18 serif, 12 display, 11 handwriting, 10 monospace, and 1 system (`system-ui`)**. The picker supports live substring search, category filtering, a scrollable font list, keyboard Escape-to-close behavior, and preserves the existing custom-font fallback path for unknown/stored fonts.
+
+**Why:** The prior 7-item native select could not deliver the Adobe Fonts-style browsing experience or live typeface previews the user asked for. Frontend now lazy-loads a single Google Fonts CSS2 stylesheet containing the **83 non-system families** the first time the picker opens, reuses the injected `<link>` by id to avoid duplicates, and renders each row plus the trigger label with that font’s real `font-family`. Main risk is the size of the initial Google Fonts request across many families; mitigation is **lazy loading on first open only** plus requesting the **default weight only** (no extra `wght` variants).

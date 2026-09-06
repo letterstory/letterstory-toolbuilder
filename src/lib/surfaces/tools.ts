@@ -228,6 +228,7 @@ export async function generateToolSurface(
 			typeof parsed.data.toolId === "string" && parsed.data.toolId.trim()
 				? parsed.data.toolId.trim()
 				: undefined,
+		brandOverrides: parsed.data.brandOverrides,
 	});
 	const { diagnostics, ...responseBody } = result;
 	const parsedBody =

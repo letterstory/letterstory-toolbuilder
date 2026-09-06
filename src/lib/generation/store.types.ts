@@ -21,6 +21,7 @@ export interface GeneratedToolBrandSnapshot {
 	bodyFont?: string | null;
 	headingFontFace?: GeneratedToolBrandFontFace | null;
 	bodyFontFace?: GeneratedToolBrandFontFace | null;
+	fontFamilyMode?: "embedded_only" | "named_with_fallback";
 	/**
 	 * `exact_asset`: a real full-logo asset exists and the generator should
 	 * render that exact image. `text_only`: no trustworthy full-logo asset is

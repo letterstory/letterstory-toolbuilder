@@ -1,13 +1,17 @@
 import Image from "next/image";
-import { useMemo, type RefObject } from "react";
+import { useEffect, useMemo, useState, type RefObject } from "react";
 import {
 	AlertCircle,
+	Check,
 	CheckCircle2,
 	ChevronDown,
 	ChevronRight,
+	Copy,
+	Lightbulb,
 	LoaderCircle,
+	RotateCcw,
 } from "lucide-react";
-import { formatDuration } from "@/components/tools/builder-activity";
+import { formatDuration, formatThoughtDuration } from "@/components/tools/builder-activity";
 import type {
 	BuilderActivityStep,
 	BuilderBrandSummary,
@@ -18,6 +22,7 @@ import type {
 	GenerationTelemetry,
 	RequestState,
 	StatusMessage,
+	ToolSummary,
 } from "@/components/tools/builder-types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -30,6 +35,7 @@ interface BuilderChatPanelProps {
 	siteUrl: string;
 	prompt: string;
 	messages: BuilderConversationMessage[];
+	activeTool: ToolSummary | null;
 	requestState: RequestState;
 	statusMessage: StatusMessage;
 	activeBrandName: string | null;
@@ -48,6 +54,7 @@ interface BuilderChatPanelProps {
 	onSubmit: () => void;
 	onRequestSuggestions: () => void;
 	onSelectSuggestion: (suggestion: BuilderToolSuggestion) => void;
+	onRollback: (version: number) => Promise<boolean>;
 	composerRef: RefObject<HTMLTextAreaElement | null>;
 }
 
@@ -56,6 +63,7 @@ export function BuilderChatPanel({
 	siteUrl,
 	prompt,
 	messages,
+	activeTool,
 	requestState,
 	statusMessage,
 	activeBrandName,
@@ -74,15 +82,25 @@ export function BuilderChatPanel({
 	onSubmit,
 	onRequestSuggestions,
 	onSelectSuggestion,
+	onRollback,
 	composerRef,
 }: BuilderChatPanelProps) {
 	const isRunning = requestState !== "idle";
 	const showSuggestionPanel = Boolean(siteUrl.trim()) && !prompt.trim() && messages.length === 0;
+	const [revisionSuggestionsExpanded, setRevisionSuggestionsExpanded] = useState(true);
+	const [revisionSuggestionPage, setRevisionSuggestionPage] = useState(0);
+	const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
+	const [expandedDisclosureIds, setExpandedDisclosureIds] = useState<string[]>([]);
+	const [confirmingRollbackId, setConfirmingRollbackId] = useState<string | null>(null);
 	const composerPlaceholder = useMemo(() => {
 		if (isRunning) return "Generation in progress…";
 		if (messages.length > 0) return "Describe the change you'd like to make to this tool…";
 		return "What would you like to build?";
 	}, [isRunning, messages.length]);
+	const revisionSuggestions = useMemo(
+		() => getRevisionSuggestions(activeTool, revisionSuggestionPage),
+		[activeTool, revisionSuggestionPage]
+	);
 	const statusLine = isRunning
 		? requestState === "updating"
 			? "Thinking…"
@@ -92,6 +110,55 @@ export function BuilderChatPanel({
 		: messages.length > 0
 			? "Continue the conversation to refine this tool."
 			: "Start with a name, optional brand site, and your build prompt.";
+
+	useEffect(() => {
+		setRevisionSuggestionsExpanded(true);
+		setRevisionSuggestionPage(0);
+	}, [activeTool?.id, activeTool?.version]);
+
+	useEffect(() => {
+		if (!copiedMessageId) return;
+		const timeout = window.setTimeout(() => setCopiedMessageId(null), 2_000);
+		return () => window.clearTimeout(timeout);
+	}, [copiedMessageId]);
+
+	useEffect(() => {
+		if (requestState === "idle") return;
+		setConfirmingRollbackId(null);
+	}, [requestState]);
+
+	async function handleCopyMessage(message: BuilderConversationMessage) {
+		try {
+			await navigator.clipboard.writeText(message.content);
+			setCopiedMessageId(message.id);
+		} catch {
+			// Message content remains visible even if clipboard permissions are blocked.
+		}
+	}
+
+	function handleSelectRevisionSuggestion(suggestion: string) {
+		onPromptChange(suggestion);
+		composerRef.current?.focus();
+		window.requestAnimationFrame(() => {
+			composerRef.current?.setSelectionRange(suggestion.length, suggestion.length);
+		});
+	}
+
+	function toggleDisclosure(messageId: string) {
+		setExpandedDisclosureIds((current) =>
+			current.includes(messageId)
+				? current.filter((id) => id !== messageId)
+				: [...current, messageId]
+		);
+	}
+
+	async function handleConfirmRollback(message: BuilderConversationMessage) {
+		if (typeof message.resultVersion !== "number") return;
+		const didRollback = await onRollback(message.resultVersion);
+		if (didRollback) {
+			setConfirmingRollbackId(null);
+		}
+	}
 
 	return (
 		<div className="flex min-h-[72vh] flex-col bg-[#f8f6f4] lg:h-full lg:min-h-0">
@@ -248,9 +315,7 @@ export function BuilderChatPanel({
 								disabled={suggestionsLoading}
 								className="shrink-0"
 							>
-								{suggestionsLoading ? (
-									<LoaderCircle className="size-4 animate-spin" />
-								) : null}
+								{suggestionsLoading ? <LoaderCircle className="size-4 animate-spin" /> : null}
 								{suggestions.length ? "Refresh suggestions" : "Suggest a tool for this brand"}
 							</Button>
 						</div>
@@ -270,9 +335,7 @@ export function BuilderChatPanel({
 									>
 										<div className="flex items-start justify-between gap-3">
 											<div>
-												<p className="text-sm font-semibold text-foreground">
-													{suggestion.title}
-												</p>
+												<p className="text-sm font-semibold text-foreground">{suggestion.title}</p>
 												<p className="mt-1 text-sm text-muted-foreground">
 													{suggestion.description}
 												</p>
@@ -291,34 +354,133 @@ export function BuilderChatPanel({
 					</section>
 				) : null}
 
-				{messages.map((message) => (
-					<div
-						key={message.id}
-						className={cn("flex", message.role === "user" ? "justify-end" : "justify-start")}
-					>
+				{messages.map((message) => {
+					const thoughtSummary = formatThoughtDuration(message.telemetry?.totalMs);
+					const hasDisclosure =
+						message.role === "assistant" && Boolean(message.actionSummary || thoughtSummary);
+					const isDisclosureExpanded = expandedDisclosureIds.includes(message.id);
+					const canRevert =
+						message.role === "assistant" && typeof message.resultVersion === "number";
+					const showRollbackConfirm = confirmingRollbackId === message.id && canRevert;
+
+					return (
 						<div
-							className={cn(
-								"max-w-[92%]",
-								message.role === "assistant" ? "space-y-2" : "space-y-1.5"
-							)}
+							key={message.id}
+							className={cn("flex", message.role === "user" ? "justify-end" : "justify-start")}
 						>
-							{message.role === "user" ? (
-								<div className="rounded-[24px] rounded-br-md bg-brand-light/40 px-4 py-3 text-sm text-foreground shadow-sm">
-									{message.content}
+							<div
+								className={cn(
+									"group relative max-w-[92%]",
+									message.role === "assistant" ? "space-y-2" : "space-y-1.5"
+								)}
+							>
+								<div className="absolute -right-1 -top-1 z-10 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+									{canRevert ? (
+										<Button
+											type="button"
+											variant="ghost"
+											size="icon"
+											onClick={() =>
+												setConfirmingRollbackId((current) =>
+													current === message.id ? null : message.id
+												)
+											}
+											disabled={requestState !== "idle"}
+											className="size-7 rounded-full border border-brand/10 bg-white/95 text-brand-text shadow-sm hover:bg-brand-light/20"
+											aria-label={`Revert to version ${message.resultVersion}`}
+										>
+											<RotateCcw className="size-3.5" />
+										</Button>
+									) : null}
+									<Button
+										type="button"
+										variant="ghost"
+										size="icon"
+										onClick={() => void handleCopyMessage(message)}
+										className="size-7 rounded-full border border-brand/10 bg-white/95 text-brand-text shadow-sm hover:bg-brand-light/20"
+										aria-label="Copy message"
+									>
+										{copiedMessageId === message.id ? (
+											<Check className="size-3.5" />
+										) : (
+											<Copy className="size-3.5" />
+										)}
+									</Button>
 								</div>
-							) : message.role === "assistant" ? (
-								<p className="text-sm leading-6 text-brand-text">{message.content}</p>
-							) : (
-								<div className="rounded-2xl border border-brand/10 bg-white px-4 py-3 text-xs text-muted-foreground">
-									{message.content}
-								</div>
-							)}
-							{message.meta ? (
-								<p className="px-1 text-[11px] text-brand-text/50">{message.meta}</p>
-							) : null}
+								{message.role === "user" ? (
+									<div className="rounded-[24px] rounded-br-md bg-brand-light/40 px-4 py-3 text-sm text-foreground shadow-sm">
+										{message.content}
+									</div>
+								) : message.role === "assistant" ? (
+									<p className="text-sm leading-6 text-brand-text">{message.content}</p>
+								) : (
+									<div className="rounded-2xl border border-brand/10 bg-white px-4 py-3 text-xs text-muted-foreground">
+										{message.content}
+									</div>
+								)}
+								{hasDisclosure ? (
+									<div className="space-y-2 px-1">
+										<button
+											type="button"
+											onClick={() => toggleDisclosure(message.id)}
+											className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-brand/10 bg-white px-2.5 py-1 text-left text-[11px] font-medium text-brand-text shadow-sm transition hover:border-brand/20 hover:bg-brand-light/15"
+											aria-expanded={isDisclosureExpanded}
+										>
+											{isDisclosureExpanded ? (
+												<ChevronDown className="size-3.5 shrink-0 text-brand-text/60" />
+											) : (
+												<ChevronRight className="size-3.5 shrink-0 text-brand-text/60" />
+											)}
+											<span className="truncate">{message.actionSummary ?? thoughtSummary}</span>
+											{message.actionSummary && thoughtSummary ? (
+												<span className="shrink-0 text-brand-text/45">· {thoughtSummary}</span>
+											) : null}
+										</button>
+										{isDisclosureExpanded ? (
+											<div className="rounded-2xl border border-brand/10 bg-white/90 px-3 py-2.5 text-xs text-muted-foreground shadow-sm">
+												<div className="space-y-1.5">
+													{message.actionSummary ? (
+														<p className="text-brand-text">{message.actionSummary}</p>
+													) : null}
+													{thoughtSummary ? <p>{thoughtSummary}</p> : null}
+													{typeof message.resultVersion === "number" ? (
+														<p>Resulted in version {message.resultVersion}.</p>
+													) : null}
+												</div>
+											</div>
+										) : null}
+									</div>
+								) : null}
+								{showRollbackConfirm ? (
+									<div className="mx-1 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-900 shadow-sm">
+										<p>Revert the live tool to version {message.resultVersion}?</p>
+										<div className="mt-2 flex gap-2">
+											<Button
+												type="button"
+												variant="outline"
+												size="sm"
+												onClick={() => setConfirmingRollbackId(null)}
+											>
+												Cancel
+											</Button>
+											<Button
+												type="button"
+												size="sm"
+												onClick={() => void handleConfirmRollback(message)}
+												disabled={requestState !== "idle"}
+											>
+												Revert
+											</Button>
+										</div>
+									</div>
+								) : null}
+								{message.meta ? (
+									<p className="px-1 text-[11px] text-brand-text/50">{message.meta}</p>
+								) : null}
+							</div>
 						</div>
-					</div>
-				))}
+					);
+				})}
 			</div>
 
 			<div className="border-t border-brand/10 bg-[#f8f6f4] px-4 py-4 sm:px-5">
@@ -333,6 +495,15 @@ export function BuilderChatPanel({
 					</p>
 					<StatusChip requestState={requestState} statusMessage={statusMessage} />
 				</div>
+				{activeTool ? (
+					<RevisionSuggestionRow
+						expanded={revisionSuggestionsExpanded}
+						suggestions={revisionSuggestions}
+						onToggle={() => setRevisionSuggestionsExpanded((current) => !current)}
+						onPopulate={handleSelectRevisionSuggestion}
+						onSuggestMore={() => setRevisionSuggestionPage((current) => current + 1)}
+					/>
+				) : null}
 				<form
 					onSubmit={(event) => {
 						event.preventDefault();
@@ -365,6 +536,106 @@ export function BuilderChatPanel({
 					</div>
 				</form>
 			</div>
+		</div>
+	);
+}
+
+const REVISION_SUGGESTION_PAGES = [
+	[
+		"Add a dark mode toggle",
+		"Add input validation",
+		"Add a reset button",
+		"Improve mobile responsiveness",
+	],
+	[
+		"Make the layout easier to scan",
+		"Add clearer empty-state guidance",
+		"Improve keyboard accessibility",
+		"Polish the spacing and visual hierarchy",
+	],
+	[
+		"Add inline helper text",
+		"Make the primary call to action stand out more",
+		"Add loading and success states",
+		"Improve the results summary",
+	],
+];
+
+function getRevisionSuggestions(activeTool: ToolSummary | null, page: number): string[] {
+	const suggestions = [...REVISION_SUGGESTION_PAGES[page % REVISION_SUGGESTION_PAGES.length]!];
+
+	if (activeTool?.warnings.length) {
+		suggestions[0] =
+			activeTool.warnings.length === 1
+				? "Address the generation note and tighten any rough edges"
+				: "Address the generation notes and tighten any rough edges";
+	}
+
+	return suggestions;
+}
+
+function RevisionSuggestionRow({
+	expanded,
+	suggestions,
+	onToggle,
+	onPopulate,
+	onSuggestMore,
+}: {
+	expanded: boolean;
+	suggestions: string[];
+	onToggle: () => void;
+	onPopulate: (suggestion: string) => void;
+	onSuggestMore: () => void;
+}) {
+	return (
+		<div className="mb-3 rounded-2xl border border-brand/10 bg-white/80 px-3 py-2.5 shadow-[0_1px_3px_rgba(15,14,14,0.06)]">
+			<div className="flex items-center justify-between gap-3">
+				<button
+					type="button"
+					onClick={onToggle}
+					className="inline-flex min-w-0 items-center gap-2 text-sm font-medium text-brand-text"
+					aria-expanded={expanded}
+				>
+					<Lightbulb className="size-4 text-brand" />
+					<span>Suggestions</span>
+					{expanded ? (
+						<ChevronDown className="size-4 text-brand-text/60" />
+					) : (
+						<ChevronRight className="size-4 text-brand-text/60" />
+					)}
+				</button>
+				{expanded ? (
+					<span className="hidden text-xs text-muted-foreground sm:inline">Scroll for more</span>
+				) : null}
+			</div>
+			{expanded ? (
+				<div className="relative mt-2">
+					<div className="pointer-events-none absolute inset-y-0 right-0 w-10 bg-gradient-to-l from-white/95 to-transparent" />
+					<div className="flex gap-2 overflow-x-auto pb-1 pr-8 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+						{suggestions.map((suggestion) => (
+							<Button
+								key={suggestion}
+								type="button"
+								variant="outline"
+								size="sm"
+								onClick={() => onPopulate(suggestion)}
+								className="h-8 shrink-0 rounded-full border-brand/12 bg-white px-3 text-xs text-brand-text hover:bg-brand-light/20"
+							>
+								{suggestion}
+							</Button>
+						))}
+						<Button
+							type="button"
+							variant="ghost"
+							size="sm"
+							onClick={onSuggestMore}
+							className="h-8 shrink-0 rounded-full border border-dashed border-brand/18 px-3 text-xs text-brand-text hover:bg-brand-light/20"
+						>
+							Suggest more
+						</Button>
+					</div>
+				</div>
+			) : null}
 		</div>
 	);
 }

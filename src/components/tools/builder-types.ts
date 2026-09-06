@@ -16,6 +16,9 @@ export interface BuilderConversationMessage {
 	role: ConversationRole;
 	content: string;
 	meta?: string;
+	resultVersion?: number;
+	telemetry?: GenerationTelemetry | null;
+	actionSummary?: string;
 }
 
 export interface BuilderBrandSummary {
@@ -24,6 +27,11 @@ export interface BuilderBrandSummary {
 	logoDataUri: string | null;
 	colors: Record<string, string>;
 	fonts: string[];
+}
+
+export interface BuilderBrandUpdateInput {
+	colors: Record<string, string>;
+	fontFamily?: string;
 }
 
 export interface BuilderToolSuggestion {

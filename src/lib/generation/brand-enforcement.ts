@@ -358,13 +358,20 @@ function buildFontFaceCss(face: EmbeddedFontFace): string {
 function buildRolePlan(
 	face: GeneratedToolBrandFontFace | null | undefined,
 	family: string | null | undefined,
-	embeddedFamilies: Set<string>
+	embeddedFamilies: Set<string>,
+	fontFamilyMode: GeneratedToolBrandSnapshot["fontFamilyMode"] = "embedded_only"
 ): FontRolePlan {
 	const systemStack = inferSystemStack(face, family);
 	const normalizedFamily = family?.trim() ? family.trim() : null;
 	if (normalizedFamily && embeddedFamilies.has(normalizedFamily)) {
 		return {
 			embeddedFamily: normalizedFamily,
+			stack: `${quoteFontFamily(normalizedFamily)}, ${systemStack}`,
+		};
+	}
+	if (normalizedFamily && fontFamilyMode === "named_with_fallback") {
+		return {
+			embeddedFamily: null,
 			stack: `${quoteFontFamily(normalizedFamily)}, ${systemStack}`,
 		};
 	}
@@ -377,11 +384,17 @@ function buildBrandFontPlan(
 	warnings: string[]
 ): BrandFontPlan {
 	const embeddedFamilies = new Set(embeddedFaces.map((face) => face.family));
-	const body = buildRolePlan(brandSnapshot.bodyFontFace, brandSnapshot.bodyFont, embeddedFamilies);
+	const body = buildRolePlan(
+		brandSnapshot.bodyFontFace,
+		brandSnapshot.bodyFont,
+		embeddedFamilies,
+		brandSnapshot.fontFamilyMode
+	);
 	const heading = buildRolePlan(
 		brandSnapshot.headingFontFace ?? brandSnapshot.bodyFontFace,
 		brandSnapshot.headingFont ?? brandSnapshot.bodyFont,
-		embeddedFamilies
+		embeddedFamilies,
+		brandSnapshot.fontFamilyMode
 	);
 	return {
 		css: embeddedFaces.map(buildFontFaceCss).join("\n"),

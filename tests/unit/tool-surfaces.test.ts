@@ -140,6 +140,36 @@ describe("tool surfaces embed snippet parity", () => {
 		});
 	});
 
+	it("passes brand overrides through to generateTool on revision requests", async () => {
+		generateToolMock.mockResolvedValue({
+			status: "success",
+			tool: baseTool,
+		});
+
+		const response = await generateToolSurface({
+			projectName: "BMI Calculator",
+			siteUrl: "https://stripe.com",
+			prompt: "Update the palette",
+			toolId: "tool-123",
+			brandOverrides: {
+				colors: { primary: "#009966", background: "#FFF0C2" },
+				fontFamily: "Merriweather",
+			},
+		});
+
+		expect(response.statusCode).toBe(200);
+		expect(generateToolMock).toHaveBeenCalledWith({
+			projectName: "BMI Calculator",
+			siteUrl: "https://stripe.com",
+			prompt: "Update the palette",
+			toolId: "tool-123",
+			brandOverrides: {
+				colors: { primary: "#009966", background: "#FFF0C2" },
+				fontFamily: "Merriweather",
+			},
+		});
+	});
+
 	it("rejects blank project names before calling generateTool", async () => {
 		const response = await generateToolSurface({
 			projectName: "   ",

@@ -43,6 +43,7 @@ export interface ToolGenerationRequest {
 	/** Optional — leave blank to generate without brand context. */
 	siteUrl: string;
 	prompt: string;
+	brandOverrides?: ToolGenerationBrandOverrides;
 	/**
 	 * When set, revises the existing tool with this id in place (same id/embed
 	 * URL, version bumped, previous content kept in history) instead of
@@ -51,6 +52,11 @@ export interface ToolGenerationRequest {
 	 * than starting from a blank page.
 	 */
 	toolId?: string;
+}
+
+export interface ToolGenerationBrandOverrides {
+	colors?: Record<string, string>;
+	fontFamily?: string;
 }
 
 export interface ToolGenerationSuccessResult {
@@ -185,12 +191,16 @@ export async function generateTool(request: ToolGenerationRequest): Promise<Tool
 		brandProfile,
 		buildPendingCompetitorContext(normalizedSiteUrl || null)
 	);
+	const effectiveBrandSnapshot = applyBrandOverridesToSnapshot(
+		brandSnapshot,
+		request.brandOverrides
+	);
 
 	const built = await buildToolContent({
 		projectName: request.projectName,
 		prompt: request.prompt,
 		siteUrl: normalizedSiteUrl || null,
-		brandSnapshot,
+		brandSnapshot: effectiveBrandSnapshot,
 		brandWarning,
 		requestStartedAt: startedAt,
 	});
@@ -260,6 +270,7 @@ async function reviseTool(
 		);
 		brandWarning = resolved.brandWarning;
 	}
+	brandSnapshot = applyBrandOverridesToSnapshot(brandSnapshot, request.brandOverrides);
 
 	const built = await buildToolContent({
 		projectName: request.projectName || existing.projectName,
@@ -727,6 +738,7 @@ function toBrandSnapshot(
 		fonts: profile.fonts,
 		headingFont: profile.typography.headingFont,
 		bodyFont: profile.typography.bodyFont,
+		fontFamilyMode: "embedded_only",
 		headingFontFace: profile.typography.headingFontFace
 			? {
 					family: profile.typography.headingFontFace.family,
@@ -748,6 +760,50 @@ function toBrandSnapshot(
 		logoPolicy,
 		logoDataUri: logoPolicy === "exact_asset" ? logoDataUri : null,
 		competitorContext,
+	};
+}
+
+function applyBrandOverridesToSnapshot(
+	brandSnapshot: GeneratedToolBrandSnapshot | null,
+	overrides?: ToolGenerationBrandOverrides
+): GeneratedToolBrandSnapshot | null {
+	if (!overrides) return brandSnapshot;
+
+	const nextColors = Object.fromEntries(
+		Object.entries(overrides.colors ?? {}).filter(
+			([name, value]) => Boolean(name.trim()) && Boolean(value.trim())
+		)
+	);
+	const nextFont = overrides.fontFamily?.trim() || null;
+	if (!Object.keys(nextColors).length && !nextFont) return brandSnapshot;
+
+	const baseSnapshot: GeneratedToolBrandSnapshot = brandSnapshot ?? {
+		brandName: null,
+		colors: {},
+		fonts: [],
+		headingFont: null,
+		bodyFont: null,
+		headingFontFace: null,
+		bodyFontFace: null,
+		fontFamilyMode: "embedded_only",
+		logoPolicy: "text_only",
+		logoDataUri: null,
+		competitorContext: null,
+	};
+	const existingFonts = baseSnapshot.fonts ?? [];
+
+	return {
+		...baseSnapshot,
+		colors: {
+			...baseSnapshot.colors,
+			...nextColors,
+		},
+		fonts: nextFont ? [nextFont, ...existingFonts.filter((font) => font !== nextFont)] : existingFonts,
+		headingFont: nextFont ?? baseSnapshot.headingFont,
+		bodyFont: nextFont ?? baseSnapshot.bodyFont,
+		headingFontFace: nextFont ? null : baseSnapshot.headingFontFace ?? null,
+		bodyFontFace: nextFont ? null : baseSnapshot.bodyFontFace ?? null,
+		fontFamilyMode: nextFont ? "named_with_fallback" : baseSnapshot.fontFamilyMode ?? "embedded_only",
 	};
 }
 

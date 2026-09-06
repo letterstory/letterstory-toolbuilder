@@ -13,12 +13,14 @@ import {
 	formatDuration,
 	parseGenerationTelemetry,
 } from "@/components/tools/builder-activity";
+import { composeBrandUpdatePrompt } from "@/components/tools/builder-brand-update";
 import { BuilderChatPanel } from "@/components/tools/builder-chat-panel";
 import { BuilderDashboardPanel } from "@/components/tools/builder-dashboard-panel";
 import { BuilderPreviewCanvas } from "@/components/tools/builder-preview-canvas";
 import { BuilderTopbar } from "@/components/tools/builder-topbar";
 import type {
 	BuilderBrandSummary,
+	BuilderBrandUpdateInput,
 	BuilderConversationMessage,
 	BuilderGenerationRun,
 	BuilderSuggestionBrandContext,
@@ -48,6 +50,7 @@ export function ToolBuilderWorkspace() {
 	const [requestState, setRequestState] = useState<RequestState>("idle");
 	const [statusMessage, setStatusMessage] = useState<StatusMessage>(INITIAL_STATUS);
 	const [activeView, setActiveView] = useState<BuilderView>("preview");
+	const [brandEditOpen, setBrandEditOpen] = useState(false);
 	const [copiedTarget, setCopiedTarget] = useState<"iframe" | "full" | "url" | null>(null);
 	const [activeTool, setActiveTool] = useState<ToolSummary | null>(null);
 	const [toolHistory, setToolHistory] = useState<ToolHistoryEntry[]>([]);
@@ -80,9 +83,16 @@ export function ToolBuilderWorkspace() {
 		}
 	}, []);
 
+	function handleSetView(view: BuilderView) {
+		setActiveView(view);
+		if (view !== "dashboard") {
+			setBrandEditOpen(false);
+		}
+	}
+
 	function handleOpenEmbed() {
 		if (!activeTool) return;
-		setActiveView("dashboard");
+		handleSetView("dashboard");
 		if (typeof window !== "undefined") {
 			window.requestAnimationFrame(() => {
 				document.getElementById("builder-embed-section")?.scrollIntoView({
@@ -142,10 +152,8 @@ export function ToolBuilderWorkspace() {
 	useEffect(() => {
 		if (
 			!activeTool ||
-			(
-				activeTool.visualCongruence?.status !== "pending" &&
-				activeTool.brandSnapshot?.competitorContext?.status !== "pending"
-			)
+			(activeTool.visualCongruence?.status !== "pending" &&
+				activeTool.brandSnapshot?.competitorContext?.status !== "pending")
 		) {
 			return;
 		}
@@ -159,6 +167,10 @@ export function ToolBuilderWorkspace() {
 		}, 4_000);
 		return () => window.clearInterval(interval);
 	}, [activeTool, loadRecentTools, loadToolDetail]);
+
+	useEffect(() => {
+		setBrandEditOpen(false);
+	}, [activeTool?.id, activeTool?.version]);
 
 	const previewUrl = activeTool ? `/t/${activeTool.id}?v=${activeTool.version}` : null;
 	const origin = typeof window !== "undefined" ? window.location.origin : "";
@@ -223,11 +235,26 @@ export function ToolBuilderWorkspace() {
 		setSuggestionsError(null);
 	}
 
+	function handleOpenThemeEditor() {
+		handleSetView("dashboard");
+		setBrandEditOpen(true);
+	}
+
 	function appendConversation(message: BuilderConversationMessage) {
 		setMessages((current) => [...current, message]);
 	}
 
-	async function runGeneration(toolId: string | undefined) {
+	async function submitGeneration({
+		promptText,
+		toolId,
+		clearComposerOnSuccess,
+		brandUpdateInput,
+	}: {
+		promptText: string;
+		toolId: string | undefined;
+		clearComposerOnSuccess: boolean;
+		brandUpdateInput?: BuilderBrandUpdateInput;
+	}) {
 		const trimmedProjectName = projectName.trim();
 		if (!trimmedProjectName) {
 			setStatusMessage({
@@ -238,7 +265,7 @@ export function ToolBuilderWorkspace() {
 			return;
 		}
 
-		const trimmedPrompt = prompt.trim();
+		const trimmedPrompt = promptText.trim();
 		if (!trimmedPrompt) {
 			setStatusMessage({
 				title: toolId ? "Update instructions required" : "Describe the tool",
@@ -255,7 +282,7 @@ export function ToolBuilderWorkspace() {
 		setSiteUrl(normalizedSiteUrl);
 		setRequestState(toolId ? "updating" : "generating");
 		setCopiedTarget(null);
-		setActiveView("preview");
+		handleSetView("preview");
 		setTelemetry(null);
 		let observedTelemetry: GenerationTelemetry | null = null;
 		const currentRun = buildGenerationRun({
@@ -295,6 +322,7 @@ export function ToolBuilderWorkspace() {
 					siteUrl: normalizedSiteUrl,
 					prompt: trimmedPrompt,
 					toolId,
+					brandOverrides: brandUpdateInput,
 				}),
 			});
 			const responseTelemetry = parseGenerationTelemetry(response);
@@ -316,10 +344,15 @@ export function ToolBuilderWorkspace() {
 			if (data.status === "success") {
 				const summary = toSummary(data.tool);
 				setActiveTool(summary);
-				setPrompt("");
+				if (clearComposerOnSuccess) {
+					setPrompt("");
+				}
 				setSiteUrl(summary.siteUrl ?? normalizedSiteUrl);
 				setProjectName(summary.projectName);
-				appendConversation(buildSuccessReply(summary, Boolean(toolId)));
+				appendConversation({
+					...buildSuccessReply(summary, Boolean(toolId)),
+					telemetry: observedTelemetry,
+				});
 				void loadRecentTools();
 				void loadToolDetail(summary.id);
 			}
@@ -344,7 +377,21 @@ export function ToolBuilderWorkspace() {
 	}
 
 	function handleSubmit() {
-		void runGeneration(activeTool ? activeTool.id : undefined);
+		void submitGeneration({
+			promptText: prompt,
+			toolId: activeTool ? activeTool.id : undefined,
+			clearComposerOnSuccess: true,
+		});
+	}
+
+	function handleApplyBrandUpdate(input: BuilderBrandUpdateInput) {
+		if (!activeTool) return;
+		void submitGeneration({
+			promptText: composeBrandUpdatePrompt(input),
+			toolId: activeTool.id,
+			clearComposerOnSuccess: false,
+			brandUpdateInput: input,
+		});
 	}
 
 	function handleStartNewTool() {
@@ -363,25 +410,26 @@ export function ToolBuilderWorkspace() {
 		setActivitySteps([]);
 		setTelemetry(null);
 		setProgress(0);
-		setActiveView("preview");
+		handleSetView("preview");
 		setStatusMessage(INITIAL_STATUS);
 		setRecentOpen(false);
 	}
 
 	function handleReopenRecent(item: ToolSummary) {
-		setActiveTool(item);
-		populateFormFrom(item);
+		const nextItem = item;
+		setActiveTool(nextItem);
+		populateFormFrom(nextItem);
 		setCopiedTarget(null);
-		setMessages(buildLoadedConversation(item));
+		setMessages(buildLoadedConversation(nextItem));
 		setActiveRun(null);
 		setActivitySteps([]);
 		setTelemetry(null);
 		setProgress(0);
-		setActiveView("preview");
-		void loadToolDetail(item.id);
+		handleSetView("preview");
+		void loadToolDetail(nextItem.id);
 		setStatusMessage({
 			title: "Reopened tool",
-			description: `Showing ${item.projectName} v${item.version}. Open it in a new tab from Publish.`,
+			description: `Showing ${nextItem.projectName} v${nextItem.version}. Open it in a new tab from Publish.`,
 			tone: "info",
 		});
 		setRecentOpen(false);
@@ -507,8 +555,8 @@ export function ToolBuilderWorkspace() {
 	}, [activeRun, activitySteps, telemetry]);
 
 	return (
-		<div className="bg-white lg:flex lg:h-full lg:min-h-0 lg:flex-col">
-			<div data-builder-topbar className="shrink-0">
+		<div className="isolate bg-white lg:flex lg:h-full lg:min-h-0 lg:flex-col">
+			<div data-builder-topbar className="relative z-20 shrink-0">
 				<BuilderTopbar
 					activeView={activeView}
 					activeTool={activeTool}
@@ -518,7 +566,8 @@ export function ToolBuilderWorkspace() {
 					recentLoading={recentLoading}
 					requestState={requestState}
 					recentOpen={recentOpen}
-					onSetView={setActiveView}
+					onSetView={handleSetView}
+					onOpenThemeEditor={handleOpenThemeEditor}
 					onToggleRecent={() => setRecentOpen((current) => !current)}
 					onStartNew={handleStartNewTool}
 					onFocusComposer={() => composerRef.current?.focus()}
@@ -528,12 +577,13 @@ export function ToolBuilderWorkspace() {
 					onRollback={handleRollback}
 				/>
 			</div>
-			<div className="grid lg:min-h-0 lg:flex-1 lg:grid-cols-[360px_minmax(0,1fr)]">
+			<div className="relative z-0 grid lg:min-h-0 lg:flex-1 lg:grid-cols-[360px_minmax(0,1fr)]">
 				<BuilderChatPanel
 					projectName={projectName}
 					siteUrl={siteUrl}
 					prompt={prompt}
 					messages={messages}
+					activeTool={activeTool}
 					requestState={requestState}
 					statusMessage={statusMessage}
 					activeBrandName={activeBrandName}
@@ -557,6 +607,7 @@ export function ToolBuilderWorkspace() {
 					onSubmit={handleSubmit}
 					onRequestSuggestions={() => void handleRequestSuggestions()}
 					onSelectSuggestion={handleSelectSuggestion}
+					onRollback={handleRollback}
 					composerRef={composerRef}
 				/>
 				<div className="border-t border-[#e4e4e7] bg-slate-50 p-4 lg:flex lg:h-full lg:min-h-0 lg:flex-col lg:overflow-y-auto lg:border-t-0 lg:border-l lg:p-5">
@@ -577,8 +628,11 @@ export function ToolBuilderWorkspace() {
 							fullEmbedSnippet={fullEmbedSnippet}
 							hostedUrl={hostedUrl}
 							copiedTarget={copiedTarget}
+							brandEditOpen={brandEditOpen}
 							requestState={requestState}
+							onBrandEditOpenChange={setBrandEditOpen}
 							onCopy={(target, text) => void handleCopyEmbed(target, text)}
+							onApplyBrandUpdate={handleApplyBrandUpdate}
 							onRollback={(version) => void handleRollback(version)}
 						/>
 					)}

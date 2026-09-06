@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, History, Pencil, Plus } from "lucide-react";
+import { ChevronDown, History, Palette, Pencil, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type {
@@ -20,6 +20,7 @@ interface BuilderTopbarProps {
 	requestState: RequestState;
 	recentOpen: boolean;
 	onSetView: (view: BuilderView) => void;
+	onOpenThemeEditor: () => void;
 	onToggleRecent: () => void;
 	onStartNew: () => void;
 	onFocusComposer: () => void;
@@ -39,6 +40,7 @@ export function BuilderTopbar({
 	requestState,
 	recentOpen,
 	onSetView,
+	onOpenThemeEditor,
 	onToggleRecent,
 	onStartNew,
 	onFocusComposer,
@@ -51,6 +53,11 @@ export function BuilderTopbar({
 	const versionMenuRef = useRef<HTMLDivElement>(null);
 	const currentLabel = projectName.trim() || activeTool?.projectName || "New tool";
 	const hasVersionHistory = Boolean(activeTool) && toolHistory.length > 0;
+	const hasThemeShortcut = Boolean(
+		activeTool?.brandSnapshot &&
+			(Object.keys(activeTool.brandSnapshot.colors ?? {}).length > 0 ||
+				activeTool.brandSnapshot.fonts.length > 0)
+	);
 	const versionEntries = useMemo(() => {
 		if (!activeTool) return [];
 		return [
@@ -86,6 +93,17 @@ export function BuilderTopbar({
 		}
 	}, [hasVersionHistory]);
 
+	useEffect(() => {
+		if (!recentOpen && !versionHistoryOpen) return;
+		function handleKeyDown(event: KeyboardEvent) {
+			if (event.key !== "Escape") return;
+			if (versionHistoryOpen) setVersionHistoryOpen(false);
+			if (recentOpen) onToggleRecent();
+		}
+		document.addEventListener("keydown", handleKeyDown);
+		return () => document.removeEventListener("keydown", handleKeyDown);
+	}, [onToggleRecent, recentOpen, versionHistoryOpen]);
+
 	async function handleRollbackClick(version: number) {
 		const didRollback = await onRollback(version);
 		if (didRollback) {
@@ -104,6 +122,7 @@ export function BuilderTopbar({
 								setVersionHistoryOpen(false);
 								onToggleRecent();
 							}}
+							aria-expanded={recentOpen}
 							className="flex h-[30px] items-center gap-2 rounded-md border border-brand/15 bg-white px-2.5 text-left shadow-sm transition hover:border-brand/25 hover:bg-brand-light/20"
 						>
 							<div className="flex size-6 items-center justify-center rounded-md bg-brand text-[11px] font-semibold text-brand-foreground">
@@ -194,6 +213,18 @@ export function BuilderTopbar({
 						Edit
 					</Button>
 
+					<Button
+						type="button"
+						variant="secondary"
+						size="sm"
+						disabled={!hasThemeShortcut || requestState !== "idle"}
+						onClick={onOpenThemeEditor}
+						className="h-[30px] rounded-md"
+					>
+						<Palette className="size-4" />
+						Theme
+					</Button>
+
 					<div className="relative" ref={versionMenuRef}>
 						<Button
 							type="button"
@@ -206,6 +237,7 @@ export function BuilderTopbar({
 							}}
 							className="size-[30px] rounded-md"
 							aria-label="Open version history"
+							aria-expanded={versionHistoryOpen}
 						>
 							<History className="size-4" />
 						</Button>

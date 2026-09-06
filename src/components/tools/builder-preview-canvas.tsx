@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { ArrowUpRight, Monitor, Sparkles } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { ArrowUpRight, Check, Copy, Monitor, Sparkles, X } from "lucide-react";
 import type {
 	BuilderGenerationRun,
 	GenerationTelemetry,
@@ -30,13 +30,39 @@ export function BuilderPreviewCanvas({
 	telemetry,
 	progress,
 }: BuilderPreviewCanvasProps) {
+	const [origin, setOrigin] = useState("");
 	const [frameHeight, setFrameHeight] = useState(720);
+	const [showPreviewBar, setShowPreviewBar] = useState(true);
+	const [copiedPreviewUrl, setCopiedPreviewUrl] = useState(false);
 	const showGenerationTakeover = requestState === "generating" && !activeRun?.toolId;
 	void telemetry;
+	const publicPreviewUrl = useMemo(
+		() => (activeTool ? `${origin || ""}/t/${activeTool.id}` : ""),
+		[activeTool, origin]
+	);
+	const absolutePreviewUrl = useMemo(
+		() => (previewUrl ? `${origin || ""}${previewUrl}` : ""),
+		[origin, previewUrl]
+	);
+
+	useEffect(() => {
+		setOrigin(window.location.origin);
+	}, []);
 
 	useEffect(() => {
 		setFrameHeight(720);
 	}, [activeTool?.id, activeTool?.version, previewUrl]);
+
+	useEffect(() => {
+		setShowPreviewBar(true);
+		setCopiedPreviewUrl(false);
+	}, [activeTool?.id, activeTool?.version, previewUrl]);
+
+	useEffect(() => {
+		if (!copiedPreviewUrl) return;
+		const timeout = window.setTimeout(() => setCopiedPreviewUrl(false), 2_000);
+		return () => window.clearTimeout(timeout);
+	}, [copiedPreviewUrl]);
 
 	useEffect(() => {
 		function handleMessage(event: MessageEvent) {
@@ -67,7 +93,7 @@ export function BuilderPreviewCanvas({
 			? "Refine the prompt in chat to steer layout, copy, and interactions while brand ingestion runs."
 			: "Add a brand site on the left if you want Toolbuilder to ingest logo, colors, fonts, and host the final iframe.";
 		return (
-			<div className="flex h-full min-h-[72vh] flex-col items-center justify-center rounded-[10px] border border-brand/10 bg-[linear-gradient(180deg,_white_0%,_color-mix(in_oklab,var(--brand-light)_18%,white)_100%)] px-6 text-center lg:min-h-[calc(100vh-16rem)]">
+			<div className="flex h-full min-h-[72vh] flex-col items-center justify-center border border-brand/10 bg-[linear-gradient(180deg,_white_0%,_color-mix(in_oklab,var(--brand-light)_18%,white)_100%)] px-6 text-center lg:min-h-[calc(100vh-16rem)]">
 				<LoadingMark />
 				<h2 className="mt-10 text-balance font-serif text-3xl font-medium leading-[1.2] tracking-tight text-slate-800 sm:text-[2rem]">
 					Building your {label} tool
@@ -89,7 +115,7 @@ export function BuilderPreviewCanvas({
 
 	if (!activeTool || !previewUrl) {
 		return (
-			<div className="flex h-full min-h-[72vh] flex-col items-center justify-center rounded-[32px] border border-dashed border-brand/15 bg-[linear-gradient(180deg,_white_0%,_color-mix(in_oklab,var(--brand-light)_24%,white)_100%)] px-6 text-center lg:min-h-[calc(100vh-16rem)]">
+			<div className="flex h-full min-h-[72vh] flex-col items-center justify-center border border-dashed border-brand/15 bg-[linear-gradient(180deg,_white_0%,_color-mix(in_oklab,var(--brand-light)_24%,white)_100%)] px-6 text-center lg:min-h-[calc(100vh-16rem)]">
 				<div className="flex size-16 items-center justify-center rounded-3xl bg-white text-brand shadow-sm">
 					<Monitor className="size-8" />
 				</div>
@@ -105,39 +131,65 @@ export function BuilderPreviewCanvas({
 		);
 	}
 
+	async function handleCopyPreviewUrl() {
+		if (!publicPreviewUrl) return;
+		try {
+			await navigator.clipboard.writeText(publicPreviewUrl);
+			setCopiedPreviewUrl(true);
+		} catch {
+			// The URL remains visible even if clipboard access is blocked.
+		}
+	}
+
 	return (
-		<div className="rounded-[32px] border border-brand/10 bg-[linear-gradient(180deg,_white_0%,_color-mix(in_oklab,var(--brand-light)_28%,white)_100%)] p-4 shadow-inner shadow-white/60">
-			<div className="mb-4 flex min-h-[52px] flex-wrap items-center justify-between gap-3 rounded-[10px] border border-brand/10 bg-[#fcfcfc] px-4 py-2.5 backdrop-blur">
-				<div>
-					<p className="text-sm font-semibold text-foreground">Live preview</p>
-					<p className="text-xs text-muted-foreground">
-						{requestState === "updating"
-							? "Updating the current hosted iframe in place while you keep the existing preview visible."
-							: "Rendering the hosted iframe exactly as customers will receive it."}
-					</p>
+		<div className="flex h-full min-h-[72vh] flex-col bg-transparent lg:min-h-0">
+			{showPreviewBar ? (
+				<div className="mb-3 flex min-h-10 items-center gap-2 border border-brand/10 bg-white/90 px-3 py-2 text-xs text-brand-text backdrop-blur">
+					<span className="shrink-0 font-medium text-foreground">
+						{requestState === "updating" ? "Updating live preview" : "Live preview"}
+					</span>
+					<span className="min-w-0 flex-1 truncate text-brand-text/75">{publicPreviewUrl}</span>
+					<Button
+						type="button"
+						variant="ghost"
+						size="icon"
+						onClick={() => void handleCopyPreviewUrl()}
+						className="size-7 rounded-full text-brand-text hover:bg-brand-light/20"
+						aria-label="Copy preview URL"
+					>
+						{copiedPreviewUrl ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+					</Button>
+					<Button
+						asChild
+						variant="ghost"
+						size="sm"
+						className="h-7 rounded-full px-2 text-brand-text hover:bg-brand-light/20"
+					>
+						<a href={absolutePreviewUrl || publicPreviewUrl} target="_blank" rel="noreferrer">
+							<ArrowUpRight className="size-3.5" />
+							Open full preview
+						</a>
+					</Button>
+					<Button
+						type="button"
+						variant="ghost"
+						size="icon"
+						onClick={() => setShowPreviewBar(false)}
+						className="size-7 rounded-full text-brand-text hover:bg-brand-light/20"
+						aria-label="Dismiss preview URL bar"
+					>
+						<X className="size-3.5" />
+					</Button>
 				</div>
-				<Button
-					asChild
-					variant="outline"
-					size="sm"
-					className="h-[30px] rounded-md border-brand/15 bg-white text-brand-text hover:bg-brand-light/20"
-				>
-					<a href={previewUrl} target="_blank" rel="noreferrer">
-						<ArrowUpRight className="size-4" />
-						Open full preview
-					</a>
-				</Button>
-			</div>
-			<div className="overflow-hidden rounded-[28px] border border-brand/10 bg-white shadow-sm">
-				<iframe
-					key={`${activeTool.id}-${activeTool.version}`}
-					src={previewUrl}
-					sandbox={IFRAME_SANDBOX}
-					title={activeTool.projectName}
-					className="w-full"
-					style={{ height: `${frameHeight}px` }}
-				/>
-			</div>
+			) : null}
+			<iframe
+				key={`${activeTool.id}-${activeTool.version}`}
+				src={previewUrl}
+				sandbox={IFRAME_SANDBOX}
+				title={activeTool.projectName}
+				className="w-full flex-1 border-0 bg-white"
+				style={{ height: `${frameHeight}px` }}
+			/>
 		</div>
 	);
 }
