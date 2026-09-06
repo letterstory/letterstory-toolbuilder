@@ -458,6 +458,7 @@ async function buildToolContent(opts: {
 			},
 		};
 	}
+	const initialSanitized = sanitized;
 
 	// Both of these are advisory, fail-soft enrichments — Mathew's brief
 	// explicitly calls for (a) supporting headline/copy around the embedded
@@ -483,7 +484,7 @@ async function buildToolContent(opts: {
 			opts.brandSnapshot
 				? timeGenerationStep("brand_fidelity_completed", () =>
 						requestBrandFidelityCheck({
-							html: sanitized.html,
+							html: initialSanitized.html,
 							brandSnapshot: opts.brandSnapshot as GeneratedToolBrandSnapshot,
 						})
 					)
@@ -519,7 +520,7 @@ async function buildToolContent(opts: {
 	const repaired = await maybeRepairBrandPresentation({
 		projectName: opts.projectName,
 		brandSnapshot: opts.brandSnapshot,
-		sanitized,
+		sanitized: initialSanitized,
 		requestStartedAt: opts.requestStartedAt,
 		additionalReasons: fidelityRepairReasons,
 		reservedAdvisoryBudgetMs: advisoryRan ? 0 : ADVISORY_TIMEOUT_MS,
