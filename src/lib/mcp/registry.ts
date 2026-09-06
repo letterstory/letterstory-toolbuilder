@@ -7,6 +7,8 @@ import {
 } from "@/lib/contracts/brand";
 import { getHealthInputSchema, getHealthOutputSchema } from "@/lib/contracts/health";
 import {
+	deleteGeneratedToolInputSchema,
+	deleteGeneratedToolOutputSchema,
 	generateToolInputSchema,
 	generateToolOutputSchema,
 	getGeneratedToolInputSchema,
@@ -20,6 +22,7 @@ import { MCP_RATE_LIMIT_RULES, type McpRateLimitedToolName } from "@/lib/rate-li
 import { ingestBrandContextSurface, validateBrandFidelitySurface } from "@/lib/surfaces/brand";
 import { getHealthPayload } from "@/lib/surfaces/health";
 import {
+	deleteGeneratedToolSurface,
 	generateToolSurface,
 	getGeneratedToolSurface,
 	listGeneratedToolsSurface,
@@ -103,6 +106,14 @@ export const MCP_TOOL_REGISTRY = [
 		inputSchema: rollbackGeneratedToolInputSchema,
 		outputSchema: rollbackGeneratedToolOutputSchema,
 		handler: async (input) => (await rollbackGeneratedToolSurface(input)).body,
+	},
+	{
+		name: "delete_generated_tool",
+		description: "Delete a generated tool by id.",
+		capability: "tools.delete",
+		inputSchema: deleteGeneratedToolInputSchema,
+		outputSchema: deleteGeneratedToolOutputSchema,
+		handler: async (input) => (await deleteGeneratedToolSurface(input)).body,
 	},
 ] satisfies McpRegistryEntry[];
 

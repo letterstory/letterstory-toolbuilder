@@ -235,6 +235,25 @@ export function ToolBuilderWorkspace() {
 		setSuggestionsError(null);
 	}
 
+	function resetWorkspaceState() {
+		setActiveTool(null);
+		setToolHistory([]);
+		setCopiedTarget(null);
+		setProjectName("");
+		setSiteUrl("");
+		setPrompt("");
+		setMessages([]);
+		setSuggestions([]);
+		setSuggestionBrandContext(null);
+		setSuggestionsLoading(false);
+		setSuggestionsError(null);
+		setActiveRun(null);
+		setActivitySteps([]);
+		setTelemetry(null);
+		setProgress(0);
+		handleSetView("preview");
+	}
+
 	function handleOpenThemeEditor() {
 		handleSetView("dashboard");
 		setBrandEditOpen(true);
@@ -395,22 +414,7 @@ export function ToolBuilderWorkspace() {
 	}
 
 	function handleStartNewTool() {
-		setActiveTool(null);
-		setToolHistory([]);
-		setCopiedTarget(null);
-		setProjectName("");
-		setSiteUrl("");
-		setPrompt("");
-		setMessages([]);
-		setSuggestions([]);
-		setSuggestionBrandContext(null);
-		setSuggestionsLoading(false);
-		setSuggestionsError(null);
-		setActiveRun(null);
-		setActivitySteps([]);
-		setTelemetry(null);
-		setProgress(0);
-		handleSetView("preview");
+		resetWorkspaceState();
 		setStatusMessage(INITIAL_STATUS);
 		setRecentOpen(false);
 	}
@@ -539,6 +543,49 @@ export function ToolBuilderWorkspace() {
 		return false;
 	}
 
+	async function handleDeleteRecent(tool: ToolSummary) {
+		const wasActiveTool = activeTool?.id === tool.id;
+		setRequestState("updating");
+		setStatusMessage({
+			title: "Deleting tool",
+			description: `Removing ${tool.projectName} from saved tools…`,
+			tone: "info",
+		});
+		try {
+			const response = await fetch(`/api/tools/${tool.id}`, { method: "DELETE" });
+			const contentType = response.headers.get("content-type") ?? "";
+			const data = contentType.includes("application/json")
+				? ((await response.json()) as { status: string; id?: string; message?: string })
+				: null;
+
+			if (response.ok && data?.status === "success") {
+				setRecentTools((current) => current.filter((item) => item.id !== tool.id));
+				if (wasActiveTool) {
+					resetWorkspaceState();
+				}
+				setStatusMessage({
+					title: "Tool deleted",
+					description: wasActiveTool
+						? `${tool.projectName} was deleted and the workspace was reset.`
+						: `${tool.projectName} was removed from recent tools.`,
+					tone: "success",
+				});
+				return;
+			}
+
+			setStatusMessage({
+				title: "Delete failed",
+				description: data?.message ?? "Could not delete that tool right now.",
+				tone: "destructive",
+			});
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			setStatusMessage({ title: "Delete failed", description: message, tone: "destructive" });
+		} finally {
+			setRequestState("idle");
+		}
+	}
+
 	async function handleCopyEmbed(target: "iframe" | "full" | "url", text: string) {
 		try {
 			await navigator.clipboard.writeText(text);
@@ -573,6 +620,7 @@ export function ToolBuilderWorkspace() {
 					onFocusComposer={() => composerRef.current?.focus()}
 					onRefreshRecent={() => void loadRecentTools()}
 					onReopenRecent={handleReopenRecent}
+					onDeleteRecent={handleDeleteRecent}
 					onOpenEmbed={handleOpenEmbed}
 					onRollback={handleRollback}
 				/>

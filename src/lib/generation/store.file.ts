@@ -8,7 +8,7 @@
 // filesystem) — that's exactly the gap store.supabase.ts closes.
 
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
 	buildHistoryEntry,
@@ -275,6 +275,26 @@ async function rollbackGeneratedTool(id: string, toVersion: number): Promise<Gen
 	return record;
 }
 
+async function deleteGeneratedTool(id: string): Promise<boolean> {
+	if (storageMode === "memory") {
+		return memoryRecords.delete(id);
+	}
+
+	try {
+		await unlink(recordPath(id));
+		return true;
+	} catch (error) {
+		if (shouldFallbackToMemory(error)) {
+			activateMemoryFallback(error);
+			return memoryRecords.delete(id);
+		}
+		if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+			return false;
+		}
+		throw error;
+	}
+}
+
 async function listGeneratedTools(): Promise<GeneratedToolRecord[]> {
 	if (storageMode === "memory") {
 		return [...memoryRecords.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
@@ -315,5 +335,6 @@ export const fileToolStore: ToolStoreBackend = {
 	updateGeneratedToolCompetitorContext,
 	updateGeneratedToolVisualCongruence,
 	rollbackGeneratedTool,
+	deleteGeneratedTool,
 	listGeneratedTools,
 };

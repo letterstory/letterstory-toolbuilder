@@ -183,6 +183,17 @@ async function rollbackGeneratedTool(id: string, toVersion: number): Promise<Gen
 	return rowToRecord(data as ToolRow);
 }
 
+async function deleteGeneratedTool(id: string): Promise<boolean> {
+	const { data, error } = await getSupabaseClient()
+		.from(TABLE)
+		.delete()
+		.eq("id", id)
+		.select("id")
+		.maybeSingle();
+	if (error) return false;
+	return Boolean(data);
+}
+
 async function updateGeneratedToolVisualCongruence(
 	id: string,
 	expectedVersion: number,
@@ -247,5 +258,6 @@ export const supabaseToolStore: ToolStoreBackend = {
 	updateGeneratedToolCompetitorContext,
 	updateGeneratedToolVisualCongruence,
 	rollbackGeneratedTool,
+	deleteGeneratedTool,
 	listGeneratedTools,
 };

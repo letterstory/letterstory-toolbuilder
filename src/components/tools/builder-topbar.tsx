@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, History, Palette, Pencil, Plus } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
+import { ChevronDown, History, Palette, Pencil, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type {
@@ -26,6 +26,7 @@ interface BuilderTopbarProps {
 	onFocusComposer: () => void;
 	onRefreshRecent: () => void;
 	onReopenRecent: (tool: ToolSummary) => void;
+	onDeleteRecent: (tool: ToolSummary) => Promise<void>;
 	onOpenEmbed: () => void;
 	onRollback: (version: number) => Promise<boolean>;
 }
@@ -46,10 +47,12 @@ export function BuilderTopbar({
 	onFocusComposer,
 	onRefreshRecent,
 	onReopenRecent,
+	onDeleteRecent,
 	onOpenEmbed,
 	onRollback,
 }: BuilderTopbarProps) {
 	const [versionHistoryOpen, setVersionHistoryOpen] = useState(false);
+	const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 	const versionMenuRef = useRef<HTMLDivElement>(null);
 	const currentLabel = projectName.trim() || activeTool?.projectName || "New tool";
 	const hasVersionHistory = Boolean(activeTool) && toolHistory.length > 0;
@@ -94,6 +97,18 @@ export function BuilderTopbar({
 	}, [hasVersionHistory]);
 
 	useEffect(() => {
+		if (recentOpen) return;
+		setConfirmDeleteId(null);
+	}, [recentOpen]);
+
+	useEffect(() => {
+		if (!confirmDeleteId) return;
+		if (!recentTools.some((tool) => tool.id === confirmDeleteId)) {
+			setConfirmDeleteId(null);
+		}
+	}, [confirmDeleteId, recentTools]);
+
+	useEffect(() => {
 		if (!recentOpen && !versionHistoryOpen) return;
 		function handleKeyDown(event: KeyboardEvent) {
 			if (event.key !== "Escape") return;
@@ -109,6 +124,16 @@ export function BuilderTopbar({
 		if (didRollback) {
 			setVersionHistoryOpen(false);
 		}
+	}
+
+	async function handleDeleteClick(event: ReactMouseEvent<HTMLButtonElement>, tool: ToolSummary) {
+		event.stopPropagation();
+		if (confirmDeleteId !== tool.id) {
+			setConfirmDeleteId(tool.id);
+			return;
+		}
+		await onDeleteRecent(tool);
+		setConfirmDeleteId((current) => (current === tool.id ? null : current));
 	}
 
 	return (
@@ -161,13 +186,18 @@ export function BuilderTopbar({
 								<div className="max-h-80 space-y-2 overflow-y-auto">
 									{recentTools.length ? (
 										recentTools.map((tool) => (
-											<button
+											<div
 												key={tool.id}
-												type="button"
-												onClick={() => onReopenRecent(tool)}
-												className="w-full rounded-2xl border border-transparent bg-brand-light/15 px-3 py-3 text-left transition hover:border-brand/15 hover:bg-white"
+												className={cn(
+													"flex items-start gap-2 rounded-2xl border border-transparent bg-brand-light/15 p-2 transition hover:border-brand/15 hover:bg-white",
+													confirmDeleteId === tool.id ? "border-destructive/20 bg-destructive/5" : null
+												)}
 											>
-												<div className="flex items-start justify-between gap-3">
+												<button
+													type="button"
+													onClick={() => onReopenRecent(tool)}
+													className="flex min-w-0 flex-1 items-start justify-between gap-3 rounded-[1rem] px-1 py-1 text-left"
+												>
 													<div className="min-w-0">
 														<p className="truncate text-sm font-medium text-foreground">
 															{tool.projectName}
@@ -179,8 +209,29 @@ export function BuilderTopbar({
 													<span className="text-xs text-muted-foreground">
 														{formatTimestamp(tool.updatedAt)}
 													</span>
-												</div>
-											</button>
+												</button>
+												<Button
+													type="button"
+													variant={confirmDeleteId === tool.id ? "destructive" : "ghost"}
+													size="sm"
+													onClick={(event) => void handleDeleteClick(event, tool)}
+													disabled={requestState !== "idle"}
+													aria-label={
+														confirmDeleteId === tool.id
+															? `Confirm delete ${tool.projectName}`
+															: `Delete ${tool.projectName}`
+													}
+													className={cn(
+														"mt-1 h-8 shrink-0 rounded-full px-2",
+														confirmDeleteId === tool.id ? "text-white" : "text-muted-foreground"
+													)}
+												>
+													<Trash2 className="size-4" />
+													<span className="text-xs">
+														{confirmDeleteId === tool.id ? "Confirm" : "Delete"}
+													</span>
+												</Button>
+											</div>
 										))
 									) : (
 										<p className="rounded-2xl bg-brand-light/15 px-3 py-5 text-sm text-muted-foreground">

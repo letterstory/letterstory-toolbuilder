@@ -9,6 +9,7 @@ npm run cli -- brand validate --site-url https://stripe.com --profile-file tests
 npm run cli -- tools list
 npm run cli -- tools generate --prompt "BMI calculator" --project-name "BMI Calculator" --site-url https://gymshark.com
 npm run cli -- tools rollback <tool-id> --version 1
+npm run cli -- tools delete <tool-id>
 npm run cli -- tools show generate_tool
 npm run cli -- tools call generate_tool --json '{"prompt":"BMI calculator"}'
 ```

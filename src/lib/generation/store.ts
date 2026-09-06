@@ -85,6 +85,10 @@ export async function rollbackGeneratedTool(id: string, toVersion: number): Prom
 	return backend().rollbackGeneratedTool(id, toVersion);
 }
 
+export async function deleteGeneratedTool(id: string): Promise<boolean> {
+	return backend().deleteGeneratedTool(id);
+}
+
 export async function listGeneratedTools(): Promise<GeneratedToolRecord[]> {
 	return backend().listGeneratedTools();
 }

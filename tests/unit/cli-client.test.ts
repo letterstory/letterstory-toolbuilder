@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ToolbuilderClient, commandFailed, parseArgv } from "../../cli/client.mjs";
+import { runToolsCommand } from "../../cli/commands/tools.mjs";
 import { runCliMain } from "../../cli/toolbuilder.mjs";
 
 afterEach(() => {
@@ -45,6 +46,17 @@ describe("cli client helpers", () => {
 
 	it("treats non-success string statuses as failures", () => {
 		expect(commandFailed({ status: "error", message: "nope" })).toBe(true);
+	});
+
+	it("routes tools delete through the CLI command helper", async () => {
+		const client = {
+			callTool: vi.fn().mockResolvedValue({ output: { status: "success", id: "tool-123" } }),
+		};
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+		await expect(runToolsCommand({ client, argv: ["delete", "tool-123"] })).resolves.toBe(0);
+		expect(client.callTool).toHaveBeenCalledWith("delete_generated_tool", { id: "tool-123" });
+		logSpy.mockRestore();
 	});
 
 	it("prints a clear error and exits non-zero when the server returns non-JSON", async () => {

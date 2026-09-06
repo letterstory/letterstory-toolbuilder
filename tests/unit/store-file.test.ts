@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mkdirMock = vi.hoisted(() => vi.fn());
 const readFileMock = vi.hoisted(() => vi.fn());
 const readdirMock = vi.hoisted(() => vi.fn());
+const unlinkMock = vi.hoisted(() => vi.fn());
 const writeFileMock = vi.hoisted(() => vi.fn());
 const randomUuidMock = vi.hoisted(() => vi.fn(() => "tool-123"));
 
@@ -10,6 +11,7 @@ vi.mock("node:fs/promises", () => ({
 	mkdir: mkdirMock,
 	readFile: readFileMock,
 	readdir: readdirMock,
+	unlink: unlinkMock,
 	writeFile: writeFileMock,
 }));
 
@@ -25,6 +27,7 @@ describe("fileToolStore", () => {
 		mkdirMock.mockReset();
 		readFileMock.mockReset();
 		readdirMock.mockReset();
+		unlinkMock.mockReset();
 		writeFileMock.mockReset();
 		randomUuidMock.mockClear();
 	});
@@ -143,5 +146,45 @@ describe("fileToolStore", () => {
 			copy: { headline: "V1", supportingCopy: "First version." },
 		});
 		expect(rolledBack?.history.map((entry) => entry.version)).not.toContain(4);
+	});
+
+	it("deletes tools from in-memory fallback storage", async () => {
+		mkdirMock.mockRejectedValue(Object.assign(new Error("read only file system"), { code: "EROFS" }));
+
+		const { fileToolStore } = await import("../../src/lib/generation/store.file");
+		await fileToolStore.saveGeneratedTool({
+			projectName: "Calc",
+			prompt: "v1",
+			siteUrl: null,
+			brandSnapshot: null,
+			html: "<!doctype html><html><body>v1</body></html>",
+			copy: null,
+			brandFidelity: null,
+			visualCongruence: null,
+			model: "claude-sonnet-4-6",
+			warnings: [],
+		});
+
+		await expect(fileToolStore.deleteGeneratedTool("tool-123")).resolves.toBe(true);
+		await expect(fileToolStore.getGeneratedTool("tool-123")).resolves.toBeNull();
+	});
+
+	it("returns false when a file-backed tool does not exist", async () => {
+		mkdirMock.mockResolvedValue(undefined);
+		unlinkMock.mockRejectedValue(Object.assign(new Error("missing"), { code: "ENOENT" }));
+
+		const { fileToolStore } = await import("../../src/lib/generation/store.file");
+
+		await expect(fileToolStore.deleteGeneratedTool("missing-tool")).resolves.toBe(false);
+	});
+
+	it("deletes the backing file for a file-backed tool", async () => {
+		mkdirMock.mockResolvedValue(undefined);
+		unlinkMock.mockResolvedValue(undefined);
+
+		const { fileToolStore } = await import("../../src/lib/generation/store.file");
+
+		await expect(fileToolStore.deleteGeneratedTool("tool-123")).resolves.toBe(true);
+		expect(unlinkMock).toHaveBeenCalledTimes(1);
 	});
 });

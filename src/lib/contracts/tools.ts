@@ -173,6 +173,21 @@ export const getGeneratedToolOutputSchema = z.union([
 	}),
 ]);
 
+export const deleteGeneratedToolInputSchema = z.object({
+	id: z.string(),
+});
+
+export const deleteGeneratedToolOutputSchema = z.union([
+	z.object({
+		status: z.literal("success"),
+		id: z.string(),
+	}),
+	z.object({
+		status: z.literal("error"),
+		message: z.string(),
+	}),
+]);
+
 export const generateToolInputSchema = z.object({
 	projectName: z.string().optional(),
 	siteUrl: z.string().optional(),

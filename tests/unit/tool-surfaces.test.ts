@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const generateToolMock = vi.hoisted(() => vi.fn());
+const deleteGeneratedToolMock = vi.hoisted(() => vi.fn());
 const getGeneratedToolMock = vi.hoisted(() => vi.fn());
 const listGeneratedToolsMock = vi.hoisted(() => vi.fn());
 const rollbackGeneratedToolMock = vi.hoisted(() => vi.fn());
@@ -11,6 +12,7 @@ vi.mock("@/lib/generation", () => ({
 }));
 
 vi.mock("@/lib/generation/store", () => ({
+	deleteGeneratedTool: deleteGeneratedToolMock,
 	getGeneratedTool: getGeneratedToolMock,
 	listGeneratedTools: listGeneratedToolsMock,
 	rollbackGeneratedTool: rollbackGeneratedToolMock,
@@ -22,6 +24,7 @@ vi.mock("@/lib/tools/suggestions", () => ({
 
 import { buildEmbedSnippet } from "../../src/lib/embed/contract";
 import {
+	deleteGeneratedToolSurface,
 	generateToolSurface,
 	getGeneratedToolSurface,
 	listGeneratedToolsSurface,
@@ -223,6 +226,35 @@ describe("tool surfaces embed snippet parity", () => {
 
 		expect(response.statusCode).toBe(200);
 		expect(response.body.tools[0]).not.toHaveProperty("embedSnippet");
+	});
+
+	it("deletes a generated tool by id", async () => {
+		deleteGeneratedToolMock.mockResolvedValue(true);
+
+		const response = await deleteGeneratedToolSurface({ id: "tool-123" });
+
+		expect(deleteGeneratedToolMock).toHaveBeenCalledWith("tool-123");
+		expect(response).toMatchObject({
+			statusCode: 200,
+			body: {
+				status: "success",
+				id: "tool-123",
+			},
+		});
+	});
+
+	it("returns 404 when deleteGeneratedTool can't find the tool", async () => {
+		deleteGeneratedToolMock.mockResolvedValue(false);
+
+		const response = await deleteGeneratedToolSurface({ id: "missing" });
+
+		expect(response).toMatchObject({
+			statusCode: 404,
+			body: {
+				status: "error",
+				message: "Tool not found.",
+			},
+		});
 	});
 
 	it("returns brand-aware suggestion payloads", async () => {

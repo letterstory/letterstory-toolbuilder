@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const generateToolSurfaceMock = vi.hoisted(() => vi.fn());
 const generateToolRateLimitedMock = vi.hoisted(() => vi.fn());
+const deleteGeneratedToolSurfaceMock = vi.hoisted(() => vi.fn());
 const getGeneratedToolSurfaceMock = vi.hoisted(() => vi.fn());
 const listGeneratedToolsSurfaceMock = vi.hoisted(() => vi.fn());
 const rollbackGeneratedToolSurfaceMock = vi.hoisted(() => vi.fn());
@@ -17,6 +18,7 @@ vi.mock("@/lib/security/rate-limit", () => ({
 }));
 
 vi.mock("@/lib/surfaces/tools", () => ({
+	deleteGeneratedToolSurface: deleteGeneratedToolSurfaceMock,
 	generateToolSurface: generateToolSurfaceMock,
 	generateToolRateLimited: generateToolRateLimitedMock,
 	getGeneratedToolSurface: getGeneratedToolSurfaceMock,
@@ -33,7 +35,7 @@ vi.mock("@/lib/generation/store", () => ({
 import { POST as generatePost } from "../../src/app/api/tools/generate/route";
 import { POST as suggestPost } from "../../src/app/api/tools/suggest/route";
 import { GET as toolsListGet } from "../../src/app/api/tools/route";
-import { GET as toolDetailGet } from "../../src/app/api/tools/[id]/route";
+import { DELETE as toolDetailDelete, GET as toolDetailGet } from "../../src/app/api/tools/[id]/route";
 import { POST as toolRollbackPost } from "../../src/app/api/tools/[id]/rollback/route";
 import { GET as toolGet } from "../../src/app/t/[id]/route";
 
@@ -42,6 +44,7 @@ beforeEach(() => {
 	getClientIpMock.mockReset();
 	generateToolSurfaceMock.mockReset();
 	generateToolRateLimitedMock.mockReset();
+	deleteGeneratedToolSurfaceMock.mockReset();
 	getGeneratedToolSurfaceMock.mockReset();
 	listGeneratedToolsSurfaceMock.mockReset();
 	rollbackGeneratedToolSurfaceMock.mockReset();
@@ -466,6 +469,40 @@ describe("GET /api/tools/[id]", () => {
 		expect(history).toHaveLength(1);
 		expect(history[0]).not.toHaveProperty("html");
 		expect(history[0]).toMatchObject({ version: 1 });
+	});
+});
+
+describe("DELETE /api/tools/[id]", () => {
+	it("returns 404 when the tool doesn't exist", async () => {
+		deleteGeneratedToolSurfaceMock.mockResolvedValueOnce({
+			statusCode: 404,
+			body: { status: "error", message: "Tool not found." },
+		});
+
+		const response = await toolDetailDelete(new Request("http://localhost/api/tools/missing"), {
+			params: Promise.resolve({ id: "missing" }),
+		});
+
+		expect(response.status).toBe(404);
+		await expect(response.json()).resolves.toMatchObject({
+			status: "error",
+			message: "Tool not found.",
+		});
+	});
+
+	it("deletes a tool and returns the success payload", async () => {
+		deleteGeneratedToolSurfaceMock.mockResolvedValueOnce({
+			statusCode: 200,
+			body: { status: "success", id: "abc" },
+		});
+
+		const response = await toolDetailDelete(new Request("http://localhost/api/tools/abc"), {
+			params: Promise.resolve({ id: "abc" }),
+		});
+
+		expect(deleteGeneratedToolSurfaceMock).toHaveBeenCalledWith({ id: "abc" });
+		expect(response.status).toBe(200);
+		await expect(response.json()).resolves.toMatchObject({ status: "success", id: "abc" });
 	});
 });
 

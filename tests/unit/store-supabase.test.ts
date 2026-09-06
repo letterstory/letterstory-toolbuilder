@@ -42,12 +42,19 @@ const getSupabaseClientMock = vi.hoisted(() =>
 		from: () => {
 			let filters: Record<string, unknown> = {};
 			let updatePayload: Partial<ToolRow> | null = null;
+			let operation: "select" | "update" | "delete" = "select";
 
 			const builder = {
 				select() {
 					return builder;
 				},
+				delete() {
+					operation = "delete";
+					updatePayload = null;
+					return builder;
+				},
 				update(payload: Partial<ToolRow>) {
+					operation = "update";
 					updatePayload = payload;
 					return builder;
 				},
@@ -56,6 +63,13 @@ const getSupabaseClientMock = vi.hoisted(() =>
 					return builder;
 				},
 				async maybeSingle() {
+					if (operation === "delete" && "id" in filters) {
+						const id = String(filters.id ?? "");
+						const row = rows.get(id);
+						if (!row) return { data: null, error: null };
+						rows.delete(id);
+						return { data: { id }, error: null };
+					}
 					const row = [...rows.values()].find(
 						(candidate) =>
 							Object.entries(filters).every(([field, value]) => candidate[field as keyof ToolRow] === value)
@@ -149,5 +163,12 @@ describe("supabaseToolStore", () => {
 			copy: { headline: "V1", supportingCopy: "First version." },
 		});
 		expect(rolledBack?.history.map((entry) => entry.version)).not.toContain(4);
+	});
+
+	it("deletes a tool row by id", async () => {
+		const { supabaseToolStore } = await import("../../src/lib/generation/store.supabase");
+
+		await expect(supabaseToolStore.deleteGeneratedTool("tool-123")).resolves.toBe(true);
+		expect(rows.has("tool-123")).toBe(false);
 	});
 });

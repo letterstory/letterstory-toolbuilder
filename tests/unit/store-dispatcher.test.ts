@@ -4,12 +4,14 @@ const fileSave = vi.hoisted(() => vi.fn());
 const fileGet = vi.hoisted(() => vi.fn());
 const fileUpdate = vi.hoisted(() => vi.fn());
 const fileRollback = vi.hoisted(() => vi.fn());
+const fileDelete = vi.hoisted(() => vi.fn());
 const fileList = vi.hoisted(() => vi.fn());
 
 const supabaseSave = vi.hoisted(() => vi.fn());
 const supabaseGet = vi.hoisted(() => vi.fn());
 const supabaseUpdate = vi.hoisted(() => vi.fn());
 const supabaseRollback = vi.hoisted(() => vi.fn());
+const supabaseDelete = vi.hoisted(() => vi.fn());
 const supabaseList = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/generation/store.file", () => ({
@@ -18,6 +20,7 @@ vi.mock("@/lib/generation/store.file", () => ({
 		getGeneratedTool: fileGet,
 		updateGeneratedTool: fileUpdate,
 		rollbackGeneratedTool: fileRollback,
+		deleteGeneratedTool: fileDelete,
 		listGeneratedTools: fileList,
 	},
 }));
@@ -28,6 +31,7 @@ vi.mock("@/lib/generation/store.supabase", () => ({
 		getGeneratedTool: supabaseGet,
 		updateGeneratedTool: supabaseUpdate,
 		rollbackGeneratedTool: supabaseRollback,
+		deleteGeneratedTool: supabaseDelete,
 		listGeneratedTools: supabaseList,
 	},
 }));
@@ -82,5 +86,19 @@ describe("generation/store dispatcher", () => {
 
 		await store.getGeneratedTool("tool-b");
 		expect(supabaseGet).toHaveBeenCalledWith("tool-b");
+	});
+
+	it("dispatches deleteGeneratedTool to the active backend", async () => {
+		const store = await import("@/lib/generation/store");
+
+		await store.deleteGeneratedTool("tool-a");
+		expect(fileDelete).toHaveBeenCalledWith("tool-a");
+		expect(supabaseDelete).not.toHaveBeenCalled();
+
+		process.env.SUPABASE_URL = "https://example.supabase.co";
+		process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role-key";
+
+		await store.deleteGeneratedTool("tool-b");
+		expect(supabaseDelete).toHaveBeenCalledWith("tool-b");
 	});
 });

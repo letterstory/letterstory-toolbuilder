@@ -1,9 +1,11 @@
 import { envServer } from "@/lib/config/env.server";
 import { generateTool } from "@/lib/generation";
-import { getGeneratedTool, listGeneratedTools, rollbackGeneratedTool } from "@/lib/generation/store";
+import { deleteGeneratedTool, getGeneratedTool, listGeneratedTools, rollbackGeneratedTool } from "@/lib/generation/store";
 import { suggestToolsForBrand } from "@/lib/tools/suggestions";
 import { buildEmbedSnippet } from "@/lib/embed/contract";
 import {
+	deleteGeneratedToolInputSchema,
+	deleteGeneratedToolOutputSchema,
 	generateToolInputSchema,
 	generateToolOutputSchema,
 	generatedToolDetailSchema,
@@ -194,6 +196,40 @@ export async function getGeneratedToolSurface(
 		body: getGeneratedToolOutputSchema.parse({
 			status: "success",
 			tool: toToolDetail(tool, context.request),
+		}),
+	};
+}
+
+export async function deleteGeneratedToolSurface(
+	input: unknown
+): Promise<SurfaceHttpResult<ReturnType<typeof deleteGeneratedToolOutputSchema.parse>>> {
+	const parsed = deleteGeneratedToolInputSchema.safeParse(input);
+	if (!parsed.success || !parsed.data.id.trim()) {
+		return {
+			statusCode: 404,
+			body: deleteGeneratedToolOutputSchema.parse({
+				status: "error",
+				message: "Tool not found.",
+			}),
+		};
+	}
+
+	const deleted = await deleteGeneratedTool(parsed.data.id);
+	if (!deleted) {
+		return {
+			statusCode: 404,
+			body: deleteGeneratedToolOutputSchema.parse({
+				status: "error",
+				message: "Tool not found.",
+			}),
+		};
+	}
+
+	return {
+		statusCode: 200,
+		body: deleteGeneratedToolOutputSchema.parse({
+			status: "success",
+			id: parsed.data.id,
 		}),
 	};
 }

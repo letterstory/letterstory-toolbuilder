@@ -106,6 +106,43 @@ describe("/api/mcp", () => {
 		});
 	});
 
+	it("POST tools/call dispatches delete_generated_tool through the central dispatcher", async () => {
+		dispatchToolCallMock.mockResolvedValueOnce({
+			name: "delete_generated_tool",
+			output: {
+				status: "success",
+				id: "tool-123",
+			},
+			meta: { httpStatus: 200 },
+		});
+
+		const response = await POST(
+			new Request("http://localhost:3000/api/mcp", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					jsonrpc: "2.0",
+					id: 31,
+					method: "tools/call",
+					params: { name: "delete_generated_tool", arguments: { id: "tool-123" } },
+				}),
+			})
+		);
+		expect(dispatchToolCallMock).toHaveBeenCalledWith({
+			name: "delete_generated_tool",
+			arguments: { id: "tool-123" },
+			request: expect.any(Request),
+		});
+		await expect(response.json()).resolves.toMatchObject({
+			jsonrpc: "2.0",
+			id: 31,
+			result: {
+				name: "delete_generated_tool",
+				output: { status: "success", id: "tool-123" },
+			},
+		});
+	});
+
 	it("POST tools/call surfaces dispatch errors as JSON-RPC errors", async () => {
 		dispatchToolCallMock.mockRejectedValueOnce(new McpDispatchError(-32602, "Invalid arguments", { issues: [] }));
 

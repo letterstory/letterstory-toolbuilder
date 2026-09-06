@@ -23,6 +23,7 @@ const EXPECTED_CAPABILITIES = [
 	"get_generated_tool",
 	"generate_tool",
 	"rollback_generated_tool",
+	"delete_generated_tool",
 ] as const;
 
 const CURATED_COMMAND_MAPPINGS = [
@@ -48,6 +49,11 @@ const CURATED_COMMAND_MAPPINGS = [
 		file: "tools.mjs",
 		cliCommand: "toolbuilder tools rollback <id> --version <n>",
 		toolName: "rollback_generated_tool",
+	},
+	{
+		file: "tools.mjs",
+		cliCommand: "toolbuilder tools delete <id>",
+		toolName: "delete_generated_tool",
 	},
 ] as const;
 
@@ -78,7 +84,7 @@ function createClient() {
 }
 
 describe("planned curated CLI ↔ MCP mapping table", () => {
-	it("covers the exact seven parity capabilities from Lead's plan", () => {
+	it("covers the exact eight parity capabilities from Lead's plan", () => {
 		expect(new Set(CURATED_COMMAND_MAPPINGS.map((mapping) => mapping.toolName))).toEqual(
 			new Set(EXPECTED_CAPABILITIES)
 		);
@@ -311,6 +317,15 @@ describe("documented CLI command behavior", () => {
 		expect(client.callTool).toHaveBeenCalledWith("rollback_generated_tool", {
 			id: "tool-123",
 			version: 2,
+		});
+	});
+
+	it("routes tools delete to delete_generated_tool", async () => {
+		const client = createClient();
+
+		await expect(runToolsCommand({ client, argv: ["delete", "tool-123"] })).resolves.toBe(0);
+		expect(client.callTool).toHaveBeenCalledWith("delete_generated_tool", {
+			id: "tool-123",
 		});
 	});
 });

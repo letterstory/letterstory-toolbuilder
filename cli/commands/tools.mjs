@@ -98,6 +98,13 @@ export async function runToolsCommand({ client, argv }) {
 		return commandFailed(response.output) ? 1 : 0;
 	}
 
+	if (action === "delete") {
+		const id = requiredPositional(positionals, 1, "tool id");
+		const response = await client.callTool("delete_generated_tool", { id });
+		printJson(response.output);
+		return commandFailed(response.output) ? 1 : 0;
+	}
+
 	if (action === "show") {
 		const toolName = requiredPositional(positionals, 1, "tool name");
 		const result = await client.listTools();
@@ -117,6 +124,6 @@ export async function runToolsCommand({ client, argv }) {
 	}
 
 	throw new Error(
-		"Usage: toolbuilder tools <list|get|generate|rollback|show|call> [...options]"
+		"Usage: toolbuilder tools <list|get|generate|rollback|delete|show|call> [...options]"
 	);
 }

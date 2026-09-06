@@ -137,6 +137,7 @@ export interface ToolStoreBackend {
 		warnings: string[]
 	): Promise<GeneratedToolRecord | null>;
 	rollbackGeneratedTool(id: string, toVersion: number): Promise<GeneratedToolRecord | null>;
+	deleteGeneratedTool(id: string): Promise<boolean>;
 	listGeneratedTools(): Promise<GeneratedToolRecord[]>;
 }
 
