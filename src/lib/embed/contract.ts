@@ -95,12 +95,13 @@ export function buildEmbedIframeTag(opts: { origin: string; toolId: string; proj
 
 /**
  * The parent-page listener script paired with the iframe tag above. Matches
- * incoming postMessages on three things before acting — `source` string,
- * `toolId`, and the sending frame's own origin (derived from the iframe's
- * `src` at runtime, not hardcoded, so this snippet works unmodified whether
- * the tool is served from a dev/staging/prod domain) — so it won't
- * misinterpret unrelated postMessage traffic elsewhere on the customer's
- * page, and won't let some other frame spoof a resize for this tool.
+ * incoming postMessages on four things before acting — the sending frame's
+ * own window handle (`event.source === frame.contentWindow`), `source`
+ * string, `version`, and `toolId` — so it won't misinterpret unrelated
+ * postMessage traffic elsewhere on the customer's page. We intentionally do
+ * not rely on `event.origin` here because the sandboxed iframe runs with an
+ * opaque origin (`"null"`) unless we add `allow-same-origin`, which we do
+ * not want for isolation.
  */
 export function buildEmbedListenerScript(toolId: string): string {
 	const domId = domIdFor(toolId);
@@ -109,10 +110,8 @@ export function buildEmbedListenerScript(toolId: string): string {
   var frame = document.getElementById(${JSON.stringify(domId)});
   var status = document.getElementById(${JSON.stringify(statusId)});
   if (!frame) return;
-  var expectedOrigin = null;
   var receivedResize = false;
   var fallbackTimer = null;
-  try { expectedOrigin = new URL(frame.src, window.location.href).origin; } catch (e) {}
   function showStatus() {
     if (status) status.hidden = false;
   }
@@ -154,7 +153,7 @@ export function buildEmbedListenerScript(toolId: string): string {
   frame.addEventListener("load", armFallbackTimer);
   frame.addEventListener("error", showStatus);
   window.addEventListener("message", function(event){
-    if (expectedOrigin && event.origin !== expectedOrigin) return;
+    if (frame.contentWindow && event.source !== frame.contentWindow) return;
     var data = event.data;
     if (!data || data.source !== ${JSON.stringify(TOOL_RESIZE_MESSAGE_SOURCE)} || data.version !== ${TOOL_RESIZE_CONTRACT_VERSION} || data.toolId !== ${JSON.stringify(toolId)}) return;
     if (typeof data.height === "number" && data.height > 0) {

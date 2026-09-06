@@ -73,12 +73,12 @@ describe("buildEmbedIframeTag", () => {
 });
 
 describe("buildEmbedListenerScript", () => {
-	it("matches on source, toolId, and the iframe's own origin", () => {
+	it("matches on source, version, toolId, and the iframe's window handle", () => {
 		const script = buildEmbedListenerScript("abc123");
 		expect(script).toContain('"letterstory-tool-abc123"');
 		expect(script).toContain('"letterstory-tool-abc123-status"');
 		expect(script).toContain(TOOL_RESIZE_MESSAGE_SOURCE);
-		expect(script).toContain("event.origin");
+		expect(script).toContain("event.source !== frame.contentWindow");
 		expect(script).toContain("data.version !== 1");
 		expect(script).toContain('"abc123"');
 	});
