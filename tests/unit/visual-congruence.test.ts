@@ -226,7 +226,19 @@ describe("finalizeVisualCongruenceForTool", () => {
 
 		expect(requestHtml).toHaveBeenCalledTimes(1);
 		expect(saveRepairedTool).not.toHaveBeenCalled();
-		expect(save).toHaveBeenCalledWith(
+		expect(save).toHaveBeenCalledTimes(2);
+		expect(save).toHaveBeenNthCalledWith(
+			1,
+			"tool-123",
+			4,
+			expect.objectContaining({ verdict: "fail", congruenceScore: 1 }),
+			[
+				"Existing warning",
+				"Visual brand match (fail): Layout density feels off-brand.",
+			]
+		);
+		expect(save).toHaveBeenNthCalledWith(
+			2,
 			"tool-123",
 			4,
 			expect.objectContaining({ verdict: "fail", congruenceScore: 1 }),
@@ -261,7 +273,7 @@ describe("finalizeVisualCongruenceForTool", () => {
 				referenceUrl: "https://stripe.com",
 				analyzedAt: "2026-09-06T00:00:10.000Z",
 			});
-		const save = vi.fn();
+		const save = vi.fn().mockResolvedValue({ id: "tool-123" });
 		const requestHtml = vi
 			.fn()
 			.mockResolvedValue("<!doctype html><html><body><main>repaired</main></body></html>");
@@ -279,12 +291,12 @@ describe("finalizeVisualCongruenceForTool", () => {
 
 		expect(requestHtml).toHaveBeenCalledTimes(1);
 		expect(analyze).toHaveBeenCalledTimes(2);
+		expect(save).toHaveBeenCalledTimes(1);
 		expect(analyze).toHaveBeenNthCalledWith(2, {
 			html: "<!doctype html><html><body><main>repaired</main></body></html>",
 			siteUrl: "stripe.com",
 			brandName: "Stripe",
 		});
-		expect(save).not.toHaveBeenCalled();
 		expect(saveRepairedTool).toHaveBeenCalledWith(
 			"tool-123",
 			4,
@@ -310,7 +322,7 @@ describe("finalizeVisualCongruenceForTool", () => {
 			referenceUrl: "https://stripe.com",
 			analyzedAt: "2026-09-06T00:00:05.000Z",
 		});
-		const save = vi.fn();
+		const save = vi.fn().mockResolvedValue({ id: "tool-123" });
 		const requestHtml = vi.fn();
 		const saveRepairedTool = vi.fn();
 
@@ -320,7 +332,7 @@ describe("finalizeVisualCongruenceForTool", () => {
 		);
 
 		expect(requestHtml).not.toHaveBeenCalled();
-		expect(save).not.toHaveBeenCalled();
+		expect(save).toHaveBeenCalledTimes(1);
 		expect(saveRepairedTool).not.toHaveBeenCalled();
 	});
 
@@ -347,7 +359,7 @@ describe("finalizeVisualCongruenceForTool", () => {
 				referenceUrl: "https://stripe.com",
 				analyzedAt: "2026-09-06T00:00:10.000Z",
 			});
-		const save = vi.fn();
+		const save = vi.fn().mockResolvedValue({ id: "tool-123" });
 		const requestHtml = vi
 			.fn()
 			.mockResolvedValue("<!doctype html><html><body><main>repaired once</main></body></html>");
@@ -365,7 +377,7 @@ describe("finalizeVisualCongruenceForTool", () => {
 
 		expect(requestHtml).toHaveBeenCalledTimes(1);
 		expect(analyze).toHaveBeenCalledTimes(2);
-		expect(save).not.toHaveBeenCalled();
+		expect(save).toHaveBeenCalledTimes(1);
 		expect(saveRepairedTool).toHaveBeenCalledTimes(1);
 		expect(saveRepairedTool).toHaveBeenCalledWith(
 			"tool-123",
