@@ -56,6 +56,9 @@ services:
     autoscaling:
       enabled: true
       minInstances: 1
-      maxInstances: 3
+      # Temporary stopgap for durable-tool-store: without Supabase configured,
+      # generated tools live in the local fallback store, so multiple pods can
+      # return false 404s when polling a tool created on a different instance.
+      maxInstances: 1
       targetCPUUtilizationPercentage: 70
     sleep: false
