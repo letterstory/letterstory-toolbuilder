@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import sharp from "sharp";
 
@@ -10,6 +11,10 @@ vi.mock("@/lib/net/ssrf", () => ({
 import { downloadAsLogoPng, looksLikeBannerNotLogo, resolveCanonicalLogo } from "../../src/lib/brand/logo";
 
 const originalFetch = global.fetch;
+const cssDependentLogoFixture = readFileSync(
+	new URL("../fixtures/notion-class-styled-logo.svg", import.meta.url),
+	"utf8"
+);
 
 function mockFetchOnce(options: { ok?: boolean; contentType: string; body: Buffer | string }) {
 	const body = typeof options.body === "string" ? Buffer.from(options.body, "utf8") : options.body;
@@ -26,6 +31,18 @@ async function makePng(width: number, height: number): Promise<Buffer> {
 	})
 		.png()
 		.toBuffer();
+}
+
+async function countVisiblePixels(png: Uint8Array | Buffer): Promise<number> {
+	const { data } = await sharp(Buffer.from(png)).ensureAlpha().raw().toBuffer({
+		resolveWithObject: true,
+	});
+
+	let visiblePixels = 0;
+	for (let index = 3; index < data.length; index += 4) {
+		if (data[index] > 0) visiblePixels += 1;
+	}
+	return visiblePixels;
 }
 
 function wrapPngAsIco(png: Buffer): Buffer {
@@ -71,6 +88,21 @@ describe("resolveCanonicalLogo / downloadAsLogoPng", () => {
 		expect(result.warnings).toEqual([]);
 	});
 
+	it("repairs CSS-dependent SVG logos whose root fill would otherwise rasterize fully transparent", async () => {
+		mockFetchOnce({ contentType: "image/svg+xml", body: cssDependentLogoFixture });
+
+		const warnings: string[] = [];
+		const bytes = await downloadAsLogoPng("https://cdn.example.com/notion-logo.svg", warnings, {
+			svgFallbackColor: "#0f172a",
+		});
+
+		expect(bytes).not.toBeNull();
+		expect(warnings).toContain(
+			"Applied a fallback fill to a CSS-dependent SVG logo so it would render visibly."
+		);
+		expect(await countVisiblePixels(bytes as Uint8Array)).toBeGreaterThan(0);
+	});
+
 	it("passes through a well-sized raster logo", async () => {
 		const png = await makePng(256, 256);
 		mockFetchOnce({ contentType: "image/png", body: png });
@@ -101,6 +133,43 @@ describe("resolveCanonicalLogo / downloadAsLogoPng", () => {
 		const bytes = await downloadAsLogoPng("https://cdn.example.com/tiny.png", warnings);
 
 		expect(bytes).toBeNull();
+	});
+
+	it("falls back when a rendered logo stays almost fully transparent", async () => {
+		const transparentPng = await sharp({
+			create: {
+				width: 128,
+				height: 128,
+				channels: 4,
+				background: { r: 255, g: 255, b: 255, alpha: 0 },
+			},
+		})
+			.png()
+			.toBuffer();
+		const goodPng = await makePng(128, 128);
+		let call = 0;
+		global.fetch = vi.fn().mockImplementation(async () => {
+			call += 1;
+			const body = call === 1 ? transparentPng : goodPng;
+			return {
+				ok: true,
+				headers: { get: (name: string) => (name.toLowerCase() === "content-type" ? "image/png" : null) },
+				arrayBuffer: async () => body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength),
+			};
+		});
+
+		const result = await resolveCanonicalLogo([
+			"https://cdn.example.com/blank.png",
+			"https://cdn.example.com/fallback.png",
+		]);
+
+		expect(result.sourceUrl).toBe("https://cdn.example.com/fallback.png");
+		expect(result.dataUri).toMatch(/^data:image\/png;base64,/);
+		expect(
+			result.warnings.some((warning) =>
+				warning.includes("almost fully transparent image and was skipped")
+			)
+		).toBe(true);
 	});
 
 	it("decodes an embedded-PNG ICO frame into a usable logo", async () => {

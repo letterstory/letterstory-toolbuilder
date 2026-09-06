@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="210" height="60" viewBox="0 0 210 60" fill="none" class="wordmark-module-scss-module__IP9eTq__wordmark">
+  <g clip-path="url(#clip)">
+    <mask id="mask" width="40" height="44" x="0" y="0" maskUnits="userSpaceOnUse">
+      <path fill="#fff" d="M40 0H0v44h40z"/>
+    </mask>
+    <g mask="url(#mask)">
+      <path class="wordmark-module-scss-module__IP9eTq__page" d="M12 8h28v44H12z"/>
+      <path class="wordmark-module-scss-module__IP9eTq__mark" fill-rule="evenodd" clip-rule="evenodd" d="M12 8h28v44H12z"/>
+    </g>
+    <path class="wordmark-module-scss-module__IP9eTq__letterforms" d="M58 12h16l10 17V12h13v36H81L71 31v17H58zm52 0h14v36h-14zm28 0h16l12 36h-14l-2-7h-13l-2 7h-14zm9 11-4 12h8zm28-11h14v36h-14z"/>
+    <defs>
+      <clipPath id="clip"><path d="M0 0h210v60H0z"/></clipPath>
+    </defs>
+  </g>
+</svg>

@@ -18,8 +18,14 @@ const MAX_LOGO_BYTES = 4_000_000;
 // URI from ballooning.
 const MAX_LOGO_EDGE_PX = 512;
 export const MIN_LOGO_EDGE_PX = 32;
+const DEFAULT_SVG_FALLBACK_FILL = "#111111";
+const MAX_TRANSPARENT_PIXEL_RATIO = 0.99;
 
 const RASTER_LOGO_MIMES = new Set(["image/png", "image/jpeg", "image/jpg", "image/webp"]);
+
+interface LogoNormalizationOptions {
+	svgFallbackColor?: string | null;
+}
 
 /**
  * A large, wide raster is an og:image/marketing banner that slipped into the
@@ -45,7 +51,8 @@ export interface CanonicalLogoResult {
  * canonical logo.
  */
 export async function resolveCanonicalLogo(
-	candidates: Array<string | null | undefined>
+	candidates: Array<string | null | undefined>,
+	options: LogoNormalizationOptions = {}
 ): Promise<CanonicalLogoResult> {
 	const warnings: string[] = [];
 	const seen = new Set<string>();
@@ -54,7 +61,7 @@ export async function resolveCanonicalLogo(
 		if (!candidate || seen.has(candidate)) continue;
 		seen.add(candidate);
 
-		const png = await downloadAsLogoPng(candidate, warnings);
+		const png = await downloadAsLogoPng(candidate, warnings, options);
 		if (!png) continue;
 
 		return {
@@ -76,7 +83,8 @@ export async function resolveCanonicalLogo(
  */
 export async function downloadAsLogoPng(
 	url: string,
-	warnings: string[]
+	warnings: string[],
+	options: LogoNormalizationOptions = {}
 ): Promise<Uint8Array | null> {
 	try {
 		const resolved = url.startsWith("data:")
@@ -88,10 +96,23 @@ export async function downloadAsLogoPng(
 
 		if (mime === "image/svg+xml" || /\.svg(\?|$)/i.test(url)) {
 			// Vector mark → crisp raster at a bounded width, transparency kept.
-			const rendered = new Resvg(buffer.toString("utf8"), {
+			const preparedSvg = prepareSvgForRasterization(buffer.toString("utf8"), options.svgFallbackColor);
+			if (preparedSvg.repaired) {
+				warnings.push(
+					"Applied a fallback fill to a CSS-dependent SVG logo so it would render visibly."
+				);
+			}
+			const rendered = new Resvg(preparedSvg.svg, {
 				fitTo: { mode: "width", value: MAX_LOGO_EDGE_PX },
 			}).render();
-			return rendered.asPng();
+			const png = rendered.asPng();
+			if (!(await pngHasVisiblePixels(png))) {
+				warnings.push(
+					"A logo candidate rendered as an almost fully transparent image and was skipped."
+				);
+				return null;
+			}
+			return png;
 		}
 
 		// Favicon ICOs: sharp can't decode the container, but the frames inside
@@ -118,7 +139,7 @@ export async function downloadAsLogoPng(
 			return null;
 		}
 
-		return new Uint8Array(
+		const png = new Uint8Array(
 			await image
 				.resize({
 					width: MAX_LOGO_EDGE_PX,
@@ -129,9 +150,31 @@ export async function downloadAsLogoPng(
 				.png()
 				.toBuffer()
 		);
+		if (!(await pngHasVisiblePixels(png))) {
+			warnings.push(
+				"A logo candidate rendered as an almost fully transparent image and was skipped."
+			);
+			return null;
+		}
+
+		return png;
 	} catch {
 		return null;
 	}
+}
+
+function prepareSvgForRasterization(
+	svg: string,
+	fallbackColor?: string | null
+): { svg: string; repaired: boolean } {
+	if (!rootSvgHasFillNone(svg)) return { svg, repaired: false };
+	if (svgDefinesVisiblePaintInternally(svg)) return { svg, repaired: false };
+
+	const normalizedFill = normalizeSvgColor(fallbackColor) ?? DEFAULT_SVG_FALLBACK_FILL;
+	return {
+		svg: replaceRootSvgFillNone(svg, normalizedFill),
+		repaired: true,
+	};
 }
 
 function summarizeLogoCandidateSource(candidate: string): string {
@@ -158,6 +201,111 @@ function decodeLogoDataUri(candidate: string): { mime: string; buffer: Buffer } 
 	}
 }
 
+function rootSvgHasFillNone(svg: string): boolean {
+	const rootMatch = svg.match(/<svg\b[^>]*>/i)?.[0];
+	if (!rootMatch) return false;
+
+	const fill = getSvgAttributeValue(rootMatch, "fill");
+	if (fill?.trim().toLowerCase() === "none") return true;
+
+	const style = getSvgAttributeValue(rootMatch, "style");
+	return styleDefinesInvisiblePaint(style, "fill");
+}
+
+function svgDefinesVisiblePaintInternally(svg: string): boolean {
+	if (/<style\b[^>]*>[\s\S]*?\b(?:fill|stroke)\s*:\s*(?!none\b|transparent\b)/i.test(svg)) {
+		return true;
+	}
+
+	const visibleSvg = stripSvgNonPaintingSections(svg);
+	const shapeTagPattern = /<(?:path|rect|circle|ellipse|polygon|polyline|text)\b[^>]*>/gi;
+	let match: RegExpExecArray | null = null;
+	while ((match = shapeTagPattern.exec(visibleSvg))) {
+		const tag = match[0];
+		const fill = getSvgAttributeValue(tag, "fill");
+		if (fill && fill.trim().toLowerCase() !== "none" && fill.trim().toLowerCase() !== "transparent") {
+			return true;
+		}
+
+		const stroke = getSvgAttributeValue(tag, "stroke");
+		if (
+			stroke &&
+			stroke.trim().toLowerCase() !== "none" &&
+			stroke.trim().toLowerCase() !== "transparent"
+		) {
+			return true;
+		}
+
+		const style = getSvgAttributeValue(tag, "style");
+		if (
+			styleDefinesVisiblePaint(style, "fill") ||
+			styleDefinesVisiblePaint(style, "stroke")
+		) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
+function stripSvgNonPaintingSections(svg: string): string {
+	return svg
+		.replace(/<defs\b[\s\S]*?<\/defs>/gi, "")
+		.replace(/<mask\b[\s\S]*?<\/mask>/gi, "")
+		.replace(/<clipPath\b[\s\S]*?<\/clipPath>/gi, "");
+}
+
+function getSvgAttributeValue(tag: string, attribute: string): string | null {
+	const match = tag.match(new RegExp(`\\b${attribute}\\s*=\\s*["']([^"']*)["']`, "i"));
+	return match?.[1] ?? null;
+}
+
+function styleDefinesInvisiblePaint(style: string | null, property: "fill" | "stroke"): boolean {
+	if (!style) return false;
+	const match = style.match(new RegExp(`\\b${property}\\s*:\\s*([^;]+)`, "i"));
+	const value = match?.[1]?.trim().toLowerCase();
+	return value === "none" || value === "transparent";
+}
+
+function styleDefinesVisiblePaint(style: string | null, property: "fill" | "stroke"): boolean {
+	if (!style) return false;
+	const match = style.match(new RegExp(`\\b${property}\\s*:\\s*([^;]+)`, "i"));
+	const value = match?.[1]?.trim().toLowerCase();
+	if (!value) return false;
+	return value !== "none" && value !== "transparent";
+}
+
+function normalizeSvgColor(color?: string | null): string | null {
+	const trimmed = color?.trim();
+	if (!trimmed) return null;
+	return /^(#[0-9a-f]{3,8}|rgba?\([^)]*\)|hsla?\([^)]*\)|[a-z]+)$/i.test(trimmed)
+		? trimmed
+		: null;
+}
+
+function replaceRootSvgFillNone(svg: string, fillColor: string): string {
+	return svg.replace(/<svg\b[^>]*>/i, (rootTag) => {
+		let updated = rootTag;
+
+		if (/\bfill\s*=\s*["']none["']/i.test(updated)) {
+			updated = updated.replace(/\bfill\s*=\s*["']none["']/i, `fill="${fillColor}"`);
+		}
+
+		if (/\bstyle\s*=\s*["'][^"']*\bfill\s*:\s*none\b[^"']*["']/i.test(updated)) {
+			updated = updated.replace(
+				/(\bstyle\s*=\s*["'][^"']*)\bfill\s*:\s*none\b([^"']*["'])/i,
+				(_, prefix: string, suffix: string) => `${prefix}fill:${fillColor}${suffix}`
+			);
+		}
+
+		if (updated === rootTag) {
+			updated = rootTag.replace("<svg", `<svg fill="${fillColor}"`);
+		}
+
+		return updated;
+	});
+}
+
 async function fetchLogoBytes(url: string): Promise<{ mime: string; buffer: Buffer } | null> {
 	const safety = await isSafeHttpsUrl(url);
 	if (!safety.ok) return null;
@@ -170,6 +318,20 @@ async function fetchLogoBytes(url: string): Promise<{ mime: string; buffer: Buff
 	const mime = (res.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
 	const buffer = Buffer.from(await res.arrayBuffer());
 	return { mime, buffer };
+}
+
+async function pngHasVisiblePixels(png: Uint8Array): Promise<boolean> {
+	const { data, info } = await sharp(Buffer.from(png)).ensureAlpha().raw().toBuffer({
+		resolveWithObject: true,
+	});
+
+	const pixelCount = Math.max(1, info.width * info.height);
+	let visiblePixels = 0;
+	for (let index = info.channels - 1; index < data.length; index += info.channels) {
+		if (data[index] > 0) visiblePixels += 1;
+	}
+
+	return 1 - visiblePixels / pixelCount <= MAX_TRANSPARENT_PIXEL_RATIO;
 }
 
 const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
