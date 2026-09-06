@@ -25,6 +25,8 @@ For CLI-specific detail, see [`cli/README.md`](./cli/README.md). This file is th
 
 > If you install or link the root `toolbuilder` bin, the same commands also work as `toolbuilder ...`. This doc uses `npm run cli -- ...` because that is how the repo currently documents local usage.
 
+> Prototype-only route: `POST /api/tools/logic-demo/invoke` runs the fixed loan-calculator demo inside a Porter sandbox. It is intentionally REST-only for this spike and is not yet wired into MCP/CLI parity or `/api/tools/generate`.
+
 ## MCP discovery
 
 The MCP registry lives at `/api/mcp`. There are two primary discovery paths:

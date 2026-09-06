@@ -29,6 +29,8 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 RUN apt-get update && apt-get install -y --no-install-recommends \
 	openssl \
 	ca-certificates \
+	curl \
+	unzip \
 	fonts-liberation \
 	libasound2 \
 	libatk-bridge2.0-0 \
@@ -57,6 +59,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 	libxrandr2 \
 	libxrender1 \
 	libxshmfence1 \
+	&& curl -fsSL https://install.porter.run | bash \
 	&& rm -rf /var/lib/apt/lists/* \
 	&& groupadd --system --gid 1001 nodejs \
 	&& useradd --system --uid 1001 --gid nodejs nextjs
