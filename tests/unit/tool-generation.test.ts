@@ -1181,6 +1181,7 @@ describe("generateTool", () => {
 			images: { logo: { canonicalDataUri: null } },
 		});
 		let repairPrompt = "";
+		let fidelityCallCount = 0;
 		const fetchMock = vi.fn().mockImplementation(async (_url, init) => {
 			const parsedBody = JSON.parse(String((init as RequestInit | undefined)?.body ?? "{}")) as {
 				system?: string;
@@ -1189,10 +1190,17 @@ describe("generateTool", () => {
 			const system = parsedBody.system ?? "";
 			const content = parsedBody.messages?.[0]?.content ?? "";
 			if (system.includes("VERDICT:")) {
+				fidelityCallCount += 1;
 				return new Response(
 					JSON.stringify({
 						content: [
-							{ type: "text", text: "VERDICT: fail\nNOTES: uses a different color palette" },
+							{
+								type: "text",
+								text:
+									fidelityCallCount === 1
+										? "VERDICT: fail\nNOTES: uses a different color palette"
+										: "VERDICT: pass\nNOTES:",
+							},
 						],
 					}),
 					{ status: 200 }
@@ -1239,7 +1247,7 @@ describe("generateTool", () => {
 		expect(repairPrompt).toContain("Authoritative brand colors to apply in rendered CSS/UI");
 		expect(repairPrompt).toContain("- text: #0a2540");
 		expect(repairPrompt).toContain("uses a different color palette");
-		expect(fetchMock).toHaveBeenCalledTimes(4);
+		expect(fetchMock).toHaveBeenCalledTimes(5);
 		expect(
 			(console.info as ReturnType<typeof vi.fn>).mock.calls.some(
 				([prefix, details]) =>
@@ -1247,11 +1255,17 @@ describe("generateTool", () => {
 					String(details).includes('"event":"brand_fidelity_repair_requested"')
 			)
 		).toBe(true);
+		expect(
+			(console.info as ReturnType<typeof vi.fn>).mock.calls.some(
+				([prefix, details]) =>
+					prefix === "[tool-generation]" &&
+					String(details).includes('"event":"brand_fidelity_rechecked"')
+			)
+		).toBe(true);
 		if (result.status === "success") {
+			expect(result.tool.brandFidelity).toEqual({ verdict: "pass", notes: "" });
 			expect(result.tool.html).toContain("background:#635bff");
-			expect(result.tool.warnings.some((w) => w.includes("Brand fidelity check (fail)"))).toBe(
-				true
-			);
+			expect(result.tool.warnings.some((w) => w.includes("Brand fidelity check"))).toBe(false);
 		}
 	});
 
@@ -1264,6 +1278,7 @@ describe("generateTool", () => {
 			typography: { headingFont: "Inter", bodyFont: "Inter" },
 			images: { logo: { canonicalDataUri: null } },
 		});
+		let fidelityCallCount = 0;
 		const timeoutSpy = vi
 			.spyOn(AbortSignal, "timeout")
 			.mockImplementation(
@@ -1278,10 +1293,17 @@ describe("generateTool", () => {
 			const system = parsedBody.system ?? "";
 			const content = parsedBody.messages?.[0]?.content ?? "";
 			if (system.includes("VERDICT:")) {
+				fidelityCallCount += 1;
 				return new Response(
 					JSON.stringify({
 						content: [
-							{ type: "text", text: "VERDICT: fail\nNOTES: uses a different color palette" },
+							{
+								type: "text",
+								text:
+									fidelityCallCount === 1
+										? "VERDICT: fail\nNOTES: uses a different color palette"
+										: "VERDICT: pass\nNOTES:",
+							},
 						],
 					}),
 					{ status: 200 }
@@ -1327,7 +1349,8 @@ describe("generateTool", () => {
 		expect(timeoutSpy).toHaveBeenNthCalledWith(2, 15000);
 		expect(timeoutSpy).toHaveBeenNthCalledWith(3, 15000);
 		expect(timeoutSpy).toHaveBeenNthCalledWith(4, 180000);
-		expect(timeoutSpy).toHaveBeenCalledTimes(4);
+		expect(timeoutSpy).toHaveBeenNthCalledWith(5, 15000);
+		expect(timeoutSpy).toHaveBeenCalledTimes(5);
 	});
 
 	it("does not trigger an extra repair pass when brand fidelity already passes", async () => {
@@ -1453,6 +1476,88 @@ describe("generateTool", () => {
 			).toBe(true);
 			expect(result.tool.warnings.some((warning) => warning.includes("Brand fidelity check (fail)"))).toBe(
 				true
+			);
+		}
+	});
+
+	it("replaces stale fidelity warnings with a re-verification-skipped warning when repair succeeds late", async () => {
+		isBrandIngestionConfiguredMock.mockReturnValue(true);
+		pullBrandProfileMock.mockResolvedValue({
+			brandName: "Stripe",
+			colors: { primary: "#635bff", text: "#0a2540" },
+			fonts: ["Inter"],
+			typography: { headingFont: "Inter", bodyFont: "Inter" },
+			images: { logo: { canonicalDataUri: null } },
+		});
+		let repairCompleted = false;
+		const fetchMock = vi.fn().mockImplementation(async (_url, init) => {
+			const parsedBody = JSON.parse(String((init as RequestInit | undefined)?.body ?? "{}")) as {
+				system?: string;
+				messages?: Array<{ content: string }>;
+			};
+			const system = parsedBody.system ?? "";
+			const content = parsedBody.messages?.[0]?.content ?? "";
+			if (system.includes("VERDICT:")) {
+				return new Response(
+					JSON.stringify({
+						content: [
+							{ type: "text", text: "VERDICT: fail\nNOTES: uses a different color palette" },
+						],
+					}),
+					{ status: 200 }
+				);
+			}
+			if (system.includes("HEADLINE:")) {
+				return advisoryFallbackResponse();
+			}
+			if (content.includes("Brand fidelity correction only.")) {
+				repairCompleted = true;
+				return new Response(
+					JSON.stringify({
+						content: [
+							{
+								type: "text",
+								text: '<!doctype html><html><head><style>body{font-family:"Inter",sans-serif;background:#635bff;color:#0a2540;}</style></head><body><main>fixed</main></body></html>',
+							},
+						],
+					}),
+					{ status: 200 }
+				);
+			}
+			return new Response(
+				JSON.stringify({
+					content: [
+						{
+							type: "text",
+							text: '<!doctype html><html><head><style>body{font-family:"Inter",sans-serif;background:#ff7a00;color:#111111;}</style></head><body><main>initial</main></body></html>',
+						},
+					],
+				}),
+				{ status: 200 }
+			);
+		});
+		global.fetch = fetchMock as unknown as typeof fetch;
+		vi.spyOn(Date, "now").mockImplementation(() =>
+			repairCompleted ? TOOL_GENERATION_TARGET_BUDGET_MS - 4_999 : 0
+		);
+
+		const result = await generateTool({
+			projectName: "Calc",
+			siteUrl: "https://stripe.com",
+			prompt: "a calculator",
+		});
+
+		expect(result.status).toBe("success");
+		expect(fetchMock).toHaveBeenCalledTimes(4);
+		if (result.status === "success") {
+			expect(result.tool.brandFidelity).toBeNull();
+			expect(
+				result.tool.warnings.some((warning) =>
+					warning.includes("Brand repair was applied, but the post-repair brand fidelity check was skipped")
+				)
+			).toBe(true);
+			expect(result.tool.warnings.some((warning) => warning.includes("Brand fidelity check (fail)"))).toBe(
+				false
 			);
 		}
 	});

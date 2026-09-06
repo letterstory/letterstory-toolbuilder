@@ -12,3 +12,8 @@
 **By:** Backend
 **What:** The managed brand-enforcement stylesheet now applies `color: var(--ls-brand-color-text) !important` on `body` and makes form controls inherit that text color, so the final served HTML cannot quietly fall back to an accent/near-black body color after repair.
 **Why:** Live Stripe verification showed that the longer repair timeout let the corrective pass finish, but the resulting document could still keep non-authoritative body text color in its own CSS. Deterministic post-enforcement closes that gap and provides a verifiable before/after fix in the final HTML.
+
+### 2026-09-06: Refresh brand-fidelity reporting after a successful repair
+**By:** Backend
+**What:** When a fidelity-driven repair succeeds, the generator now runs one post-repair `requestBrandFidelityCheck()` against the repaired HTML, replaces the response's `brandFidelity` value with that fresh verdict, and removes the stale warning entirely if the repaired tool now passes. If there is not enough time left for the re-check, the response explicitly says the fix was applied but not re-verified instead of surfacing stale pre-repair notes.
+**Why:** Live verification showed the repair path could fix the actual HTML while the API response still claimed the old failure, which misled reviewers. A single budget-gated post-repair re-check keeps the one-pass repair model while making the reported QA state match the delivered artifact.

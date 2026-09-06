@@ -537,6 +537,38 @@ async function buildToolContent(opts: {
 		brandSnapshot: opts.brandSnapshot,
 	});
 	sanitized = enforced.sanitized;
+	if (opts.brandSnapshot && brandFidelity && fidelityRepairReasons.length && repaired.didRepair) {
+		const remainingRecheckBudgetMs =
+			TOOL_GENERATION_TARGET_BUDGET_MS - (Date.now() - opts.requestStartedAt);
+		if (remainingRecheckBudgetMs >= MIN_ADVISORY_BUDGET_MS) {
+			const recheckStartedAt = Date.now();
+			const refreshedBrandFidelity = await timeGenerationStep("brand_fidelity_rechecked", () =>
+				requestBrandFidelityCheck({
+					html: sanitized.html,
+					brandSnapshot: opts.brandSnapshot as GeneratedToolBrandSnapshot,
+					timeoutMs: Math.min(ADVISORY_TIMEOUT_MS, remainingRecheckBudgetMs),
+				})
+			);
+			advisoryMs += Date.now() - recheckStartedAt;
+			if (refreshedBrandFidelity) {
+				brandFidelity = refreshedBrandFidelity;
+			} else {
+				brandFidelity = null;
+				repaired.warnings.push(
+					"Brand repair was applied, but the post-repair brand fidelity check could not be completed."
+				);
+			}
+		} else {
+			logGenerationStep("brand_fidelity_recheck_skipped", {
+				reason: "insufficient_budget",
+				remainingBudgetMs: remainingRecheckBudgetMs,
+			});
+			brandFidelity = null;
+			repaired.warnings.push(
+				"Brand repair was applied, but the post-repair brand fidelity check was skipped to stay within the live request budget."
+			);
+		}
+	}
 	const warnings = [
 		...(opts.brandWarning ? [opts.brandWarning] : []),
 		...repaired.warnings,
@@ -851,13 +883,14 @@ async function requestAdvisoryText(opts: {
 	system: string;
 	userContent: string;
 	maxTokens: number;
+	timeoutMs?: number;
 }): Promise<string | null> {
 	try {
 		const response = await requestAnthropicText({
 			system: opts.system,
 			userContent: opts.userContent,
 			maxTokens: opts.maxTokens,
-			timeoutMs: ADVISORY_TIMEOUT_MS,
+			timeoutMs: opts.timeoutMs ?? ADVISORY_TIMEOUT_MS,
 		});
 		return response.text;
 	} catch {
@@ -916,6 +949,7 @@ async function requestSupportingCopy(opts: {
 async function requestBrandFidelityCheck(opts: {
 	html: string;
 	brandSnapshot: GeneratedToolBrandSnapshot;
+	timeoutMs?: number;
 }): Promise<GeneratedToolBrandFidelity | null> {
 	const system = [
 		"You are a brand QA reviewer. You are given a brand's design tokens and the source of a generated HTML tool. Decide whether the tool's actual implementation (colors, fonts, tone, logo usage) is faithful to the brand, well enough that a visitor would believe it's from the same company.",
@@ -938,7 +972,12 @@ async function requestBrandFidelityCheck(opts: {
 
 	const userContent = [brandContext, "", "Generated tool source:", truncatedHtml].join("\n");
 
-	const text = await requestAdvisoryText({ system, userContent, maxTokens: 200 });
+	const text = await requestAdvisoryText({
+		system,
+		userContent,
+		maxTokens: 200,
+		timeoutMs: opts.timeoutMs,
+	});
 	if (!text) return null;
 
 	const verdictRaw = text.match(/VERDICT:\s*(\w+)/i)?.[1]?.toLowerCase();
@@ -1045,9 +1084,10 @@ async function maybeRepairBrandPresentation(opts: {
 }): Promise<{
 	sanitized: SanitizedHtml;
 	warnings: string[];
+	didRepair: boolean;
 }> {
 	if (!opts.brandSnapshot) {
-		return { sanitized: opts.sanitized, warnings: [] };
+		return { sanitized: opts.sanitized, warnings: [], didRepair: false };
 	}
 
 	const deterministicReasons = collectBrandRepairReasons(opts.sanitized.html, opts.brandSnapshot);
@@ -1055,13 +1095,18 @@ async function maybeRepairBrandPresentation(opts: {
 	const reasons = mergeBrandRepairReasons(deterministicReasons, additionalReasons);
 	if (!reasons.length) {
 		logGenerationStep("brand_repair_skipped", { reason: "not_needed" });
-		return { sanitized: opts.sanitized, warnings: [] };
+		return { sanitized: opts.sanitized, warnings: [], didRepair: false };
 	}
 
-	const finalize = (sanitized: SanitizedHtml, extraWarnings: string[] = []) => {
+	const finalize = (
+		sanitized: SanitizedHtml,
+		extraWarnings: string[] = [],
+		didRepair = false
+	) => {
 		return {
 			sanitized,
 			warnings: extraWarnings,
+			didRepair,
 		};
 	};
 
@@ -1118,7 +1163,7 @@ async function maybeRepairBrandPresentation(opts: {
 			additionalReasonCount: additionalReasons.length,
 			remainingReasonCount: remainingReasons.length,
 		});
-		return finalize(repaired);
+		return finalize(repaired, [], true);
 	} catch (error) {
 		logGenerationStep("brand_repair_failed", {
 			reason: error instanceof Error ? error.message : String(error),
