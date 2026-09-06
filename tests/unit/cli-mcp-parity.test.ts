@@ -13,6 +13,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { runBrandCommand } from "../../cli/commands/brand.mjs";
 import { runHealthCommand } from "../../cli/commands/health.mjs";
 import { runToolsCommand } from "../../cli/commands/tools.mjs";
+import { brandProfileSchema } from "../../src/lib/contracts/brand";
 
 const EXPECTED_CAPABILITIES = [
 	"get_health",
@@ -157,13 +158,32 @@ describe("documented CLI command behavior", () => {
 		).resolves.toBe(0);
 		expect(client.callTool).toHaveBeenCalledWith("validate_brand_fidelity", {
 			siteUrl: "https://stripe.com",
-			profile: {
+			profile: expect.objectContaining({
+				url: "https://stripe.com",
+				source: "context.dev",
 				brandName: "Stripe",
-				voice: {
-					tone: "clear",
-				},
-			},
+				colors: expect.objectContaining({
+					primary: "#533AFD",
+					secondary: "#A494FC",
+					accent: "#040404",
+					background: "#FFFFFF",
+					text: "#000EFF",
+				}),
+				fonts: ["sohne-var"],
+				typography: expect.objectContaining({
+					primaryFont: "sohne-var",
+					fontFamilies: ["sohne-var"],
+				}),
+			}),
 		});
+	});
+
+	it("ships a schema-valid brand profile fixture for CLI validate examples", async () => {
+		const profile = JSON.parse(
+			await readFile(path.join(repoRoot, "tests", "fixtures", "brand-profile.json"), "utf8")
+		);
+
+		expect(() => brandProfileSchema.parse(profile)).not.toThrow();
 	});
 
 	it("routes tools list to generated tools by default", async () => {

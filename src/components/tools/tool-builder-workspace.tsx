@@ -444,7 +444,7 @@ export function ToolBuilderWorkspace() {
 	}
 
 	async function handleRollback(version: number) {
-		if (!activeTool) return;
+		if (!activeTool) return false;
 		setRequestState("updating");
 		setStatusMessage({
 			title: "Restoring version",
@@ -474,6 +474,7 @@ export function ToolBuilderWorkspace() {
 				});
 				void loadRecentTools();
 				void loadToolDetail(summary.id);
+				return true;
 			} else {
 				setStatusMessage({
 					title: "Restore failed",
@@ -487,6 +488,7 @@ export function ToolBuilderWorkspace() {
 		} finally {
 			setRequestState("idle");
 		}
+		return false;
 	}
 
 	async function handleCopyEmbed(target: "iframe" | "full" | "url", text: string) {
@@ -505,12 +507,13 @@ export function ToolBuilderWorkspace() {
 	}, [activeRun, activitySteps, telemetry]);
 
 	return (
-		<div className="overflow-hidden rounded-[34px] border border-brand/10 bg-white shadow-[0_24px_80px_-40px_rgba(15,23,42,0.35)]">
-			<div data-builder-topbar>
+		<div className="bg-white lg:flex lg:h-full lg:min-h-0 lg:flex-col">
+			<div data-builder-topbar className="shrink-0">
 				<BuilderTopbar
 					activeView={activeView}
 					activeTool={activeTool}
 					projectName={projectName}
+					toolHistory={toolHistory}
 					recentTools={recentTools}
 					recentLoading={recentLoading}
 					requestState={requestState}
@@ -522,9 +525,10 @@ export function ToolBuilderWorkspace() {
 					onRefreshRecent={() => void loadRecentTools()}
 					onReopenRecent={handleReopenRecent}
 					onOpenEmbed={handleOpenEmbed}
+					onRollback={handleRollback}
 				/>
 			</div>
-			<div className="grid lg:grid-cols-[360px_minmax(0,1fr)]">
+			<div className="grid lg:min-h-0 lg:flex-1 lg:grid-cols-[360px_minmax(0,1fr)]">
 				<BuilderChatPanel
 					projectName={projectName}
 					siteUrl={siteUrl}
@@ -555,7 +559,7 @@ export function ToolBuilderWorkspace() {
 					onSelectSuggestion={handleSelectSuggestion}
 					composerRef={composerRef}
 				/>
-				<div className="border-t border-[#e4e4e7] bg-slate-50 p-4 lg:border-t-0 lg:border-l lg:p-5">
+				<div className="border-t border-[#e4e4e7] bg-slate-50 p-4 lg:flex lg:h-full lg:min-h-0 lg:flex-col lg:overflow-y-auto lg:border-t-0 lg:border-l lg:p-5">
 					{activeView === "preview" ? (
 						<BuilderPreviewCanvas
 							activeTool={activeTool}

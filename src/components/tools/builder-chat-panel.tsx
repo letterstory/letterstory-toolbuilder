@@ -94,7 +94,7 @@ export function BuilderChatPanel({
 			: "Start with a name, optional brand site, and your build prompt.";
 
 	return (
-		<div className="flex min-h-[72vh] flex-col bg-[#f8f6f4] lg:min-h-[calc(100vh-16rem)]">
+		<div className="flex min-h-[72vh] flex-col bg-[#f8f6f4] lg:h-full lg:min-h-0">
 			<div className="border-b border-brand/10 bg-[#f8f6f4] px-4 py-4 shadow-[0_2px_4px_rgba(15,14,14,0.05)] sm:px-5">
 				<div className="grid gap-3">
 					<div className="grid gap-3 sm:grid-cols-2">

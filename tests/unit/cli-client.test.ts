@@ -1,6 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { commandFailed, parseArgv } from "../../cli/client.mjs";
+import { ToolbuilderClient, commandFailed, parseArgv } from "../../cli/client.mjs";
+import { runCliMain } from "../../cli/toolbuilder.mjs";
+
+afterEach(() => {
+	vi.unstubAllGlobals();
+});
 
 describe("cli client helpers", () => {
 	it("parses space-separated option values", () => {
@@ -40,5 +45,31 @@ describe("cli client helpers", () => {
 
 	it("treats non-success string statuses as failures", () => {
 		expect(commandFailed({ status: "error", message: "nope" })).toBe(true);
+	});
+
+	it("prints a clear error and exits non-zero when the server returns non-JSON", async () => {
+		vi.stubGlobal(
+			"fetch",
+			vi.fn().mockResolvedValue(
+				new Response("<html><body>503 Service Unavailable</body></html>", {
+					status: 503,
+					headers: { "Content-Type": "text/html; charset=utf-8" },
+				})
+			)
+		);
+
+		const errorLog = vi.fn();
+
+		await expect(
+			new ToolbuilderClient({ baseUrl: "https://toolbuilder.example.com" }).callTool("get_health", {})
+		).rejects.toThrow(
+			"Server returned a non-JSON response (HTTP 503). This can happen during deploys/cold starts — wait a moment and retry. (Content-Type: text/html; charset=utf-8)"
+		);
+
+		await expect(runCliMain(["health"], { logError: errorLog })).resolves.toBe(1);
+		expect(errorLog).toHaveBeenCalledWith(
+			"Server returned a non-JSON response (HTTP 503). This can happen during deploys/cold starts — wait a moment and retry. (Content-Type: text/html; charset=utf-8)"
+		);
+		expect(errorLog).not.toHaveBeenCalledWith(expect.stringContaining("Unexpected token"));
 	});
 });

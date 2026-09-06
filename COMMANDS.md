@@ -860,10 +860,10 @@ Example response shape:
 
 ### CLI
 
-- **Command with file input:** `npm run cli -- brand validate --site-url https://stripe.com --profile-file brand-profile.json`
-- **Command with stdin:** `cat brand-profile.json | npm run cli -- brand validate --site-url https://stripe.com --stdin`
-- **With host override:** `npm run cli -- --url https://your-deployed-origin brand validate --site-url https://stripe.com --profile-file brand-profile.json`
-- **With env override:** `TOOLBUILDER_API_URL=https://your-deployed-origin npm run cli -- brand validate --site-url https://stripe.com --profile-file brand-profile.json`
+- **Command with file input:** `npm run cli -- brand validate --site-url https://stripe.com --profile-file tests/fixtures/brand-profile.json`
+- **Command with stdin:** `cat tests/fixtures/brand-profile.json | npm run cli -- brand validate --site-url https://stripe.com --stdin`
+- **With host override:** `npm run cli -- --url https://your-deployed-origin brand validate --site-url https://stripe.com --profile-file tests/fixtures/brand-profile.json`
+- **With env override:** `TOOLBUILDER_API_URL=https://your-deployed-origin npm run cli -- brand validate --site-url https://stripe.com --profile-file tests/fixtures/brand-profile.json`
 
 ## 4. Tools list
 
