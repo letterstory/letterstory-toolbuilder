@@ -102,6 +102,8 @@ export function BuilderChatPanel({
 		() => getRevisionSuggestions(activeTool, revisionSuggestionPage),
 		[activeTool, revisionSuggestionPage]
 	);
+	const showGenerationPipeline =
+		Boolean(activeRun) || Boolean(telemetry) || activitySteps.length > 0 || Boolean(brandSummary);
 	const statusLine = isRunning
 		? requestState === "updating"
 			? "Thinking…"
@@ -111,7 +113,7 @@ export function BuilderChatPanel({
 		: messages.length > 0
 			? "Continue the conversation to refine this tool."
 			: isNewTool
-				? "Start with a brand site, optional tool name, and your build prompt."
+				? "Ready when you are."
 				: "Continue refining the name, brand site, or prompt for this tool.";
 
 	useEffect(() => {
@@ -193,19 +195,13 @@ export function BuilderChatPanel({
 							/>
 						</label>
 					</div>
-					<div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-						<Badge
-							variant="secondary"
-							className="rounded-full border border-brand/10 bg-brand-light/35 text-brand-text"
-						>
-							Brand ingestion + hosted iframe
-						</Badge>
+					<div className="text-xs text-muted-foreground">
 						<span>
 							{activeBrandName
 								? `Current brand context: ${activeBrandName}`
 								: isNewTool
-									? "Brand site drives logo, colors, fonts, and hosted embed output — required to generate a tool. Leave the name blank and we'll title it for you."
-									: "Brand site drives logo, colors, fonts, and hosted embed output."}
+									? "Brand site is required and powers logo, color, and font extraction."
+									: "Brand site powers logo, color, and font extraction."}
 						</span>
 					</div>
 				</div>
@@ -214,82 +210,77 @@ export function BuilderChatPanel({
 			<div className="flex-1 space-y-6 overflow-y-auto px-4 py-5 sm:px-5">
 				{brandSummary ? <BrandSummaryCard summary={brandSummary} /> : null}
 
-				<section className="rounded-[28px] border border-brand/10 bg-white p-4 shadow-sm">
-					<div className="flex items-start justify-between gap-3">
-						<div>
-							<p className="text-sm font-semibold text-foreground">
-								{brandSummary ? "Brand ingestion & generation pipeline" : "Generation pipeline"}
-							</p>
-							<p className="text-xs text-muted-foreground">
-								{telemetry?.totalMs
-									? `Completed in ${formatDuration(telemetry.totalMs)}${telemetry.attemptsSummary ? ` · ${telemetry.attemptsSummary}` : ""}`
-									: activeRun
-										? "Estimated step timing while the backend request is in flight."
-										: brandSummary
-											? "This thread shows the real brand-ingestion path the tool used."
-											: "Add a brand site to expose logo, color, and font extraction before generation."}
-							</p>
-						</div>
-						<div className="flex items-center gap-2 text-xs text-muted-foreground">
-							{telemetry ? (
-								<Badge variant="outline" className="border-brand/15 text-brand-text">
-									Observed
-								</Badge>
-							) : (
-								<Badge
-									variant="secondary"
-									className="border border-brand/10 bg-brand-light/35 text-brand-text"
-								>
-									Estimated live
-								</Badge>
-							)}
-							<ChevronDown className="size-4 text-brand-text/60" />
-						</div>
-					</div>
-					<div className="mt-4 space-y-3">
-						{activitySteps.length > 0 ? (
-							activitySteps.map((step) => (
-								<div key={step.key} className="rounded-xl border border-transparent p-1">
-									<div className="flex min-h-[34px] items-center gap-2 rounded-md bg-transparent p-1 text-sm">
-										<StepIcon status={step.status} />
-										<div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
-											<StepLabel title={step.title} />
-											<Badge
-												variant="outline"
-												className="h-5 rounded-md border-brand/10 bg-white px-2 text-[11px] text-muted-foreground"
-											>
-												{step.status === "complete"
-													? "Done"
-													: step.status === "active"
-														? "In progress"
-														: "Queued"}
-											</Badge>
-										</div>
-									</div>
-									<p className="ml-8 mt-1 text-xs leading-5 text-muted-foreground">
-										{step.description}
-									</p>
-									{step.detail ? (
-										<p className="ml-8 mt-2 text-xs font-medium text-brand-text/80">
-											{step.detail}
-										</p>
-									) : null}
-								</div>
-							))
-						) : (
-							<div className="rounded-2xl bg-brand-light/12 px-4 py-4 text-sm text-muted-foreground">
-								No run yet. Your first build will show the brand-ingestion and HTML generation
-								stages here.
+				{showGenerationPipeline ? (
+					<section className="rounded-[28px] border border-brand/10 bg-white p-4 shadow-sm">
+						<div className="flex items-start justify-between gap-3">
+							<div>
+								<p className="text-sm font-semibold text-foreground">
+									{brandSummary ? "Brand ingestion & generation pipeline" : "Generation pipeline"}
+								</p>
+								<p className="text-xs text-muted-foreground">
+									{telemetry?.totalMs
+										? `Completed in ${formatDuration(telemetry.totalMs)}${telemetry.attemptsSummary ? ` · ${telemetry.attemptsSummary}` : ""}`
+										: activeRun
+											? "Estimated step timing while the backend request is in flight."
+											: brandSummary
+												? "This thread shows the real brand-ingestion path the tool used."
+												: "Add a brand site to expose logo, color, and font extraction before generation."}
+								</p>
 							</div>
-						)}
-					</div>
-				</section>
-
-				{messages.length === 0 ? (
-					<div className="rounded-[28px] border border-dashed border-brand/15 bg-white/80 px-5 py-6 text-sm text-muted-foreground">
-						Your first prompt becomes the opening chat message. After the first build, use this
-						thread to request revisions and the existing tool will update in place.
-					</div>
+							<div className="flex items-center gap-2 text-xs text-muted-foreground">
+								{telemetry ? (
+									<Badge variant="outline" className="border-brand/15 text-brand-text">
+										Observed
+									</Badge>
+								) : (
+									<Badge
+										variant="secondary"
+										className="border border-brand/10 bg-brand-light/35 text-brand-text"
+									>
+										Estimated live
+									</Badge>
+								)}
+								<ChevronDown className="size-4 text-brand-text/60" />
+							</div>
+						</div>
+						<div className="mt-4 space-y-3">
+							{activitySteps.length > 0 ? (
+								activitySteps.map((step) => (
+									<div key={step.key} className="rounded-xl border border-transparent p-1">
+										<div className="flex min-h-[34px] items-center gap-2 rounded-md bg-transparent p-1 text-sm">
+											<StepIcon status={step.status} />
+											<div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+												<StepLabel title={step.title} />
+												<Badge
+													variant="outline"
+													className="h-5 rounded-md border-brand/10 bg-white px-2 text-[11px] text-muted-foreground"
+												>
+													{step.status === "complete"
+														? "Done"
+														: step.status === "active"
+															? "In progress"
+															: "Queued"}
+												</Badge>
+											</div>
+										</div>
+										<p className="ml-8 mt-1 text-xs leading-5 text-muted-foreground">
+											{step.description}
+										</p>
+										{step.detail ? (
+											<p className="ml-8 mt-2 text-xs font-medium text-brand-text/80">
+												{step.detail}
+											</p>
+										) : null}
+									</div>
+								))
+							) : (
+								<div className="rounded-2xl bg-brand-light/12 px-4 py-4 text-sm text-muted-foreground">
+									No run yet. Your first build will show the brand-ingestion and HTML generation
+									stages here.
+								</div>
+							)}
+						</div>
+					</section>
 				) : null}
 
 				{showSuggestionPanel ? (
