@@ -341,7 +341,7 @@ function summarizeNorms(
 	const unavailable = competitors.filter((competitor) => competitor.status === "unavailable");
 	if (unavailable.length) {
 		notes.push(
-			`Could not analyze ${unavailable.map((competitor) => competitor.companyName).join(", ")} via Firecrawl.`
+			`Could not analyze ${unavailable.map((competitor) => competitor.companyName).join(", ")} via Context.dev.`
 		);
 	}
 
