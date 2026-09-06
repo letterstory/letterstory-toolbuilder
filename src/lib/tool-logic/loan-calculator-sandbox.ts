@@ -10,7 +10,7 @@ const LOAN_CALCULATOR_TOOL_TAG = "loan-calculator-demo";
 const NODE_IMAGE = "node:20-alpine";
 const BUILD_SANDBOX_TTL = "5m";
 const WARM_SANDBOX_TTL = "30m";
-const WARM_SANDBOX_NAME = "loan-calculator-demo-warm";
+const WARM_SANDBOX_NAME_PREFIX = "loan-calculator-demo-warm";
 const SANDBOX_CPU = "250m";
 const SANDBOX_MEMORY = "256Mi";
 const BUILD_TIMEOUT_MS = 180_000;
@@ -164,13 +164,18 @@ async function terminateExistingWarmSandboxes(): Promise<void> {
 
 async function discoverWarmSandbox(snapshotId: string): Promise<string | null> {
 	const sandboxes = await listTaggedSandboxes("running", "warm-pool");
-	const matching = sandboxes.find(
-		(sandbox) => sandbox.name === WARM_SANDBOX_NAME && sandbox.tags?.snapshot === snapshotId
-	);
+	const matching = sandboxes
+		.filter((sandbox) => sandbox.tags?.snapshot === snapshotId)
+		.sort((left, right) => right.name.localeCompare(left.name))[0];
 	return matching?.name ?? null;
 }
 
+function makeWarmSandboxName(snapshotId: string): string {
+	return `${WARM_SANDBOX_NAME_PREFIX}-${snapshotId.slice(0, 8)}-${Date.now().toString(36)}`;
+}
+
 async function createWarmSandbox(snapshotId: string): Promise<string> {
+	const sandboxName = makeWarmSandboxName(snapshotId);
 	await terminateExistingWarmSandboxes();
 	await runPorterCommand(
 		[
@@ -179,7 +184,7 @@ async function createWarmSandbox(snapshotId: string): Promise<string> {
 			"--from-snapshot",
 			snapshotId,
 			"--name",
-			WARM_SANDBOX_NAME,
+			sandboxName,
 			"--ttl",
 			WARM_SANDBOX_TTL,
 			"--cpu",
@@ -198,7 +203,7 @@ async function createWarmSandbox(snapshotId: string): Promise<string> {
 		],
 		{ timeoutMs: BUILD_TIMEOUT_MS }
 	);
-	return WARM_SANDBOX_NAME;
+	return sandboxName;
 }
 
 export async function ensureWarmLoanCalculatorSandbox(): Promise<{
