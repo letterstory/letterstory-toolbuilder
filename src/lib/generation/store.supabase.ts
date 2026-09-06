@@ -32,6 +32,7 @@ interface ToolRow {
 	copy: GeneratedToolRecord["copy"];
 	brand_fidelity: GeneratedToolRecord["brandFidelity"];
 	visual_congruence: GeneratedToolRecord["visualCongruence"];
+	logic: GeneratedToolRecord["logic"];
 	model: string;
 	warnings: string[];
 	created_at: string;
@@ -76,6 +77,7 @@ function rowToRecord(row: ToolRow): GeneratedToolRecord {
 		copy: row.copy,
 		brandFidelity: row.brand_fidelity,
 		visualCongruence: row.visual_congruence,
+		logic: row.logic ?? null,
 		model: row.model,
 		warnings: row.warnings ?? [],
 		createdAt: row.created_at,
@@ -86,6 +88,7 @@ function rowToRecord(row: ToolRow): GeneratedToolRecord {
 				...entry,
 				brandSnapshot: normalizeBrandSnapshot(entry.brandSnapshot),
 				visualCongruence: entry.visualCongruence ?? null,
+				logic: entry.logic ?? null,
 			})) ?? [],
 	};
 }
@@ -100,15 +103,19 @@ function contentToRow(content: GeneratedToolContent) {
 		copy: content.copy,
 		brand_fidelity: content.brandFidelity,
 		visual_congruence: content.visualCongruence,
+		logic: content.logic,
 		model: content.model,
 		warnings: content.warnings,
 	};
 }
 
-async function saveGeneratedTool(input: GeneratedToolContent): Promise<GeneratedToolRecord> {
+async function saveGeneratedTool(
+	input: GeneratedToolContent,
+	options?: { id?: string }
+): Promise<GeneratedToolRecord> {
 	const { data, error } = await getSupabaseClient()
 		.from(TABLE)
-		.insert({ ...contentToRow(input), version: 1, history: [] })
+		.insert({ ...contentToRow(input), ...(options?.id ? { id: options.id } : {}), version: 1, history: [] })
 		.select()
 		.single();
 	if (error || !data) {

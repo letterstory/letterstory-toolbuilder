@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { toolLogicContractSchema } from "@/lib/tool-logic/spec";
 
 export const generatedToolBrandSnapshotSchema = z.object({
 	brandName: z.string().nullable(),
@@ -75,6 +76,24 @@ export const generatedToolVisualCongruenceSchema = z.object({
 	analyzedAt: z.string().nullable(),
 });
 
+export const generatedToolLogicSchema = z.object({
+	invokePath: z.string().min(1),
+	toolTag: z.string().min(1),
+	snapshotId: z.string().min(1),
+	warmSandboxName: z.string().nullable(),
+	handlerModulePath: z.string().min(1),
+	contract: toolLogicContractSchema,
+	generatedAt: z.string(),
+	generationModel: z.string().min(1),
+	classificationReason: z.string().min(1),
+	validation: z.object({
+		staticAnalysisPassedAt: z.string(),
+		smokeTestPassedAt: z.string(),
+		smokeTestInputCount: z.number().int().positive(),
+		rulesVersion: z.string().min(1),
+	}),
+});
+
 export const generatedToolHistoryEntrySchema = z.object({
 	projectName: z.string(),
 	prompt: z.string(),
@@ -84,6 +103,7 @@ export const generatedToolHistoryEntrySchema = z.object({
 	copy: generatedToolCopySchema.nullable(),
 	brandFidelity: generatedToolBrandFidelitySchema.nullable(),
 	visualCongruence: generatedToolVisualCongruenceSchema.nullable(),
+	logic: generatedToolLogicSchema.nullable().optional(),
 	model: z.string(),
 	warnings: z.array(z.string()),
 	version: z.number().int(),
@@ -100,6 +120,7 @@ export const generatedToolRecordSchema = z.object({
 	copy: generatedToolCopySchema.nullable(),
 	brandFidelity: generatedToolBrandFidelitySchema.nullable(),
 	visualCongruence: generatedToolVisualCongruenceSchema.nullable(),
+	logic: generatedToolLogicSchema.nullable().optional(),
 	model: z.string(),
 	warnings: z.array(z.string()),
 	createdAt: z.string(),

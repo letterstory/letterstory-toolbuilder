@@ -40,6 +40,22 @@ npm run brand:probe
 
 That script calls the live Context.dev endpoints against a small set of real sites and prints the extracted logo URLs, colors, fonts, and higher-level branding fields for manual quality assessment.
 
+## Sandboxed tool-logic prototype
+
+A prototype backend execution path now exists at `POST /api/tools/logic-demo/invoke`. The route validates a numeric loan-calculator payload, ensures a tagged Porter sandbox snapshot exists, keeps one warm sandbox alive from that snapshot, and executes real amortization logic inside the sandboxed Node handler.
+
+Example request body:
+
+```json
+{
+	"principal": 100000,
+	"annualRatePercent": 6,
+	"termMonths": 360
+}
+```
+
+The response returns `{ status, output, sandbox }`, where `output` includes cent-rounded payment totals plus the full amortization schedule and `sandbox` exposes the warm sandbox name/snapshot id used for the run.
+
 ## Tool-generation smoke test
 
 To exercise the live `/api/tools/generate` endpoint with the current manual-retest payload (`gymshark.com` + `BMI Calculator`), run:

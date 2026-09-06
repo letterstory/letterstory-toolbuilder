@@ -4,6 +4,7 @@
 // shapes without a circular import.
 
 import type { BrandCompetitorContext } from "@/lib/brand/competitor-context";
+import type { ToolLogicContract } from "@/lib/tool-logic/spec";
 
 export interface GeneratedToolBrandFontFace {
 	family: string;
@@ -56,6 +57,25 @@ export interface GeneratedToolVisualCongruence {
 	analyzedAt: string | null;
 }
 
+export interface GeneratedToolLogicRecord {
+	invokePath: string;
+	toolTag: string;
+	snapshotId: string;
+	warmSandboxName: string | null;
+	handlerModulePath: string;
+	contract: ToolLogicContract;
+	handlerSource: string;
+	generatedAt: string;
+	generationModel: string;
+	classificationReason: string;
+	validation: {
+		staticAnalysisPassedAt: string;
+		smokeTestPassedAt: string;
+		smokeTestInputCount: number;
+		rulesVersion: string;
+	};
+}
+
 /** The generated artifact + everything Claude was told to produce it — shared between the live record and each stored history snapshot. */
 export type GeneratedToolContent = {
 	projectName: string;
@@ -69,6 +89,8 @@ export type GeneratedToolContent = {
 	brandFidelity: GeneratedToolBrandFidelity | null;
 	/** Visual screenshot-vs-screenshot style congruence check against the live brand site. */
 	visualCongruence: GeneratedToolVisualCongruence | null;
+	/** Optional generated server-side logic runtime metadata for tools that need sandboxed execution. */
+	logic?: GeneratedToolLogicRecord | null;
 	model: string;
 	warnings: string[];
 };
@@ -94,9 +116,13 @@ export interface GeneratedToolRecord extends GeneratedToolContent {
 // cap it to a handful of recent versions, enough for a practical "undo".
 export const MAX_HISTORY_ENTRIES = 5;
 
-/** Storage backend contract — implemented by both store.file.ts (dev fallback) and store.supabase.ts (durable/multi-instance). */
+export interface SaveGeneratedToolOptions {
+	id?: string;
+}
+
+/** Storage backend contract — implemented by both store.file.ts (dev fallback) and store.supabase.ts (durable/multi-instance-safe). */
 export interface ToolStoreBackend {
-	saveGeneratedTool(input: GeneratedToolContent): Promise<GeneratedToolRecord>;
+	saveGeneratedTool(input: GeneratedToolContent, options?: SaveGeneratedToolOptions): Promise<GeneratedToolRecord>;
 	getGeneratedTool(id: string): Promise<GeneratedToolRecord | null>;
 	updateGeneratedTool(id: string, updates: GeneratedToolContent): Promise<GeneratedToolRecord | null>;
 	updateGeneratedToolCompetitorContext(
@@ -125,6 +151,7 @@ export function buildHistoryEntry(existing: GeneratedToolRecord): GeneratedToolH
 		copy: existing.copy,
 		brandFidelity: existing.brandFidelity,
 		visualCongruence: existing.visualCongruence,
+		logic: existing.logic,
 		model: existing.model,
 		warnings: existing.warnings,
 		version: existing.version,
@@ -143,6 +170,7 @@ export function contentFromHistoryEntry(entry: GeneratedToolHistoryEntry): Gener
 		copy: entry.copy,
 		brandFidelity: entry.brandFidelity,
 		visualCongruence: entry.visualCongruence,
+		logic: entry.logic,
 		model: entry.model,
 		warnings: entry.warnings,
 	};

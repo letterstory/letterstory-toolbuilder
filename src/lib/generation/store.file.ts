@@ -94,6 +94,7 @@ function normalizeRecord(record: GeneratedToolRecord): GeneratedToolRecord {
 		...record,
 		brandSnapshot: normalizeBrandSnapshot(record.brandSnapshot),
 		visualCongruence: record.visualCongruence ?? null,
+		logic: record.logic ?? null,
 		updatedAt: record.updatedAt ?? record.createdAt,
 		version: record.version ?? 1,
 		history:
@@ -101,15 +102,19 @@ function normalizeRecord(record: GeneratedToolRecord): GeneratedToolRecord {
 				...entry,
 				brandSnapshot: normalizeBrandSnapshot(entry.brandSnapshot),
 				visualCongruence: entry.visualCongruence ?? null,
+				logic: entry.logic ?? null,
 			})) ?? [],
 	};
 }
 
-async function saveGeneratedTool(input: GeneratedToolContent): Promise<GeneratedToolRecord> {
+async function saveGeneratedTool(
+	input: GeneratedToolContent,
+	options?: { id?: string }
+): Promise<GeneratedToolRecord> {
 	const now = new Date().toISOString();
 	const record: GeneratedToolRecord = {
 		...input,
-		id: randomUUID(),
+		id: options?.id ?? randomUUID(),
 		createdAt: now,
 		updatedAt: now,
 		version: 1,
