@@ -1,0 +1,4 @@
+### 2026-09-06: Verified main commit 604c953 reached Porter staging via auto-triggered GitHub Actions deploy
+**By:** Infra
+**What:** Confirmed the `Deploy to letterstory-toolbuilder` GitHub Actions workflow (`porter-app-6018-letterstory-toolbuilder.yml`) auto-triggered on the `main` push for commit `604c953cc7e0903a5762d63a73d475f1471fbc42` (run `34066788085`), then completed successfully after the `Build and push desired image` and `Roll out without surge` steps both passed. Post-deploy verification against `https://web-22301-57c6c7ab-4p0z458q.onporter.run/api/health` returned `200 OK`.
+**Why:** This repository’s staging deploy path is the push-to-`main` GitHub Actions workflow, and the successful run bound to the exact requested commit plus a live `200` health response is the authoritative proof that Porter staging is serving the redeployed build.

@@ -450,6 +450,19 @@ export function ToolBuilderWorkspace() {
 		setRecentOpen(false);
 	}
 
+	function handleDuplicateRecent(item: ToolSummary) {
+		resetWorkspaceState();
+		setSiteUrl(item.siteUrl ?? "");
+		setPrompt(item.prompt ?? "");
+		setStatusMessage({
+			title: "Ready to duplicate",
+			description: "Copied the brand site and prompt into a new tool draft. Review and generate when ready.",
+			tone: "info",
+		});
+		setRecentOpen(false);
+		window.requestAnimationFrame(() => composerRef.current?.focus());
+	}
+
 	async function handleRequestSuggestions() {
 		const normalizedSiteUrl = normalizeSiteUrl(siteUrl);
 		if (!normalizedSiteUrl.trim()) {
@@ -637,6 +650,7 @@ export function ToolBuilderWorkspace() {
 					onFocusComposer={() => composerRef.current?.focus()}
 					onRefreshRecent={() => void loadRecentTools()}
 					onReopenRecent={handleReopenRecent}
+					onDuplicateRecent={handleDuplicateRecent}
 					onDeleteRecent={handleDeleteRecent}
 					onOpenEmbed={handleOpenEmbed}
 					onRollback={handleRollback}

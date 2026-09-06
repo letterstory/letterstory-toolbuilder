@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
-import { ChevronDown, History, Palette, Pencil, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, CopyPlus, History, Palette, Pencil, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type {
@@ -26,6 +26,7 @@ interface BuilderTopbarProps {
 	onFocusComposer: () => void;
 	onRefreshRecent: () => void;
 	onReopenRecent: (tool: ToolSummary) => void;
+	onDuplicateRecent: (tool: ToolSummary) => void;
 	onDeleteRecent: (tool: ToolSummary) => Promise<void>;
 	onOpenEmbed: () => void;
 	onRollback: (version: number) => Promise<boolean>;
@@ -47,6 +48,7 @@ export function BuilderTopbar({
 	onFocusComposer,
 	onRefreshRecent,
 	onReopenRecent,
+	onDuplicateRecent,
 	onDeleteRecent,
 	onOpenEmbed,
 	onRollback,
@@ -136,6 +138,11 @@ export function BuilderTopbar({
 		setConfirmDeleteId((current) => (current === tool.id ? null : current));
 	}
 
+	function handleDuplicateClick(event: ReactMouseEvent<HTMLButtonElement>, tool: ToolSummary) {
+		event.stopPropagation();
+		onDuplicateRecent(tool);
+	}
+
 	return (
 		<div className="border-b border-brand/10 bg-[#f8f6f4] px-4 py-2.5 backdrop-blur sm:px-5">
 			<div className="flex min-h-[52px] flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
@@ -210,6 +217,18 @@ export function BuilderTopbar({
 														{formatTimestamp(tool.updatedAt)}
 													</span>
 												</button>
+												<Button
+													type="button"
+													variant="ghost"
+													size="sm"
+													onClick={(event) => handleDuplicateClick(event, tool)}
+													disabled={requestState !== "idle"}
+													aria-label={`Duplicate ${tool.projectName}`}
+													className="mt-1 h-8 shrink-0 rounded-full px-2 text-muted-foreground"
+												>
+													<CopyPlus className="size-4" />
+													<span className="text-xs">Duplicate</span>
+												</Button>
 												<Button
 													type="button"
 													variant={confirmDeleteId === tool.id ? "destructive" : "ghost"}
