@@ -53,6 +53,15 @@ export async function updateGeneratedTool(
 	return backend().updateGeneratedTool(id, updates);
 }
 
+export async function updateGeneratedToolCompetitorContext(
+	id: string,
+	expectedVersion: number,
+	competitorContext: NonNullable<GeneratedToolRecord["brandSnapshot"]>["competitorContext"]
+): Promise<GeneratedToolRecord | null> {
+	if (!competitorContext) return null;
+	return backend().updateGeneratedToolCompetitorContext(id, expectedVersion, competitorContext);
+}
+
 export async function updateGeneratedToolVisualCongruence(
 	id: string,
 	expectedVersion: number,

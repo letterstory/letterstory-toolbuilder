@@ -40,13 +40,38 @@ interface ToolRow {
 	history: GeneratedToolRecord["history"];
 }
 
+function normalizeBrandSnapshot(
+	brandSnapshot: GeneratedToolRecord["brandSnapshot"]
+): GeneratedToolRecord["brandSnapshot"] {
+	if (!brandSnapshot?.competitorContext) return brandSnapshot ?? null;
+	const competitorContext = brandSnapshot.competitorContext as NonNullable<
+		NonNullable<GeneratedToolRecord["brandSnapshot"]>["competitorContext"]
+	> & { status?: string; analyzedAt?: string | null };
+	return {
+		...brandSnapshot,
+		competitorContext: {
+			status: competitorContext.status === "pending" || competitorContext.status === "failed"
+				? competitorContext.status
+				: "completed",
+			industry: competitorContext.industry ?? null,
+			signal: competitorContext.signal ?? null,
+			summary: competitorContext.summary ?? "",
+			target: competitorContext.target ?? null,
+			industryNorms: competitorContext.industryNorms ?? null,
+			competitors: competitorContext.competitors ?? [],
+			notes: competitorContext.notes ?? [],
+			analyzedAt: competitorContext.analyzedAt ?? null,
+		},
+	};
+}
+
 function rowToRecord(row: ToolRow): GeneratedToolRecord {
 	return {
 		id: row.id,
 		projectName: row.project_name,
 		prompt: row.prompt,
 		siteUrl: row.site_url,
-		brandSnapshot: row.brand_snapshot,
+		brandSnapshot: normalizeBrandSnapshot(row.brand_snapshot),
 		html: row.html,
 		copy: row.copy,
 		brandFidelity: row.brand_fidelity,
@@ -56,7 +81,12 @@ function rowToRecord(row: ToolRow): GeneratedToolRecord {
 		createdAt: row.created_at,
 		updatedAt: row.updated_at,
 		version: row.version,
-		history: row.history ?? [],
+		history:
+			row.history?.map((entry) => ({
+				...entry,
+				brandSnapshot: normalizeBrandSnapshot(entry.brandSnapshot),
+				visualCongruence: entry.visualCongruence ?? null,
+			})) ?? [],
 	};
 }
 
@@ -149,6 +179,33 @@ async function updateGeneratedToolVisualCongruence(
 	return rowToRecord(data as ToolRow);
 }
 
+async function updateGeneratedToolCompetitorContext(
+	id: string,
+	expectedVersion: number,
+	competitorContext: NonNullable<GeneratedToolRecord["brandSnapshot"]>["competitorContext"]
+): Promise<GeneratedToolRecord | null> {
+	const existing = await getGeneratedTool(id);
+	if (!existing || existing.version !== expectedVersion || !existing.brandSnapshot || !competitorContext) {
+		return null;
+	}
+
+	const { data, error } = await getSupabaseClient()
+		.from(TABLE)
+		.update({
+			brand_snapshot: {
+				...existing.brandSnapshot,
+				competitorContext,
+			},
+			updated_at: new Date().toISOString(),
+		})
+		.eq("id", id)
+		.eq("version", expectedVersion)
+		.select()
+		.maybeSingle();
+	if (error || !data) return null;
+	return rowToRecord(data as ToolRow);
+}
+
 async function listGeneratedTools(): Promise<GeneratedToolRecord[]> {
 	const { data, error } = await getSupabaseClient()
 		.from(TABLE)
@@ -162,6 +219,7 @@ export const supabaseToolStore: ToolStoreBackend = {
 	saveGeneratedTool,
 	getGeneratedTool,
 	updateGeneratedTool,
+	updateGeneratedToolCompetitorContext,
 	updateGeneratedToolVisualCongruence,
 	rollbackGeneratedTool,
 	listGeneratedTools,

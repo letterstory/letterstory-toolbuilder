@@ -12,9 +12,13 @@ vi.mock("@/lib/brand", () => ({
 	isBrandIngestionConfigured: isBrandIngestionConfiguredMock,
 }));
 
-vi.mock("@/lib/brand/competitor-context", () => ({
-	buildCompetitorContextForBrand: buildCompetitorContextForBrandMock,
-}));
+vi.mock("@/lib/brand/competitor-context", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("@/lib/brand/competitor-context")>();
+	return {
+		...actual,
+		buildCompetitorContextForBrand: buildCompetitorContextForBrandMock,
+	};
+});
 
 vi.mock("@/lib/generation/store", () => ({
 	saveGeneratedTool: saveGeneratedToolMock,
@@ -169,7 +173,7 @@ describe("generateTool", () => {
 		}
 	});
 
-	it("pulls brand context without blocking generation on competitor analysis", async () => {
+	it("returns a pending competitor context without blocking generation on competitor analysis", async () => {
 		isBrandIngestionConfiguredMock.mockReturnValue(true);
 		pullBrandProfileMock.mockResolvedValue({
 			brandName: "Stripe",
@@ -198,8 +202,17 @@ describe("generateTool", () => {
 				bodyFont: "Inter",
 				logoPolicy: "exact_asset",
 				logoDataUri: "data:image/png;base64,abc",
+				competitorContext: {
+					status: "pending",
+					signal: null,
+					summary: "Analyzing competitor norms for this brand…",
+					target: null,
+					industryNorms: null,
+					competitors: [],
+					notes: [],
+					analyzedAt: null,
+				},
 			});
-			expect(result.tool.brandSnapshot?.competitorContext ?? null).toBeNull();
 			expect(result.tool.brandFidelity).toEqual({ verdict: "pass", notes: "" });
 		}
 	});

@@ -1,11 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+	buildPendingCompetitorContext,
 	buildCompetitorContextForBrand,
 	extractCompetitorSignalFromBrandProfile,
+	finalizeCompetitorContextForTool,
 	parseCompetitorResponse,
 	type CompetitorCandidate,
 } from "../../src/lib/brand/competitor-context";
 import type { BrandProfile } from "../../src/lib/brand";
+import type { GeneratedToolRecord } from "../../src/lib/generation/store";
 
 function makeProfile(overrides: Partial<BrandProfile> = {}): BrandProfile {
 	return {
@@ -262,5 +265,96 @@ describe("competitor context", () => {
 			industry: "food delivery",
 			competitors: [{ companyName: "Uber Eats", domain: "ubereats.com" }],
 		});
+	});
+
+	it("resolves pending competitor context asynchronously and persists the completed analysis", async () => {
+		const tool: GeneratedToolRecord = {
+			id: "tool-123",
+			projectName: "Calc",
+			prompt: "a calculator",
+			siteUrl: "https://example.com",
+			brandSnapshot: {
+				brandName: "Example",
+				colors: { primary: "#6B46FF" },
+				fonts: ["Inter"],
+				logoDataUri: null,
+				competitorContext: buildPendingCompetitorContext("https://example.com"),
+			},
+			html: "<!doctype html><html><body>tool</body></html>",
+			copy: null,
+			brandFidelity: null,
+			visualCongruence: null,
+			model: "claude-sonnet-4-6",
+			warnings: [],
+			createdAt: "2024-01-01T00:00:00.000Z",
+			updatedAt: "2024-01-01T00:00:00.000Z",
+			version: 1,
+			history: [],
+		};
+		const getTool = vi.fn().mockResolvedValue(tool);
+		const loadBrandProfile = vi.fn().mockResolvedValue(makeProfile());
+		const completedContext = {
+			status: "completed",
+			industry: "food delivery",
+			signal: "matches",
+			summary: "Competitor read for food delivery: warm palette. Extracted target broadly matches that pattern.",
+			target: {
+				primaryColor: "#6B46FF",
+				primaryColorFamily: "cool",
+				fontFamily: "Merriweather",
+				fontCategory: "serif",
+				logoStyle: "wordmark",
+			},
+			industryNorms: {
+				sampleSize: 2,
+				primaryColorFamily: "warm",
+				fontCategory: "sans-serif",
+				logoStyle: "wordmark",
+			},
+			competitors: [
+				{
+					companyName: "Uber Eats",
+					domain: "ubereats.com",
+					status: "analyzed",
+					brandName: "Uber Eats",
+					primaryColor: "#06C167",
+					primaryColorFamily: "cool",
+					fontFamily: "Uber Move",
+					fontCategory: "sans-serif",
+					logoStyle: "wordmark",
+					notes: [],
+				},
+			],
+			notes: [],
+			analyzedAt: "2024-01-01T00:00:01.000Z",
+		} as const;
+		const buildContext = vi.fn().mockResolvedValue(completedContext);
+		const saveContext = vi.fn().mockResolvedValue({
+			...tool,
+			brandSnapshot: {
+				...tool.brandSnapshot!,
+				competitorContext: completedContext,
+			},
+		});
+
+		expect(tool.brandSnapshot?.competitorContext?.status).toBe("pending");
+
+		await finalizeCompetitorContextForTool(
+			{ toolId: "tool-123", expectedVersion: 1 },
+			{ getTool, loadBrandProfile, buildContext, saveContext }
+		);
+
+		expect(loadBrandProfile).toHaveBeenCalledWith("https://example.com");
+		expect(buildContext).toHaveBeenCalledTimes(1);
+		expect(saveContext).toHaveBeenCalledWith(
+			"tool-123",
+			1,
+			expect.objectContaining({
+				status: "completed",
+				signal: "matches",
+				industry: "food delivery",
+				competitors: [expect.objectContaining({ domain: "ubereats.com" })],
+			})
+		);
 	});
 });

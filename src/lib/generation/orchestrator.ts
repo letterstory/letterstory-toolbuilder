@@ -17,6 +17,7 @@
 
 import { envServer } from "@/lib/config/env.server";
 import { requestAnthropicText } from "@/lib/anthropic/messages";
+import { buildPendingCompetitorContext } from "@/lib/brand/competitor-context";
 import { isBrandIngestionConfigured, pullBrandProfile, type BrandProfile } from "@/lib/brand";
 import { enforceBrandPresentation } from "@/lib/generation/brand-enforcement";
 import { buildPendingVisualCongruence } from "@/lib/generation/visual-congruence";
@@ -169,7 +170,10 @@ export async function generateTool(request: ToolGenerationRequest): Promise<Tool
 	const brandStartedAt = Date.now();
 	const { brandProfile, brandWarning } = await resolveBrandContext(normalizedSiteUrl);
 	const brandContextMs = Date.now() - brandStartedAt;
-	const brandSnapshot = toBrandSnapshot(brandProfile);
+	const brandSnapshot = toBrandSnapshot(
+		brandProfile,
+		buildPendingCompetitorContext(normalizedSiteUrl || null)
+	);
 
 	const built = await buildToolContent({
 		projectName: request.projectName,
@@ -239,7 +243,10 @@ async function reviseTool(
 		const brandStartedAt = Date.now();
 		const resolved = await resolveBrandContext(normalizedSiteUrl);
 		brandContextMs = Date.now() - brandStartedAt;
-		brandSnapshot = toBrandSnapshot(resolved.brandProfile);
+		brandSnapshot = toBrandSnapshot(
+			resolved.brandProfile,
+			buildPendingCompetitorContext(normalizedSiteUrl)
+		);
 		brandWarning = resolved.brandWarning;
 	}
 

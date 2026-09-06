@@ -9,22 +9,29 @@ export const generatedToolBrandSnapshotSchema = z.object({
 	logoDataUri: z.string().nullable(),
 	competitorContext: z
 		.object({
+			status: z.enum(["pending", "completed", "failed"]),
 			industry: z.string().nullable(),
-			signal: z.enum(["matches", "mixed", "diverges", "suspicious_match", "limited"]),
+			signal: z
+				.enum(["matches", "mixed", "diverges", "suspicious_match", "limited"])
+				.nullable(),
 			summary: z.string(),
-			target: z.object({
-				primaryColor: z.string().nullable(),
-				primaryColorFamily: z.enum(["cool", "warm", "neutral", "unknown"]),
-				fontFamily: z.string().nullable(),
-				fontCategory: z.enum(["sans-serif", "serif", "monospace", "display", "unknown"]),
-				logoStyle: z.enum(["wordmark", "logo-mark", "combination", "unknown"]),
-			}),
-			industryNorms: z.object({
-				sampleSize: z.number().int().nonnegative(),
-				primaryColorFamily: z.enum(["cool", "warm", "neutral", "unknown"]),
-				fontCategory: z.enum(["sans-serif", "serif", "monospace", "display", "unknown"]),
-				logoStyle: z.enum(["wordmark", "logo-mark", "combination", "unknown"]),
-			}),
+			target: z
+				.object({
+					primaryColor: z.string().nullable(),
+					primaryColorFamily: z.enum(["cool", "warm", "neutral", "unknown"]),
+					fontFamily: z.string().nullable(),
+					fontCategory: z.enum(["sans-serif", "serif", "monospace", "display", "unknown"]),
+					logoStyle: z.enum(["wordmark", "logo-mark", "combination", "unknown"]),
+				})
+				.nullable(),
+			industryNorms: z
+				.object({
+					sampleSize: z.number().int().nonnegative(),
+					primaryColorFamily: z.enum(["cool", "warm", "neutral", "unknown"]),
+					fontCategory: z.enum(["sans-serif", "serif", "monospace", "display", "unknown"]),
+					logoStyle: z.enum(["wordmark", "logo-mark", "combination", "unknown"]),
+				})
+				.nullable(),
 			competitors: z.array(
 				z.object({
 					companyName: z.string(),
@@ -40,6 +47,7 @@ export const generatedToolBrandSnapshotSchema = z.object({
 				})
 			),
 			notes: z.array(z.string()),
+			analyzedAt: z.string().nullable(),
 		})
 		.nullable()
 		.optional(),

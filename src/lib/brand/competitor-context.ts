@@ -1,6 +1,11 @@
 import { requestAnthropicText } from "@/lib/anthropic/messages";
 import { envServer } from "@/lib/config/env.server";
 import {
+	getGeneratedTool,
+	updateGeneratedToolCompetitorContext,
+	type GeneratedToolRecord,
+} from "@/lib/generation/store";
+import {
 	normalizeBrandSiteUrl,
 	pullBrandProfile,
 	type BrandProfile,
@@ -12,6 +17,8 @@ const MAX_COMPETITORS = 3;
 type FontCategory = "sans-serif" | "serif" | "monospace" | "display" | "unknown";
 type ColorFamily = "cool" | "warm" | "neutral" | "unknown";
 type LogoStyle = "wordmark" | "logo-mark" | "combination" | "unknown";
+type BrandCompetitorSignal = "matches" | "mixed" | "diverges" | "suspicious_match" | "limited";
+export type BrandCompetitorContextStatus = "pending" | "completed" | "failed";
 
 export interface BrandCompetitorEntry {
 	companyName: string;
@@ -42,13 +49,15 @@ export interface BrandCompetitorIndustryNorms {
 }
 
 export interface BrandCompetitorContext {
+	status: BrandCompetitorContextStatus;
 	industry: string | null;
-	signal: "matches" | "mixed" | "diverges" | "suspicious_match" | "limited";
+	signal: BrandCompetitorSignal | null;
 	summary: string;
-	target: BrandCompetitorTargetSignal;
-	industryNorms: BrandCompetitorIndustryNorms;
+	target: BrandCompetitorTargetSignal | null;
+	industryNorms: BrandCompetitorIndustryNorms | null;
 	competitors: BrandCompetitorEntry[];
 	notes: string[];
+	analyzedAt: string | null;
 }
 
 export interface CompetitorCandidate {
@@ -62,6 +71,13 @@ export interface CompetitorContextDeps {
 		competitors: CompetitorCandidate[];
 	}>;
 	fetchCompetitorSignal: (candidate: CompetitorCandidate) => Promise<BrandCompetitorEntry>;
+}
+
+interface FinalizeCompetitorContextDeps {
+	getTool: typeof getGeneratedTool;
+	loadBrandProfile: typeof pullBrandProfile;
+	buildContext: typeof buildCompetitorContextForBrand;
+	saveContext: typeof updateGeneratedToolCompetitorContext;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -362,6 +378,7 @@ function summarizeNorms(
 						: "Extracted target only partially matches that pattern.";
 
 	return {
+		status: "completed",
 		industry,
 		signal,
 		summary: `Competitor read${industry ? ` for ${industry}` : ""}: ${
@@ -371,6 +388,36 @@ function summarizeNorms(
 		industryNorms: norms,
 		competitors,
 		notes,
+		analyzedAt: new Date().toISOString(),
+	};
+}
+
+export function buildPendingCompetitorContext(siteUrl: string | null): BrandCompetitorContext | null {
+	if (!siteUrl) return null;
+	return {
+		status: "pending",
+		industry: null,
+		signal: null,
+		summary: "Analyzing competitor norms for this brand…",
+		target: null,
+		industryNorms: null,
+		competitors: [],
+		notes: [],
+		analyzedAt: null,
+	};
+}
+
+function buildFailedCompetitorContext(message: string): BrandCompetitorContext {
+	return {
+		status: "failed",
+		industry: null,
+		signal: null,
+		summary: "Competitor analysis unavailable.",
+		target: null,
+		industryNorms: null,
+		competitors: [],
+		notes: [message],
+		analyzedAt: new Date().toISOString(),
 	};
 }
 
@@ -526,4 +573,55 @@ export async function buildCompetitorContextForBrand(
 	if (!analyzedCount) return null;
 
 	return summarizeNorms(identified.industry ?? inferIndustry(profile), buildTargetCompetitorSignal(profile), competitors);
+}
+
+function shouldAnalyzeTool(tool: GeneratedToolRecord, expectedVersion: number): boolean {
+	return (
+		tool.version === expectedVersion &&
+		Boolean(tool.siteUrl) &&
+		Boolean(tool.brandSnapshot) &&
+		tool.brandSnapshot?.competitorContext?.status === "pending"
+	);
+}
+
+function logCompetitorContextStep(event: string, details: Record<string, unknown>): void {
+	console.info("[tool-generation]", JSON.stringify({ event, ...details }));
+}
+
+export async function finalizeCompetitorContextForTool(
+	opts: { toolId: string; expectedVersion: number },
+	deps: Partial<FinalizeCompetitorContextDeps> = {}
+): Promise<void> {
+	const getTool = deps.getTool ?? getGeneratedTool;
+	const loadBrandProfile = deps.loadBrandProfile ?? pullBrandProfile;
+	const buildContext = deps.buildContext ?? buildCompetitorContextForBrand;
+	const saveContext = deps.saveContext ?? updateGeneratedToolCompetitorContext;
+	const tool = await getTool(opts.toolId);
+	if (!tool || !shouldAnalyzeTool(tool, opts.expectedVersion) || !tool.siteUrl) return;
+
+	const startedAt = Date.now();
+	let competitorContext: BrandCompetitorContext;
+	try {
+		const profile = await loadBrandProfile(tool.siteUrl);
+		competitorContext =
+			(await buildContext(profile)) ??
+			buildFailedCompetitorContext("Competitor analysis returned no usable signal.");
+		logCompetitorContextStep("competitor_context_completed", {
+			toolId: opts.toolId,
+			durationMs: Date.now() - startedAt,
+			status: competitorContext.status,
+			competitorCount: competitorContext.competitors.length,
+		});
+	} catch (error) {
+		competitorContext = buildFailedCompetitorContext(
+			error instanceof Error ? error.message : String(error)
+		);
+		logCompetitorContextStep("competitor_context_failed", {
+			toolId: opts.toolId,
+			durationMs: Date.now() - startedAt,
+			error: competitorContext.notes[0] ?? "unknown error",
+		});
+	}
+
+	await saveContext(opts.toolId, opts.expectedVersion, competitorContext);
 }

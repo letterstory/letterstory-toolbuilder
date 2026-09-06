@@ -98,6 +98,11 @@ export interface ToolStoreBackend {
 	saveGeneratedTool(input: GeneratedToolContent): Promise<GeneratedToolRecord>;
 	getGeneratedTool(id: string): Promise<GeneratedToolRecord | null>;
 	updateGeneratedTool(id: string, updates: GeneratedToolContent): Promise<GeneratedToolRecord | null>;
+	updateGeneratedToolCompetitorContext(
+		id: string,
+		expectedVersion: number,
+		competitorContext: NonNullable<GeneratedToolBrandSnapshot["competitorContext"]>
+	): Promise<GeneratedToolRecord | null>;
 	updateGeneratedToolVisualCongruence(
 		id: string,
 		expectedVersion: number,

@@ -23,6 +23,31 @@ const STORE_DIR = path.join(process.cwd(), ".data", "tools");
 const memoryRecords = new Map<string, GeneratedToolRecord>();
 let storageMode: "file" | "memory" = "file";
 
+function normalizeBrandSnapshot(
+	brandSnapshot: GeneratedToolRecord["brandSnapshot"]
+): GeneratedToolRecord["brandSnapshot"] {
+	if (!brandSnapshot?.competitorContext) return brandSnapshot ?? null;
+	const competitorContext = brandSnapshot.competitorContext as NonNullable<
+		NonNullable<GeneratedToolRecord["brandSnapshot"]>["competitorContext"]
+	> & { status?: string; analyzedAt?: string | null };
+	return {
+		...brandSnapshot,
+		competitorContext: {
+			status: competitorContext.status === "pending" || competitorContext.status === "failed"
+				? competitorContext.status
+				: "completed",
+			industry: competitorContext.industry ?? null,
+			signal: competitorContext.signal ?? null,
+			summary: competitorContext.summary ?? "",
+			target: competitorContext.target ?? null,
+			industryNorms: competitorContext.industryNorms ?? null,
+			competitors: competitorContext.competitors ?? [],
+			notes: competitorContext.notes ?? [],
+			analyzedAt: competitorContext.analyzedAt ?? null,
+		},
+	};
+}
+
 function shouldFallbackToMemory(error: unknown): boolean {
 	return (
 		error instanceof Error &&
@@ -67,10 +92,16 @@ function recordPath(id: string): string {
 function normalizeRecord(record: GeneratedToolRecord): GeneratedToolRecord {
 	return {
 		...record,
+		brandSnapshot: normalizeBrandSnapshot(record.brandSnapshot),
 		visualCongruence: record.visualCongruence ?? null,
 		updatedAt: record.updatedAt ?? record.createdAt,
 		version: record.version ?? 1,
-		history: record.history ?? [],
+		history:
+			record.history?.map((entry) => ({
+				...entry,
+				brandSnapshot: normalizeBrandSnapshot(entry.brandSnapshot),
+				visualCongruence: entry.visualCongruence ?? null,
+			})) ?? [],
 	};
 }
 
@@ -172,6 +203,38 @@ async function updateGeneratedToolVisualCongruence(
 	return record;
 }
 
+async function updateGeneratedToolCompetitorContext(
+	id: string,
+	expectedVersion: number,
+	competitorContext: NonNullable<GeneratedToolRecord["brandSnapshot"]>["competitorContext"]
+): Promise<GeneratedToolRecord | null> {
+	const existing = await getGeneratedTool(id);
+	if (!existing || existing.version !== expectedVersion || !existing.brandSnapshot || !competitorContext) {
+		return null;
+	}
+
+	const record: GeneratedToolRecord = {
+		...existing,
+		brandSnapshot: {
+			...existing.brandSnapshot,
+			competitorContext,
+		},
+		updatedAt: new Date().toISOString(),
+	};
+	if (storageMode === "memory") {
+		memoryRecords.set(id, record);
+		return record;
+	}
+	try {
+		await writeFile(recordPath(id), JSON.stringify(record, null, 2), "utf8");
+	} catch (error) {
+		if (!shouldFallbackToMemory(error)) throw error;
+		activateMemoryFallback(error);
+		memoryRecords.set(id, record);
+	}
+	return record;
+}
+
 async function rollbackGeneratedTool(id: string, toVersion: number): Promise<GeneratedToolRecord | null> {
 	const existing = await getGeneratedTool(id);
 	if (!existing) return null;
@@ -219,6 +282,7 @@ export const fileToolStore: ToolStoreBackend = {
 	saveGeneratedTool,
 	getGeneratedTool,
 	updateGeneratedTool,
+	updateGeneratedToolCompetitorContext,
 	updateGeneratedToolVisualCongruence,
 	rollbackGeneratedTool,
 	listGeneratedTools,

@@ -127,6 +127,15 @@ export function BuilderDashboardPanel({
 									{visualCongruenceBadgeLabel(activeTool.visualCongruence)}
 								</Badge>
 							) : null}
+							{activeTool.brandSnapshot?.competitorContext ? (
+								<Badge
+									variant={competitorContextBadgeVariant(
+										activeTool.brandSnapshot.competitorContext.status
+									)}
+								>
+									{competitorContextBadgeLabel(activeTool.brandSnapshot.competitorContext)}
+								</Badge>
+							) : null}
 						</div>
 						{activeTool.copy ? (
 							<div className="mt-4 rounded-3xl bg-brand-light/12 p-4">
@@ -224,9 +233,18 @@ export function BuilderDashboardPanel({
 												variant="outline"
 												className="border-brand/10 bg-white/70 text-brand-text"
 											>
-												Signal:{" "}
-												{activeTool.brandSnapshot.competitorContext.signal.replace(/_/g, " ")}
+												Status:{" "}
+												{activeTool.brandSnapshot.competitorContext.status.replace(/_/g, " ")}
 											</Badge>
+											{activeTool.brandSnapshot.competitorContext.signal ? (
+												<Badge
+													variant="outline"
+													className="border-brand/10 bg-white/70 text-brand-text"
+												>
+													Signal:{" "}
+													{activeTool.brandSnapshot.competitorContext.signal.replace(/_/g, " ")}
+												</Badge>
+											) : null}
 											{activeTool.brandSnapshot.competitorContext.industry ? (
 												<Badge
 													variant="outline"
@@ -236,43 +254,50 @@ export function BuilderDashboardPanel({
 												</Badge>
 											) : null}
 										</div>
-										<div className="mt-3 space-y-2">
-											{activeTool.brandSnapshot.competitorContext.competitors.map((competitor) => (
-												<div
-													key={competitor.domain}
-													className="rounded-2xl border border-brand/10 bg-white/70 px-3 py-3 text-xs text-brand-text"
-												>
-													<div className="flex flex-wrap items-center gap-2">
-														<span className="font-medium text-foreground">
-															{competitor.companyName}
-														</span>
-														<span className="text-muted-foreground">{competitor.domain}</span>
-														<Badge variant="secondary">{competitor.status}</Badge>
-													</div>
-													{competitor.status === "analyzed" ? (
-														<p className="mt-2 text-muted-foreground">
-															{[
-																competitor.primaryColor
-																	? `${competitor.primaryColor} ${competitor.primaryColorFamily}`
-																	: null,
-																competitor.fontFamily
-																	? `${competitor.fontFamily} (${competitor.fontCategory})`
-																	: competitor.fontCategory !== "unknown"
-																		? competitor.fontCategory
+										{activeTool.brandSnapshot.competitorContext.status === "pending" ? (
+											<p className="mt-3 text-xs text-muted-foreground">
+												Analyzing competitors… this panel will fill in automatically.
+											</p>
+										) : null}
+										{activeTool.brandSnapshot.competitorContext.competitors.length ? (
+											<div className="mt-3 space-y-2">
+												{activeTool.brandSnapshot.competitorContext.competitors.map((competitor) => (
+													<div
+														key={competitor.domain}
+														className="rounded-2xl border border-brand/10 bg-white/70 px-3 py-3 text-xs text-brand-text"
+													>
+														<div className="flex flex-wrap items-center gap-2">
+															<span className="font-medium text-foreground">
+																{competitor.companyName}
+															</span>
+															<span className="text-muted-foreground">{competitor.domain}</span>
+															<Badge variant="secondary">{competitor.status}</Badge>
+														</div>
+														{competitor.status === "analyzed" ? (
+															<p className="mt-2 text-muted-foreground">
+																{[
+																	competitor.primaryColor
+																		? `${competitor.primaryColor} ${competitor.primaryColorFamily}`
 																		: null,
-																competitor.logoStyle !== "unknown"
-																	? competitor.logoStyle
-																	: null,
-															]
-																.filter(Boolean)
-																.join(" · ") || "Limited extracted brand signal."}
-														</p>
-													) : competitor.notes.length ? (
-														<p className="mt-2 text-muted-foreground">{competitor.notes[0]}</p>
-													) : null}
-												</div>
-											))}
-										</div>
+																	competitor.fontFamily
+																		? `${competitor.fontFamily} (${competitor.fontCategory})`
+																		: competitor.fontCategory !== "unknown"
+																			? competitor.fontCategory
+																			: null,
+																	competitor.logoStyle !== "unknown"
+																		? competitor.logoStyle
+																		: null,
+																]
+																	.filter(Boolean)
+																	.join(" · ") || "Limited extracted brand signal."}
+															</p>
+														) : competitor.notes.length ? (
+															<p className="mt-2 text-muted-foreground">{competitor.notes[0]}</p>
+														) : null}
+													</div>
+												))}
+											</div>
+										) : null}
 										{activeTool.brandSnapshot.competitorContext.notes.length ? (
 											<ul className="mt-3 list-disc space-y-1 pl-5 text-xs text-muted-foreground">
 												{activeTool.brandSnapshot.competitorContext.notes.map((note) => (
@@ -369,4 +394,22 @@ function visualCongruenceBadgeLabel(tool: NonNullable<BuilderDashboardPanelProps
 	if (tool.status === "failed") return "Visual match: unavailable";
 	const score = tool.congruenceScore ? ` (${tool.congruenceScore}/5)` : "";
 	return `Visual match: ${tool.verdict ?? "review"}${score}`;
+}
+
+function competitorContextBadgeVariant(
+	status: "pending" | "completed" | "failed"
+): "secondary" | "outline" | "destructive" {
+	if (status === "pending") return "secondary";
+	if (status === "failed") return "outline";
+	return "secondary";
+}
+
+function competitorContextBadgeLabel(
+	context: NonNullable<NonNullable<BuilderDashboardPanelProps["activeTool"]>["brandSnapshot"]>["competitorContext"]
+) {
+	if (!context) return "Competitor check";
+	if (context.status === "pending") return "Competitors: analyzing…";
+	if (context.status === "failed") return "Competitors: unavailable";
+	const count = context.competitors.length ? ` (${context.competitors.length})` : "";
+	return `Competitors: ${context.signal?.replace(/_/g, " ") ?? "review"}${count}`;
 }

@@ -140,7 +140,15 @@ export function ToolBuilderWorkspace() {
 	}, [activeRun, requestState]);
 
 	useEffect(() => {
-		if (!activeTool || activeTool.visualCongruence?.status !== "pending") return;
+		if (
+			!activeTool ||
+			(
+				activeTool.visualCongruence?.status !== "pending" &&
+				activeTool.brandSnapshot?.competitorContext?.status !== "pending"
+			)
+		) {
+			return;
+		}
 		const poll = async () => {
 			await loadToolDetail(activeTool.id, true);
 			void loadRecentTools();
