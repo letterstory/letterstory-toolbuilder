@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowUpRight, Check, Copy, Monitor, Sparkles, X } from "lucide-react";
+import { ArrowUpRight, Check, Code2, Copy, Monitor, Sparkles, X } from "lucide-react";
 import type {
 	BuilderGenerationRun,
 	GenerationTelemetry,
@@ -11,6 +11,7 @@ import {
 	IFRAME_SANDBOX,
 	TOOL_RESIZE_CONTRACT_VERSION,
 	TOOL_RESIZE_MESSAGE_SOURCE,
+	buildEmbedSnippet,
 } from "@/lib/embed/contract";
 
 interface BuilderPreviewCanvasProps {
@@ -34,6 +35,7 @@ export function BuilderPreviewCanvas({
 	const [frameHeight, setFrameHeight] = useState(720);
 	const [showPreviewBar, setShowPreviewBar] = useState(true);
 	const [copiedPreviewUrl, setCopiedPreviewUrl] = useState(false);
+	const [copiedEmbedCode, setCopiedEmbedCode] = useState(false);
 	const showGenerationTakeover = requestState === "generating" && !activeRun?.toolId;
 	void telemetry;
 	const publicPreviewUrl = useMemo(
@@ -56,13 +58,17 @@ export function BuilderPreviewCanvas({
 	useEffect(() => {
 		setShowPreviewBar(true);
 		setCopiedPreviewUrl(false);
+		setCopiedEmbedCode(false);
 	}, [activeTool?.id, activeTool?.version, previewUrl]);
 
 	useEffect(() => {
-		if (!copiedPreviewUrl) return;
-		const timeout = window.setTimeout(() => setCopiedPreviewUrl(false), 2_000);
+		if (!copiedPreviewUrl && !copiedEmbedCode) return;
+		const timeout = window.setTimeout(() => {
+			setCopiedPreviewUrl(false);
+			setCopiedEmbedCode(false);
+		}, 2_000);
 		return () => window.clearTimeout(timeout);
-	}, [copiedPreviewUrl]);
+	}, [copiedEmbedCode, copiedPreviewUrl]);
 
 	useEffect(() => {
 		function handleMessage(event: MessageEvent) {
@@ -141,6 +147,22 @@ export function BuilderPreviewCanvas({
 		}
 	}
 
+	async function handleCopyEmbedCode() {
+		if (!activeTool || !origin) return;
+		try {
+			await navigator.clipboard.writeText(
+				buildEmbedSnippet({
+					origin,
+					toolId: activeTool.id,
+					projectName: activeTool.projectName,
+				})
+			);
+			setCopiedEmbedCode(true);
+		} catch {
+			// The preview remains usable even if clipboard access is blocked.
+		}
+	}
+
 	return (
 		<div className="flex h-full min-h-[72vh] flex-col bg-transparent lg:min-h-0">
 			{showPreviewBar ? (
@@ -158,6 +180,16 @@ export function BuilderPreviewCanvas({
 						aria-label="Copy preview URL"
 					>
 						{copiedPreviewUrl ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+					</Button>
+					<Button
+						type="button"
+						variant="ghost"
+						size="icon"
+						onClick={() => void handleCopyEmbedCode()}
+						className="size-7 rounded-full text-brand-text hover:bg-brand-light/20"
+						aria-label="Copy embed code"
+					>
+						{copiedEmbedCode ? <Check className="size-3.5" /> : <Code2 className="size-3.5" />}
 					</Button>
 					<Button
 						asChild
