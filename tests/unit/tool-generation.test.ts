@@ -1171,6 +1171,215 @@ describe("generateTool", () => {
 		}
 	});
 
+	it("triggers a brand repair pass when brand fidelity fails and includes the notes in the repair prompt", async () => {
+		isBrandIngestionConfiguredMock.mockReturnValue(true);
+		pullBrandProfileMock.mockResolvedValue({
+			brandName: "Stripe",
+			colors: { primary: "#635bff", text: "#0a2540" },
+			fonts: ["Inter"],
+			typography: { headingFont: "Inter", bodyFont: "Inter" },
+			images: { logo: { canonicalDataUri: null } },
+		});
+		let repairPrompt = "";
+		const fetchMock = vi.fn().mockImplementation(async (_url, init) => {
+			const parsedBody = JSON.parse(String((init as RequestInit | undefined)?.body ?? "{}")) as {
+				system?: string;
+				messages?: Array<{ content: string }>;
+			};
+			const system = parsedBody.system ?? "";
+			const content = parsedBody.messages?.[0]?.content ?? "";
+			if (system.includes("VERDICT:")) {
+				return new Response(
+					JSON.stringify({
+						content: [
+							{ type: "text", text: "VERDICT: fail\nNOTES: uses a different color palette" },
+						],
+					}),
+					{ status: 200 }
+				);
+			}
+			if (system.includes("HEADLINE:")) {
+				return advisoryFallbackResponse();
+			}
+			if (content.includes("Brand fidelity correction only.")) {
+				repairPrompt = content;
+				return new Response(
+					JSON.stringify({
+						content: [
+							{
+								type: "text",
+								text: '<!doctype html><html><head><style>body{font-family:"Inter",sans-serif;background:#635bff;color:#0a2540;}</style></head><body><main>fixed</main></body></html>',
+							},
+						],
+					}),
+					{ status: 200 }
+				);
+			}
+			return new Response(
+				JSON.stringify({
+					content: [
+						{
+							type: "text",
+							text: '<!doctype html><html><head><style>body{font-family:"Inter",sans-serif;background:#ff7a00;color:#111111;}</style></head><body><main>initial</main></body></html>',
+						},
+					],
+				}),
+				{ status: 200 }
+			);
+		});
+		global.fetch = fetchMock as unknown as typeof fetch;
+
+		const result = await generateTool({
+			projectName: "Calc",
+			siteUrl: "https://stripe.com",
+			prompt: "a calculator",
+		});
+
+		expect(result.status).toBe("success");
+		expect(repairPrompt).toContain("uses a different color palette");
+		expect(fetchMock).toHaveBeenCalledTimes(4);
+		expect(
+			(console.info as ReturnType<typeof vi.fn>).mock.calls.some(
+				([prefix, details]) =>
+					prefix === "[tool-generation]" &&
+					String(details).includes('"event":"brand_fidelity_repair_requested"')
+			)
+		).toBe(true);
+		if (result.status === "success") {
+			expect(result.tool.html).toContain("background:#635bff");
+			expect(result.tool.warnings.some((w) => w.includes("Brand fidelity check (fail)"))).toBe(
+				true
+			);
+		}
+	});
+
+	it("does not trigger an extra repair pass when brand fidelity already passes", async () => {
+		isBrandIngestionConfiguredMock.mockReturnValue(true);
+		pullBrandProfileMock.mockResolvedValue({
+			brandName: "Stripe",
+			colors: { primary: "#635bff", text: "#0a2540" },
+			fonts: ["Inter"],
+			typography: { headingFont: "Inter", bodyFont: "Inter" },
+			images: { logo: { canonicalDataUri: null } },
+		});
+		const fetchMock = vi.fn().mockImplementation(async (_url, init) => {
+			const parsedBody = JSON.parse(String((init as RequestInit | undefined)?.body ?? "{}")) as {
+				system?: string;
+				messages?: Array<{ content: string }>;
+			};
+			const system = parsedBody.system ?? "";
+			if (system.includes("VERDICT:")) {
+				return new Response(
+					JSON.stringify({ content: [{ type: "text", text: "VERDICT: pass\nNOTES:" }] }),
+					{ status: 200 }
+				);
+			}
+			if (system.includes("HEADLINE:")) {
+				return advisoryFallbackResponse();
+			}
+			return new Response(
+				JSON.stringify({
+					content: [
+						{
+							type: "text",
+							text: '<!doctype html><html><head><style>body{font-family:"Inter",sans-serif;background:#635bff;color:#0a2540;}</style></head><body><main>ok</main></body></html>',
+						},
+					],
+				}),
+				{ status: 200 }
+			);
+		});
+		global.fetch = fetchMock as unknown as typeof fetch;
+
+		const result = await generateTool({
+			projectName: "Calc",
+			siteUrl: "https://stripe.com",
+			prompt: "a calculator",
+		});
+
+		expect(result.status).toBe("success");
+		expect(fetchMock).toHaveBeenCalledTimes(3);
+		expect(
+			fetchMock.mock.calls.some(([, init]) => {
+				const parsedBody = JSON.parse(String((init as RequestInit | undefined)?.body ?? "{}")) as {
+					messages?: Array<{ content: string }>;
+				};
+				return parsedBody.messages?.[0]?.content?.includes("Brand fidelity correction only.");
+			})
+		).toBe(false);
+	});
+
+	it("skips brand fidelity repair gracefully when the remaining request budget is too small", async () => {
+		isBrandIngestionConfiguredMock.mockReturnValue(true);
+		pullBrandProfileMock.mockResolvedValue({
+			brandName: "Stripe",
+			colors: { primary: "#635bff", text: "#0a2540" },
+			fonts: ["Inter"],
+			typography: { headingFont: "Inter", bodyFont: "Inter" },
+			images: { logo: { canonicalDataUri: null } },
+		});
+		let completedAdvisoryCalls = 0;
+		let advisoryFinished = false;
+		const fetchMock = vi.fn().mockImplementation(async (_url, init) => {
+			const parsedBody = JSON.parse(String((init as RequestInit | undefined)?.body ?? "{}")) as {
+				system?: string;
+			};
+			const system = parsedBody.system ?? "";
+			if (system.includes("VERDICT:")) {
+				completedAdvisoryCalls += 1;
+				advisoryFinished = completedAdvisoryCalls >= 2;
+				return new Response(
+					JSON.stringify({
+						content: [
+							{ type: "text", text: "VERDICT: fail\nNOTES: uses a different color palette" },
+						],
+					}),
+					{ status: 200 }
+				);
+			}
+			if (system.includes("HEADLINE:")) {
+				completedAdvisoryCalls += 1;
+				advisoryFinished = completedAdvisoryCalls >= 2;
+				return advisoryFallbackResponse();
+			}
+			return new Response(
+				JSON.stringify({
+					content: [
+						{
+							type: "text",
+							text: '<!doctype html><html><head><style>body{font-family:"Inter",sans-serif;background:#ff7a00;color:#111111;}</style></head><body><main>initial</main></body></html>',
+						},
+					],
+				}),
+				{ status: 200 }
+			);
+		});
+		global.fetch = fetchMock as unknown as typeof fetch;
+		vi.spyOn(Date, "now").mockImplementation(() =>
+			advisoryFinished ? TOOL_GENERATION_TARGET_BUDGET_MS - 4_999 : 0
+		);
+
+		const result = await generateTool({
+			projectName: "Calc",
+			siteUrl: "https://stripe.com",
+			prompt: "a calculator",
+		});
+
+		expect(result.status).toBe("success");
+		expect(fetchMock).toHaveBeenCalledTimes(3);
+		if (result.status === "success") {
+			expect(result.tool.html).toContain("background:#ff7a00");
+			expect(
+				result.tool.warnings.some((warning) =>
+					warning.includes("Brand repair was skipped due to request-budget limits")
+				)
+			).toBe(true);
+			expect(result.tool.warnings.some((warning) => warning.includes("Brand fidelity check (fail)"))).toBe(
+				true
+			);
+		}
+	});
+
 	it("continues without brand context (with a warning) when Context.dev isn't configured", async () => {
 		isBrandIngestionConfiguredMock.mockReturnValue(false);
 		mockAnthropicSuccess("<!doctype html><html><body>hi</body></html>");

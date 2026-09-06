@@ -459,25 +459,6 @@ async function buildToolContent(opts: {
 		};
 	}
 
-	const repaired = await maybeRepairBrandPresentation({
-		projectName: opts.projectName,
-		brandSnapshot: opts.brandSnapshot,
-		sanitized,
-		requestStartedAt: opts.requestStartedAt,
-	});
-	const enforced = await enforceBrandPresentation({
-		html: repaired.sanitized.html,
-		projectName: opts.projectName,
-		brandSnapshot: opts.brandSnapshot,
-	});
-	sanitized = enforced.sanitized;
-	const warnings = [
-		...(opts.brandWarning ? [opts.brandWarning] : []),
-		...repaired.warnings,
-		...enforced.warnings,
-		...sanitized.warnings,
-	];
-
 	// Both of these are advisory, fail-soft enrichments — Mathew's brief
 	// explicitly calls for (a) supporting headline/copy around the embedded
 	// iframe, and (b) an LLM cross-check that the generated tool doesn't
@@ -488,7 +469,8 @@ async function buildToolContent(opts: {
 	let copy: GeneratedToolCopy | null = null;
 	let brandFidelity: GeneratedToolBrandFidelity | null = null;
 	const remainingBudgetMs = TOOL_GENERATION_TARGET_BUDGET_MS - (Date.now() - opts.requestStartedAt);
-	if (remainingBudgetMs >= ADVISORY_TIMEOUT_MS + MIN_ADVISORY_BUDGET_MS) {
+	const advisoryRan = remainingBudgetMs >= ADVISORY_TIMEOUT_MS + MIN_ADVISORY_BUDGET_MS;
+	if (advisoryRan) {
 		const advisoryStartedAt = Date.now();
 		[copy, brandFidelity] = await Promise.all([
 			timeGenerationStep("supporting_copy_completed", () =>
@@ -512,6 +494,54 @@ async function buildToolContent(opts: {
 			durationMs: advisoryMs,
 			ranBrandFidelity: Boolean(opts.brandSnapshot),
 		});
+	} else {
+		advisorySkipped = true;
+		logGenerationStep("advisory_phase_skipped", {
+			remainingBudgetMs,
+			requiredBudgetMs: ADVISORY_TIMEOUT_MS + MIN_ADVISORY_BUDGET_MS,
+		});
+	}
+
+	const fidelityRepairReasons =
+		brandFidelity && brandFidelity.verdict !== "pass"
+			? [
+					brandFidelity.notes ||
+						"Review the generated styling against the brand and correct any mismatched colors, fonts, logo treatment, or tone.",
+				]
+			: [];
+	if (brandFidelity && fidelityRepairReasons.length) {
+		logGenerationStep("brand_fidelity_repair_requested", {
+			verdict: brandFidelity.verdict,
+			noteChars: fidelityRepairReasons[0]?.length ?? 0,
+		});
+	}
+
+	const repaired = await maybeRepairBrandPresentation({
+		projectName: opts.projectName,
+		brandSnapshot: opts.brandSnapshot,
+		sanitized,
+		requestStartedAt: opts.requestStartedAt,
+		additionalReasons: fidelityRepairReasons,
+		reservedAdvisoryBudgetMs: advisoryRan ? 0 : ADVISORY_TIMEOUT_MS,
+	});
+	const enforced = await enforceBrandPresentation({
+		html: repaired.sanitized.html,
+		projectName: opts.projectName,
+		brandSnapshot: opts.brandSnapshot,
+	});
+	sanitized = enforced.sanitized;
+	const warnings = [
+		...(opts.brandWarning ? [opts.brandWarning] : []),
+		...repaired.warnings,
+		...enforced.warnings,
+		...sanitized.warnings,
+	];
+	if (advisorySkipped) {
+		warnings.push(
+			"Supporting copy and brand QA were skipped to return the generated tool within the live request budget."
+		);
+	}
+	if (advisoryRan) {
 		if (!copy) {
 			warnings.push(
 				"Could not generate supporting headline/copy for this tool — add your own before embedding."
@@ -529,15 +559,6 @@ async function buildToolContent(opts: {
 				);
 			}
 		}
-	} else {
-		advisorySkipped = true;
-		warnings.push(
-			"Supporting copy and brand QA were skipped to return the generated tool within the live request budget."
-		);
-		logGenerationStep("advisory_phase_skipped", {
-			remainingBudgetMs,
-			requiredBudgetMs: ADVISORY_TIMEOUT_MS + MIN_ADVISORY_BUDGET_MS,
-		});
 	}
 
 	logGenerationStep("build_succeeded", {
@@ -962,6 +983,19 @@ function collectBrandRepairReasons(
 	return reasons;
 }
 
+function mergeBrandRepairReasons(
+	deterministicReasons: string[],
+	additionalReasons: string[]
+): string[] {
+	const merged = [...deterministicReasons];
+	for (const reason of additionalReasons) {
+		const trimmed = reason.trim();
+		if (!trimmed || merged.includes(trimmed)) continue;
+		merged.push(trimmed);
+	}
+	return merged;
+}
+
 function buildBrandRepairPrompt(
 	brandSnapshot: GeneratedToolBrandSnapshot,
 	reasons: string[]
@@ -988,6 +1022,8 @@ async function maybeRepairBrandPresentation(opts: {
 	brandSnapshot: GeneratedToolBrandSnapshot | null;
 	sanitized: SanitizedHtml;
 	requestStartedAt: number;
+	additionalReasons?: string[];
+	reservedAdvisoryBudgetMs?: number;
 }): Promise<{
 	sanitized: SanitizedHtml;
 	warnings: string[];
@@ -996,7 +1032,9 @@ async function maybeRepairBrandPresentation(opts: {
 		return { sanitized: opts.sanitized, warnings: [] };
 	}
 
-	const reasons = collectBrandRepairReasons(opts.sanitized.html, opts.brandSnapshot);
+	const deterministicReasons = collectBrandRepairReasons(opts.sanitized.html, opts.brandSnapshot);
+	const additionalReasons = opts.additionalReasons ?? [];
+	const reasons = mergeBrandRepairReasons(deterministicReasons, additionalReasons);
 	if (!reasons.length) {
 		logGenerationStep("brand_repair_skipped", { reason: "not_needed" });
 		return { sanitized: opts.sanitized, warnings: [] };
@@ -1010,11 +1048,14 @@ async function maybeRepairBrandPresentation(opts: {
 	};
 
 	const remainingBudgetMs = TOOL_GENERATION_TARGET_BUDGET_MS - (Date.now() - opts.requestStartedAt);
-	const availableRepairBudgetMs = remainingBudgetMs - ADVISORY_TIMEOUT_MS;
+	const reservedAdvisoryBudgetMs = opts.reservedAdvisoryBudgetMs ?? ADVISORY_TIMEOUT_MS;
+	const availableRepairBudgetMs = remainingBudgetMs - reservedAdvisoryBudgetMs;
 	if (availableRepairBudgetMs < MIN_ADVISORY_BUDGET_MS) {
 		logGenerationStep("brand_repair_skipped", {
 			reason: "insufficient_budget",
 			reasonCount: reasons.length,
+			deterministicReasonCount: deterministicReasons.length,
+			additionalReasonCount: additionalReasons.length,
 			remainingBudgetMs,
 		});
 		return {
@@ -1028,6 +1069,8 @@ async function maybeRepairBrandPresentation(opts: {
 	logGenerationStep("brand_repair_started", {
 		timeoutMs,
 		reasonCount: reasons.length,
+		deterministicReasonCount: deterministicReasons.length,
+		additionalReasonCount: additionalReasons.length,
 		logoPolicy: opts.brandSnapshot.logoPolicy,
 	});
 
@@ -1053,6 +1096,8 @@ async function maybeRepairBrandPresentation(opts: {
 		logGenerationStep("brand_repair_finished", {
 			timeoutMs,
 			initialReasonCount: reasons.length,
+			deterministicReasonCount: deterministicReasons.length,
+			additionalReasonCount: additionalReasons.length,
 			remainingReasonCount: remainingReasons.length,
 		});
 		return finalize(repaired);
