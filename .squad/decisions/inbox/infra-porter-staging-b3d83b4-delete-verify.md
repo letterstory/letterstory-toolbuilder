@@ -1,0 +1,4 @@
+### 2026-09-06: Porter staging deploy of main@b3d83b4 verified with live delete flow
+**By:** Infra
+**What:** Confirmed GitHub Actions workflow `porter-app-6018-letterstory-toolbuilder.yml` deployed commit `b3d83b480fb186d6c73fa080aa71c7a96f89d691` to Porter staging via run `34065803004`, then verified live REST behavior end-to-end: `GET /api/health` returned `200`, `POST /api/tools/generate` returned `200` and created tool `ea48fc31-e337-42d9-9905-ee21f722b4f9`, `DELETE /api/tools/ea48fc31-e337-42d9-9905-ee21f722b4f9` returned `200 {"status":"success","id":"ea48fc31-e337-42d9-9905-ee21f722b4f9"}`, and a follow-up `GET /api/tools/ea48fc31-e337-42d9-9905-ee21f722b4f9` returned `404 {"status":"error","message":"Tool not found."}`.
+**Why:** This records that the new delete-tool path is live on staging across the real deployed stack, and notes that the app briefly served `503` immediately after rollout before warming back to healthy.

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 import type { ToolGenerationResult } from "@/lib/generation";
 import type { GeneratedToolRecord } from "@/lib/generation/store";
 import {
@@ -362,6 +363,7 @@ export function ToolBuilderWorkspace() {
 			setStatusMessage(toStatusMessage(data, Boolean(toolId), responseTelemetry));
 			if (data.status === "success") {
 				const summary = toSummary(data.tool);
+				toast.success(toolId ? "Tool updated" : "Tool generated");
 				setActiveTool(summary);
 				if (clearComposerOnSuccess) {
 					setPrompt("");
@@ -374,9 +376,18 @@ export function ToolBuilderWorkspace() {
 				});
 				void loadRecentTools();
 				void loadToolDetail(summary.id);
+			} else {
+				toast.error(
+					data.status === "not_configured"
+						? "Generation not configured"
+						: toolId
+							? "Update failed"
+							: "Generation failed"
+				);
 			}
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
+			toast.error(toolId ? "Update failed" : "Generation failed");
 			setStatusMessage({
 				title: toolId ? "Update failed" : "Generation failed",
 				description: message,
@@ -516,6 +527,7 @@ export function ToolBuilderWorkspace() {
 			};
 			if (data.status === "success" && data.tool) {
 				const summary = toSummary(data.tool);
+				toast.success("Version restored");
 				setActiveTool(summary);
 				populateFormFrom(summary);
 				appendConversation(buildRestoredConversationMessage(version));
@@ -528,6 +540,7 @@ export function ToolBuilderWorkspace() {
 				void loadToolDetail(summary.id);
 				return true;
 			} else {
+				toast.error("Restore failed");
 				setStatusMessage({
 					title: "Restore failed",
 					description: data.message ?? "Could not restore that version.",
@@ -536,6 +549,7 @@ export function ToolBuilderWorkspace() {
 			}
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
+			toast.error("Restore failed");
 			setStatusMessage({ title: "Restore failed", description: message, tone: "destructive" });
 		} finally {
 			setRequestState("idle");
@@ -559,6 +573,7 @@ export function ToolBuilderWorkspace() {
 				: null;
 
 			if (response.ok && data?.status === "success") {
+				toast.success("Tool deleted");
 				setRecentTools((current) => current.filter((item) => item.id !== tool.id));
 				if (wasActiveTool) {
 					resetWorkspaceState();
@@ -573,6 +588,7 @@ export function ToolBuilderWorkspace() {
 				return;
 			}
 
+			toast.error("Delete failed");
 			setStatusMessage({
 				title: "Delete failed",
 				description: data?.message ?? "Could not delete that tool right now.",
@@ -580,6 +596,7 @@ export function ToolBuilderWorkspace() {
 			});
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
+			toast.error("Delete failed");
 			setStatusMessage({ title: "Delete failed", description: message, tone: "destructive" });
 		} finally {
 			setRequestState("idle");
