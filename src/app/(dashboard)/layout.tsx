@@ -14,7 +14,7 @@ const NAV_LINKS = [
 
 export default function DashboardLayout({ children }: { children: ReactNode }) {
 	return (
-		<div className="min-h-screen bg-muted/30">
+		<div className="min-h-dvh bg-muted/30 lg:flex lg:h-dvh lg:flex-col lg:overflow-hidden">
 			<header className="sticky top-0 z-20 border-b bg-background/95 backdrop-blur">
 				<div className="mx-auto flex w-full max-w-7xl items-center justify-between px-6 py-4">
 					<div className="flex items-center gap-3">
@@ -40,7 +40,9 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
 				</div>
 				<Separator />
 			</header>
-			<main className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-6 py-8">{children}</main>
+			<main className="w-full lg:flex lg:min-h-0 lg:flex-1 lg:flex-col lg:overflow-y-auto">
+				{children}
+			</main>
 		</div>
 	);
 }
