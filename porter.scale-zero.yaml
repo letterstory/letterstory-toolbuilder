@@ -30,8 +30,8 @@ services:
       httpPath: /api/health
     ingressAnnotations:
       nginx.ingress.kubernetes.io/proxy-connect-timeout: "60"
-      nginx.ingress.kubernetes.io/proxy-send-timeout: "180"
-      nginx.ingress.kubernetes.io/proxy-read-timeout: "180"
+      nginx.ingress.kubernetes.io/proxy-send-timeout: "330"
+      nginx.ingress.kubernetes.io/proxy-read-timeout: "330"
     autoscaling:
       enabled: false
     sleep: false

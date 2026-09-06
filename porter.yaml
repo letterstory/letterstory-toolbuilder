@@ -43,13 +43,16 @@ services:
       enabled: true
       httpPath: /api/health
     # /api/tools/generate can chain up to three sequential Anthropic calls
-    # (HTML build + retry + advisory copy/fidelity checks) and can run past
-    # nginx's default 60s proxy timeout, which returns an HTML 504 page that
-    # breaks client-side response.json() parsing. Give it headroom.
+    # (HTML build + retry + advisory copy/fidelity checks) and the app itself
+    # now budgets the full request for a 300s ingress ceiling
+    # (NGINX_GENERATION_ROUTE_BUDGET_MS = 300_000). Keep nginx comfortably
+    # above that so app-level budget checks fail first and can return a JSON
+    # error/partial result instead of nginx terminating the socket with a bare
+    # 504 page.
     ingressAnnotations:
       nginx.ingress.kubernetes.io/proxy-connect-timeout: "60"
-      nginx.ingress.kubernetes.io/proxy-send-timeout: "180"
-      nginx.ingress.kubernetes.io/proxy-read-timeout: "180"
+      nginx.ingress.kubernetes.io/proxy-send-timeout: "330"
+      nginx.ingress.kubernetes.io/proxy-read-timeout: "330"
     autoscaling:
       enabled: true
       minInstances: 1

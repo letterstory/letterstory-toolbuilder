@@ -1,0 +1,4 @@
+### 2026-09-05: Toolbuilder ingress timeout now exceeds the app's 300s generation budget
+**By:** Infra
+**What:** Raised `nginx.ingress.kubernetes.io/proxy-send-timeout` and `nginx.ingress.kubernetes.io/proxy-read-timeout` from `180` to `330` seconds in both `porter.yaml` and `porter.scale-zero.yaml`, while leaving `proxy-connect-timeout` at `60`.
+**Why:** The generation pipeline explicitly budgets for a 300-second ingress envelope (`NGINX_GENERATION_ROUTE_BUDGET_MS = 300_000`, `TOOL_GENERATION_TARGET_BUDGET_MS = 280_000`), but live Porter ingress was still severing long-running requests at 180 seconds with a bare 504. Pushing the read/send ceiling above 300 seconds ensures the app's own budget/error handling has first chance to complete or fail gracefully instead of nginx killing legitimate 180–280 second generations.
