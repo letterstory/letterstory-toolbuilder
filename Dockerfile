@@ -6,6 +6,7 @@
 FROM node:22-slim AS deps
 WORKDIR /app
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+ENV HOME=/home/nextjs
 # openssl/ca-certificates: sharp/@resvg/resvg-js pull prebuilt native
 # binaries at install time and need these present on slim/debian bases.
 RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates && rm -rf /var/lib/apt/lists/*
@@ -67,7 +68,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 	&& porter version \
 	&& rm -rf /var/lib/apt/lists/* \
 	&& groupadd --system --gid 1001 nodejs \
-	&& useradd --system --uid 1001 --gid nodejs nextjs
+	&& useradd --system --uid 1001 --gid nodejs --home-dir /home/nextjs --create-home nextjs \
+	&& chown -R nextjs:nodejs /home/nextjs /app
 
 COPY --from=builder /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
