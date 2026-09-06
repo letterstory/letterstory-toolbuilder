@@ -1,5 +1,6 @@
 import { envServer } from "@/lib/config/env.server";
 import { isSafeHttpsUrl } from "@/lib/net/ssrf";
+import { normalizeSiteUrl } from "@/lib/utils";
 import {
 	getGeneratedTool,
 	updateGeneratedToolVisualCongruence,
@@ -12,6 +13,12 @@ const VISUAL_CONGRUENCE_TIMEOUT_MS = 45_000;
 const VIEWPORT = { width: 1440, height: 1280 };
 const SETTLE_DELAY_MS = 1_500;
 const VISUAL_WARNING_PREFIX = "Visual brand match";
+
+interface FinalizeVisualCongruenceDeps {
+	getTool: typeof getGeneratedTool;
+	analyze: typeof analyzeVisualCongruence;
+	save: typeof updateGeneratedToolVisualCongruence;
+}
 
 interface AnthropicImageSource {
 	type: "base64";
@@ -320,7 +327,8 @@ export async function analyzeVisualCongruence(opts: {
 	const captureReferenceScreenshot = opts.captureReferenceScreenshot ?? captureReferenceSiteScreenshot;
 	const renderGeneratedScreenshot = opts.renderGeneratedScreenshot ?? renderGeneratedToolScreenshot;
 	const requestAssessment = opts.requestAssessment ?? requestVisualCongruenceAssessment;
-	const { base64: referenceImageBase64, referenceUrl } = await captureReferenceScreenshot(opts.siteUrl);
+	const normalizedSiteUrl = normalizeSiteUrl(opts.siteUrl);
+	const { base64: referenceImageBase64, referenceUrl } = await captureReferenceScreenshot(normalizedSiteUrl);
 	const generatedImageBase64 = await renderGeneratedScreenshot(opts.html);
 	const assessment = await requestAssessment({
 		brandName: opts.brandName,
@@ -340,27 +348,53 @@ function shouldAnalyzeTool(tool: GeneratedToolRecord, expectedVersion: number): 
 	);
 }
 
+function logVisualCongruenceStep(event: string, details: Record<string, unknown>): void {
+	console.info("[tool-generation]", JSON.stringify({ event, ...details }));
+}
+
 export async function finalizeVisualCongruenceForTool(opts: {
 	toolId: string;
 	expectedVersion: number;
-}): Promise<void> {
-	const tool = await getGeneratedTool(opts.toolId);
+}, deps: Partial<FinalizeVisualCongruenceDeps> = {}): Promise<void> {
+	const getTool = deps.getTool ?? getGeneratedTool;
+	const analyze = deps.analyze ?? analyzeVisualCongruence;
+	const save = deps.save ?? updateGeneratedToolVisualCongruence;
+	const tool = await getTool(opts.toolId);
 	if (!tool || !shouldAnalyzeTool(tool, opts.expectedVersion) || !tool.siteUrl) return;
 
+	const startedAt = Date.now();
 	let visualCongruence: GeneratedToolVisualCongruence;
 	try {
-		visualCongruence = await analyzeVisualCongruence({
+		visualCongruence = await analyze({
 			html: tool.html,
 			siteUrl: tool.siteUrl,
 			brandName: tool.brandSnapshot?.brandName ?? null,
+		});
+		logVisualCongruenceStep("visual_congruence_completed", {
+			toolId: opts.toolId,
+			durationMs: Date.now() - startedAt,
+			status: visualCongruence.status,
+			verdict: visualCongruence.verdict,
+			congruenceScore: visualCongruence.congruenceScore,
 		});
 	} catch (error) {
 		visualCongruence = buildFailedVisualCongruence(
 			tool.siteUrl,
 			error instanceof Error ? error.message : String(error)
 		);
+		logVisualCongruenceStep("visual_congruence_failed", {
+			toolId: opts.toolId,
+			durationMs: Date.now() - startedAt,
+			error: visualCongruence.notes,
+		});
 	}
 
 	const warnings = mergeVisualCongruenceWarnings(tool.warnings, visualCongruence);
-	await updateGeneratedToolVisualCongruence(opts.toolId, opts.expectedVersion, visualCongruence, warnings);
+	const saved = await save(opts.toolId, opts.expectedVersion, visualCongruence, warnings);
+	if (!saved) {
+		logVisualCongruenceStep("visual_congruence_save_skipped", {
+			toolId: opts.toolId,
+			expectedVersion: opts.expectedVersion,
+		});
+	}
 }
