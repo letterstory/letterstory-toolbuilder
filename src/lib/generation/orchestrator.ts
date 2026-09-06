@@ -76,7 +76,7 @@ export type ToolGenerationResult = ToolGenerationSuccessResult | ToolGenerationF
 export const NGINX_GENERATION_ROUTE_BUDGET_MS = 300_000;
 export const TOOL_GENERATION_TARGET_BUDGET_MS = 280_000;
 const PRIMARY_ANTHROPIC_TIMEOUT_MS = 210_000;
-const INITIAL_RETRY_ANTHROPIC_TIMEOUT_MS = 35_000;
+const INITIAL_RETRY_ANTHROPIC_TIMEOUT_MS = 50_000;
 const REVISION_RETRY_ANTHROPIC_TIMEOUT_MS = 70_000;
 const ADVISORY_TIMEOUT_MS = 15_000;
 // Repair uses the same full-HTML regeneration path as initial tool creation,
@@ -84,7 +84,8 @@ const ADVISORY_TIMEOUT_MS = 15_000;
 // it to whatever time remains inside TOOL_GENERATION_TARGET_BUDGET_MS.
 const BRAND_REPAIR_TIMEOUT_MS = 180_000;
 const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-6";
-const MAX_TOKENS = 8_000;
+export const HTML_GENERATION_MAX_TOKENS = 12_000;
+export const TRUNCATED_HTML_RETRY_MAX_TOKENS = 16_000;
 const MAX_GENERATION_ATTEMPTS = 2;
 const MAX_PROMPT_BRAND_COLORS = 4;
 const MAX_PROMPT_BRAND_FONTS = 2;
@@ -92,7 +93,7 @@ const MIN_ADVISORY_BUDGET_MS = 5_000;
 // Worst-case request-budget math for one /api/tools/generate request:
 // - initial generation path:
 //   - primary HTML generation attempt: 210s
-//   - fallback retry (only for malformed HTML / transient 5xx/network failures): 35s
+//   - fallback retry (only for malformed HTML / transient 5xx/network failures): 50s
 //   - advisory copy + brand-fidelity checks: 15s max wall time because they run in parallel
 //   - optional repair pass: bounded by the remaining request budget after those steps,
 //     with an upper ceiling of 180s. In the absolute worst case after a 210s main build
@@ -112,7 +113,8 @@ export const MAX_REVISION_ANTHROPIC_PIPELINE_WORST_CASE_MS =
 // signal (colors, fonts, logo <img>) — capping keeps this a cheap, fast
 // advisory check instead of resending the whole (possibly large) document.
 const MAX_FIDELITY_HTML_CHARS = 6_000;
-const FIDELITY_ENFORCEMENT_STYLE_TAG = /<style[^>]*data-letterstory-brand-enforcement="true"[^>]*>[\s\S]*?<\/style>/i;
+const FIDELITY_ENFORCEMENT_STYLE_TAG =
+	/<style[^>]*data-letterstory-brand-enforcement="true"[^>]*>[\s\S]*?<\/style>/i;
 const BRAND_COLOR_KEYS = ["primary", "secondary", "accent", "background", "text"] as const;
 
 type BrandColorKey = (typeof BRAND_COLOR_KEYS)[number];
@@ -121,6 +123,8 @@ interface AnthropicMessagesResponse {
 	content?: Array<{ type: string; text?: string }>;
 	error?: { message?: string };
 }
+
+type HtmlRetryMode = "invalid_html" | "transient_failure";
 
 export interface ToolGenerationDiagnostics {
 	totalMs: number;
@@ -388,6 +392,8 @@ async function buildToolContent(opts: {
 		const timeSpentMs = Date.now() - opts.requestStartedAt;
 		const remainingBudgetMs = Math.max(0, TOOL_GENERATION_TARGET_BUDGET_MS - timeSpentMs);
 		const reservedAdvisoryMs = isRevision ? 0 : ADVISORY_TIMEOUT_MS;
+		const retryMode = attempt > 1 ? resolveHtmlRetryMode(lastFailure) : undefined;
+		const maxTokens = resolveHtmlMaxTokens(attempt, retryMode);
 		const timeoutMs = Math.max(
 			MIN_ADVISORY_BUDGET_MS,
 			Math.min(
@@ -402,7 +408,8 @@ async function buildToolContent(opts: {
 				projectName: opts.projectName,
 				prompt: opts.prompt,
 				brandSnapshot: opts.brandSnapshot,
-				isRetry: attempt > 1,
+				maxTokens,
+				retryMode,
 				existingHtml: opts.existingHtml,
 				timeoutMs,
 			});
@@ -575,7 +582,7 @@ async function buildToolContent(opts: {
 								sanitized.html,
 								opts.brandSnapshot as GeneratedToolBrandSnapshot,
 								originalBrandFidelity.notes
-						  )
+							)
 						: null;
 				if (
 					deterministicColorCheck?.applicable &&
@@ -594,7 +601,7 @@ async function buildToolContent(opts: {
 						? {
 								verdict: brandFidelity.verdict,
 								notes: filteredNotes,
-						  }
+							}
 						: { verdict: "pass", notes: "" };
 				}
 			} else {
@@ -798,12 +805,16 @@ function applyBrandOverridesToSnapshot(
 			...baseSnapshot.colors,
 			...nextColors,
 		},
-		fonts: nextFont ? [nextFont, ...existingFonts.filter((font) => font !== nextFont)] : existingFonts,
+		fonts: nextFont
+			? [nextFont, ...existingFonts.filter((font) => font !== nextFont)]
+			: existingFonts,
 		headingFont: nextFont ?? baseSnapshot.headingFont,
 		bodyFont: nextFont ?? baseSnapshot.bodyFont,
-		headingFontFace: nextFont ? null : baseSnapshot.headingFontFace ?? null,
-		bodyFontFace: nextFont ? null : baseSnapshot.bodyFontFace ?? null,
-		fontFamilyMode: nextFont ? "named_with_fallback" : baseSnapshot.fontFamilyMode ?? "embedded_only",
+		headingFontFace: nextFont ? null : (baseSnapshot.headingFontFace ?? null),
+		bodyFontFace: nextFont ? null : (baseSnapshot.bodyFontFace ?? null),
+		fontFamilyMode: nextFont
+			? "named_with_fallback"
+			: (baseSnapshot.fontFamilyMode ?? "embedded_only"),
 	};
 }
 
@@ -824,11 +835,7 @@ function shouldRequireExactLogoAsset(profile: BrandProfile): boolean {
 		const height = profile.images.logo.height ?? 0;
 		const shortEdge = Math.min(width, height);
 		const longEdge = Math.max(width, height);
-		return (
-			shortEdge >= MIN_LOGO_EDGE_PX * 2 &&
-			longEdge > 0 &&
-			longEdge / shortEdge <= 1.33
-		);
+		return shortEdge >= MIN_LOGO_EDGE_PX * 2 && longEdge > 0 && longEdge / shortEdge <= 1.33;
 	}
 	return true;
 }
@@ -837,7 +844,8 @@ async function requestToolHtml(opts: {
 	projectName: string;
 	prompt: string;
 	brandSnapshot: GeneratedToolBrandSnapshot | null;
-	isRetry?: boolean;
+	maxTokens: number;
+	retryMode?: HtmlRetryMode;
 	timeoutMs: number;
 	/** When set, this is a revision: edit this HTML per the prompt instead of building from scratch. */
 	existingHtml?: string;
@@ -898,18 +906,26 @@ async function requestToolHtml(opts: {
 		"",
 		"Brand context:",
 		brandPrompt,
-		...(opts.isRetry
+		...(opts.retryMode === "invalid_html"
 			? [
 					"",
-					"IMPORTANT: Your previous response was incomplete or was not a valid, complete HTML document. Return the ENTIRE self-contained document in one response, starting with <!doctype html> and ending with the literal closing tag </html>, with no truncation and no surrounding commentary.",
+					"IMPORTANT: Your previous response ended before the full HTML document was complete. Return the ENTIRE self-contained document in one response, starting with <!doctype html> and ending with the literal closing tag </html>, with no surrounding commentary.",
+					"Be economical so the document fits comfortably inside one response: keep visible supporting copy brief, avoid repetitive brand-boilerplate inside the page, and prefer compact CSS/JS over verbose repetition.",
 				]
-			: []),
+			: opts.retryMode === "transient_failure"
+				? [
+						"",
+						"IMPORTANT: The previous attempt failed before a usable document was returned. Return the ENTIRE self-contained document in one response, starting with <!doctype html> and ending with the literal closing tag </html>, with no surrounding commentary.",
+					]
+				: []),
 	].join("\n");
 	logGenerationStep("html_generation_prompt_prepared", {
 		timeoutMs: opts.timeoutMs,
+		maxTokens: opts.maxTokens,
 		isRevision,
 		brandPromptChars: brandPrompt.length,
 		includesInlineLogo: brandPrompt.includes("Logo data URI:"),
+		retryMode: opts.retryMode ?? null,
 		userContentChars: userContent.length,
 	});
 
@@ -924,7 +940,7 @@ async function requestToolHtml(opts: {
 			},
 			body: JSON.stringify({
 				model,
-				max_tokens: MAX_TOKENS,
+				max_tokens: opts.maxTokens,
 				system: instructions,
 				messages: [{ role: "user", content: userContent }],
 			}),
@@ -1122,10 +1138,7 @@ function htmlMentionsColorValue(html: string, color: string | null | undefined):
 	return new RegExp(escapeRegex(normalizedColor), "i").test(html);
 }
 
-function htmlUsesBrandTextColor(
-	html: string,
-	brandSnapshot: GeneratedToolBrandSnapshot
-): boolean {
+function htmlUsesBrandTextColor(html: string, brandSnapshot: GeneratedToolBrandSnapshot): boolean {
 	const normalizedTextColor = normalizeHexColor(brandSnapshot.colors.text);
 	if (!normalizedTextColor) return false;
 	return new RegExp(
@@ -1220,9 +1233,7 @@ function verifyBrandColorUsage(
 
 function splitFeedbackClauses(note: string): string[] {
 	return note
-		.split(
-			/\s*(?:;\s*|,\s*but\s+|\s+but\s+|,\s*while\s+|\s+while\s+|,\s*and\s+|\.\s+)\s*/i
-		)
+		.split(/\s*(?:;\s*|,\s*but\s+|\s+but\s+|,\s*while\s+|\s+while\s+|,\s*and\s+|\.\s+)\s*/i)
 		.map((clause) => clause.trim())
 		.filter(Boolean);
 }
@@ -1294,7 +1305,7 @@ function buildBrandRepairPrompt(
 			? [
 					"Authoritative brand colors to apply in rendered CSS/UI (do not substitute lookalikes):",
 					...colorLines.map((line) => `- ${line}`),
-			  ].join("\n")
+				].join("\n")
 			: "Authoritative brand colors: none detected.",
 		brandSnapshot.bodyFont
 			? `Primary UI/body font to use: ${brandSnapshot.bodyFont}.`
@@ -1335,11 +1346,7 @@ async function maybeRepairBrandPresentation(opts: {
 		return { sanitized: opts.sanitized, warnings: [], didRepair: false };
 	}
 
-	const finalize = (
-		sanitized: SanitizedHtml,
-		extraWarnings: string[] = [],
-		didRepair = false
-	) => {
+	const finalize = (sanitized: SanitizedHtml, extraWarnings: string[] = [], didRepair = false) => {
 		return {
 			sanitized,
 			warnings: extraWarnings,
@@ -1379,6 +1386,7 @@ async function maybeRepairBrandPresentation(opts: {
 			projectName: opts.projectName,
 			prompt: buildBrandRepairPrompt(opts.brandSnapshot, reasons),
 			brandSnapshot: opts.brandSnapshot,
+			maxTokens: HTML_GENERATION_MAX_TOKENS,
 			existingHtml: opts.sanitized.html,
 			timeoutMs,
 		});
@@ -1439,6 +1447,23 @@ function buildBrandPrompt(brandSnapshot: GeneratedToolBrandSnapshot | null): str
 			? "A real logo asset exists and will be injected into the header programmatically after generation. Leave space for a clean brand lockup and do not invent, redraw, trace, or type a substitute logo."
 			: `No trustworthy full-logo image is available. If you need visible branding, use a clean text-only brand-name treatment with the exact brand name "${brandSnapshot.brandName ?? "Unknown"}". Do not invent an icon, mascot, sparkle, silhouette, monogram, badge, or faux app-icon.`,
 	].join("\n");
+}
+
+function resolveHtmlRetryMode(
+	previousFailure:
+		| { kind: "step_error"; error: unknown; message: string }
+		| { kind: "invalid_html"; message: string }
+		| null
+): HtmlRetryMode | undefined {
+	if (!previousFailure) return undefined;
+	return previousFailure.kind === "invalid_html" ? "invalid_html" : "transient_failure";
+}
+
+function resolveHtmlMaxTokens(attempt: number, retryMode?: HtmlRetryMode): number {
+	if (attempt <= 1) return HTML_GENERATION_MAX_TOKENS;
+	return retryMode === "invalid_html"
+		? TRUNCATED_HTML_RETRY_MAX_TOKENS
+		: HTML_GENERATION_MAX_TOKENS;
 }
 
 function shouldRetryHtmlGeneration(error: unknown, attempt: number): boolean {

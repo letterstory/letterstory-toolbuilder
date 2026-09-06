@@ -28,10 +28,12 @@ vi.mock("@/lib/generation/store", () => ({
 
 import {
 	generateTool,
+	HTML_GENERATION_MAX_TOKENS,
 	isToolGenerationConfigured,
 	MAX_ANTHROPIC_PIPELINE_WORST_CASE_MS,
 	MAX_REVISION_ANTHROPIC_PIPELINE_WORST_CASE_MS,
 	NGINX_GENERATION_ROUTE_BUDGET_MS,
+	TRUNCATED_HTML_RETRY_MAX_TOKENS,
 	TOOL_GENERATION_TARGET_BUDGET_MS,
 } from "../../src/lib/generation/orchestrator";
 
@@ -79,6 +81,18 @@ const advisoryFallbackResponse = () =>
 			status: 200,
 		}
 	);
+
+interface AnthropicRequestBody {
+	system?: string;
+	max_tokens?: number;
+	messages?: Array<{ content: string }>;
+}
+
+function parseAnthropicRequestBodies(fetchMock: ReturnType<typeof vi.fn>): AnthropicRequestBody[] {
+	return fetchMock.mock.calls.map(([, init]) =>
+		JSON.parse(String((init as RequestInit | undefined)?.body ?? "{}"))
+	) as AnthropicRequestBody[];
+}
 
 describe("generateTool", () => {
 	beforeEach(() => {
@@ -1574,13 +1588,13 @@ describe("generateTool", () => {
 				notes: "The `font-family` on `body` falls back to system fonts instead of `sohne-var`",
 			});
 			expect(
-				result.tool.warnings.some((warning) =>
-					warning.includes("body text color") || warning.includes("#040404")
+				result.tool.warnings.some(
+					(warning) => warning.includes("body text color") || warning.includes("#040404")
 				)
 			).toBe(false);
 			expect(
-				result.tool.warnings.some((warning) =>
-					warning.includes("font-family") && warning.includes("sohne-var")
+				result.tool.warnings.some(
+					(warning) => warning.includes("font-family") && warning.includes("sohne-var")
 				)
 			).toBe(true);
 		}
@@ -1707,9 +1721,9 @@ describe("generateTool", () => {
 					warning.includes("Brand repair was skipped due to request-budget limits")
 				)
 			).toBe(true);
-			expect(result.tool.warnings.some((warning) => warning.includes("Brand fidelity check (fail)"))).toBe(
-				true
-			);
+			expect(
+				result.tool.warnings.some((warning) => warning.includes("Brand fidelity check (fail)"))
+			).toBe(true);
 		}
 	});
 
@@ -1786,12 +1800,14 @@ describe("generateTool", () => {
 			expect(result.tool.brandFidelity).toBeNull();
 			expect(
 				result.tool.warnings.some((warning) =>
-					warning.includes("Brand repair was applied, but the post-repair brand fidelity check was skipped")
+					warning.includes(
+						"Brand repair was applied, but the post-repair brand fidelity check was skipped"
+					)
 				)
 			).toBe(true);
-			expect(result.tool.warnings.some((warning) => warning.includes("Brand fidelity check (fail)"))).toBe(
-				false
-			);
+			expect(
+				result.tool.warnings.some((warning) => warning.includes("Brand fidelity check (fail)"))
+			).toBe(false);
 		}
 	});
 
@@ -1920,6 +1936,23 @@ describe("generateTool", () => {
 		expect(timeoutSpy).toHaveBeenCalledTimes(2);
 	});
 
+	it("uses the expanded HTML token budget for the main generation call", async () => {
+		mockAnthropicSuccess("<!doctype html><html><body>hi</body></html>");
+
+		const result = await generateTool({
+			projectName: "Calc",
+			siteUrl: "https://stripe.com",
+			prompt: "a calculator",
+		});
+
+		expect(result.status).toBe("success");
+		const requestBodies = parseAnthropicRequestBodies(global.fetch as ReturnType<typeof vi.fn>);
+		const htmlRequest = requestBodies.find((body) =>
+			body.system?.includes("senior product engineer")
+		);
+		expect(htmlRequest?.max_tokens).toBe(HTML_GENERATION_MAX_TOKENS);
+	});
+
 	it("returns an error result when Anthropic returns no text content at all", async () => {
 		mockAnthropicSuccess("");
 
@@ -1967,6 +2000,19 @@ describe("generateTool", () => {
 		if (result.status === "success") {
 			expect(result.tool.html).toContain("complete</body></html>");
 		}
+		const requestBodies = parseAnthropicRequestBodies(fetchMock);
+		const htmlRequests = requestBodies.filter((body) =>
+			body.system?.includes("senior product engineer")
+		);
+		expect(htmlRequests).toHaveLength(2);
+		expect(htmlRequests[0]?.max_tokens).toBe(HTML_GENERATION_MAX_TOKENS);
+		expect(htmlRequests[1]?.max_tokens).toBe(TRUNCATED_HTML_RETRY_MAX_TOKENS);
+		expect(htmlRequests[1]?.messages?.[0]?.content).toContain(
+			"previous response ended before the full HTML document was complete"
+		);
+		expect(htmlRequests[1]?.messages?.[0]?.content).toContain(
+			"Be economical so the document fits comfortably inside one response"
+		);
 	});
 
 	it("gives up and returns an error after the retry also produces invalid HTML", async () => {
@@ -2169,7 +2215,9 @@ describe("generateTool — revisions (toolId set)", () => {
 				logoDataUri: null,
 			},
 		});
-		mockAnthropicSuccess("<!doctype html><html><head><style>body{background:#ffffff;}</style></head><body>revised</body></html>");
+		mockAnthropicSuccess(
+			"<!doctype html><html><head><style>body{background:#ffffff;}</style></head><body>revised</body></html>"
+		);
 
 		const result = await generateTool({
 			projectName: "Mileage Calculator",
@@ -2204,7 +2252,9 @@ describe("generateTool — revisions (toolId set)", () => {
 		};
 		const revisionMessage = htmlCallBody.messages?.[0]?.content ?? "";
 
-		expect(revisionMessage).toContain("Colors: primary: #009966, accent: #F97316, background: #FFF0C2");
+		expect(revisionMessage).toContain(
+			"Colors: primary: #009966, accent: #F97316, background: #FFF0C2"
+		);
 		expect(revisionMessage).toContain("Fonts: Merriweather, Inter");
 		expect(revisionMessage).toContain("Typography usage: Use Merriweather");
 		expect(revisionMessage).not.toContain("Colors: primary: #5A3FF2");
