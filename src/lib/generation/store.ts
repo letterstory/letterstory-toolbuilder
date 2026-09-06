@@ -15,6 +15,7 @@ import type {
 	GeneratedToolContent,
 	GeneratedToolRecord,
 	GeneratedToolVisualCongruence,
+	SaveGeneratedToolOptions,
 	ToolStoreBackend,
 } from "./store.types";
 
@@ -25,6 +26,7 @@ export type {
 	GeneratedToolContent,
 	GeneratedToolCopy,
 	GeneratedToolHistoryEntry,
+	GeneratedToolLogicRecord,
 	GeneratedToolRecord,
 	GeneratedToolVisualCongruence,
 	VisualCongruenceStatus,
@@ -38,8 +40,11 @@ export function isToolStoreDurable(): boolean {
 	return isSupabaseConfigured();
 }
 
-export async function saveGeneratedTool(input: GeneratedToolContent): Promise<GeneratedToolRecord> {
-	return backend().saveGeneratedTool(input);
+export async function saveGeneratedTool(
+	input: GeneratedToolContent,
+	options?: SaveGeneratedToolOptions
+): Promise<GeneratedToolRecord> {
+	return backend().saveGeneratedTool(input, options);
 }
 
 export async function getGeneratedTool(id: string): Promise<GeneratedToolRecord | null> {

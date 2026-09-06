@@ -1,34 +1,14 @@
 import type { LoanCalculatorInput, LoanCalculatorOutput } from "@/lib/contracts/tool-logic";
-import { loanCalculatorOutputSchema } from "@/lib/contracts/tool-logic";
 import {
-	getLoanCalculatorHandlerSource,
-	LOAN_CALCULATOR_HANDLER_PATH,
-} from "./loan-calculator-handler-source";
-import { runPorterCommand, runPorterJson } from "./porter-cli";
+	buildPromotedToolLogicRuntime,
+	ensureWarmToolLogicSandbox,
+	invokeToolLogicInSandbox,
+	type ToolLogicRuntimeMetadata,
+} from "@/lib/tool-logic/runtime";
+import type { ToolLogicContract } from "@/lib/tool-logic/spec";
+import { getLoanCalculatorHandlerSource } from "./loan-calculator-handler-source";
 
 const LOAN_CALCULATOR_TOOL_TAG = "loan-calculator-demo";
-const NODE_IMAGE = "node:20-alpine";
-const BUILD_SANDBOX_TTL = "5m";
-const WARM_SANDBOX_TTL = "30m";
-const WARM_SANDBOX_NAME_PREFIX = "loan-calculator-demo-warm";
-const SANDBOX_CPU = "250m";
-const SANDBOX_MEMORY = "256Mi";
-const BUILD_TIMEOUT_MS = 180_000;
-const EXEC_TIMEOUT_MS = 30_000;
-
-interface PorterSandboxRecord {
-	id: string;
-	name: string;
-	phase?: string;
-	tags?: Record<string, string>;
-}
-
-interface PorterSnapshotRecord {
-	id: string;
-	sandbox_id: string;
-	status: string;
-	t_ready_unix_ms?: number;
-}
 
 export interface LoanCalculatorSandboxInvocation {
 	output: LoanCalculatorOutput;
@@ -36,227 +16,88 @@ export interface LoanCalculatorSandboxInvocation {
 	snapshotId: string;
 }
 
-let snapshotPromise: Promise<string> | null = null;
-let warmSandboxPromise: Promise<{ sandboxName: string; snapshotId: string }> | null = null;
+const loanCalculatorContract: ToolLogicContract = {
+	input: {
+		type: "object",
+		fields: {
+			principal: { type: "number", exclusiveMinimum: 0 },
+			annualRatePercent: { type: "number", minimum: 0, maximum: 100 },
+			termMonths: { type: "integer", minimum: 1, maximum: 600 },
+		},
+	},
+	output: {
+		type: "object",
+		fields: {
+			principal: { type: "number", minimum: 0 },
+			annualRatePercent: { type: "number", minimum: 0, maximum: 100 },
+			termMonths: { type: "integer", minimum: 1 },
+			monthlyRatePercent: { type: "number", minimum: 0 },
+			scheduledMonthlyPayment: { type: "number", minimum: 0 },
+			finalPayment: { type: "number", minimum: 0 },
+			totalPaid: { type: "number", minimum: 0 },
+			totalInterest: { type: "number", minimum: 0 },
+			amortizationSchedule: {
+				type: "array",
+				items: {
+					type: "object",
+					fields: {
+						paymentNumber: { type: "integer", minimum: 1 },
+						paymentAmount: { type: "number", minimum: 0 },
+						principalPaid: { type: "number", minimum: 0 },
+						interestPaid: { type: "number", minimum: 0 },
+						remainingBalance: { type: "number", minimum: 0 },
+					},
+				},
+				minItems: 1,
+			},
+		},
+	},
+};
 
-function makeBuildSandboxName(): string {
-	return `loan-calculator-demo-build-${Date.now().toString(36)}`;
-}
+let runtimePromise: Promise<ToolLogicRuntimeMetadata> | null = null;
 
-async function listTaggedSandboxes(
-	phase: "all" | "running",
-	purpose?: string
-): Promise<PorterSandboxRecord[]> {
-	const args = [
-		"sandbox",
-		"list",
-		"--json",
-		"--tag",
-		`tool=${LOAN_CALCULATOR_TOOL_TAG}`,
-		"--phase",
-		phase,
-	];
-	if (purpose) args.push("--tag", `purpose=${purpose}`);
-	return runPorterJson<PorterSandboxRecord[]>(args, { timeoutMs: EXEC_TIMEOUT_MS });
-}
-
-async function listSnapshots(): Promise<PorterSnapshotRecord[]> {
-	return runPorterJson<PorterSnapshotRecord[]>(["sandbox", "snapshots", "list", "--json"], {
-		timeoutMs: EXEC_TIMEOUT_MS,
-	});
-}
-
-async function discoverLatestSnapshotId(): Promise<string | null> {
-	const [buildSandboxes, snapshots] = await Promise.all([
-		listTaggedSandboxes("all", "build"),
-		listSnapshots(),
-	]);
-	const buildSandboxIds = new Set(buildSandboxes.map((sandbox) => sandbox.id));
-	const latestSnapshot = snapshots
-		.filter((snapshot) => snapshot.status === "ready" && buildSandboxIds.has(snapshot.sandbox_id))
-		.sort((left, right) => (right.t_ready_unix_ms ?? 0) - (left.t_ready_unix_ms ?? 0))[0];
-	return latestSnapshot?.id ?? null;
-}
-
-async function createBuildSandbox(name: string): Promise<void> {
-	await runPorterCommand(
-		[
-			"sandbox",
-			"create",
-			NODE_IMAGE,
-			"--name",
-			name,
-			"--ttl",
-			BUILD_SANDBOX_TTL,
-			"--cpu",
-			SANDBOX_CPU,
-			"--memory",
-			SANDBOX_MEMORY,
-			"--tag",
-			`tool=${LOAN_CALCULATOR_TOOL_TAG}`,
-			"--tag",
-			"purpose=build",
-			"--",
-			"sleep",
-			"infinity",
-		],
-		{ timeoutMs: BUILD_TIMEOUT_MS }
-	);
-}
-
-async function writeHandlerIntoSandbox(name: string): Promise<void> {
-	const script = `cat > ${LOAN_CALCULATOR_HANDLER_PATH} <<'EOF'\n${getLoanCalculatorHandlerSource()}\nEOF\nchmod +x ${LOAN_CALCULATOR_HANDLER_PATH}`;
-	await runPorterCommand(["sandbox", "exec", name, "--command", script], {
-		timeoutMs: BUILD_TIMEOUT_MS,
-	});
-}
-
-async function snapshotSandbox(name: string): Promise<string> {
-	const snapshot = await runPorterJson<PorterSnapshotRecord>(
-		["sandbox", "snapshot", name, "--json"],
-		{
-			timeoutMs: BUILD_TIMEOUT_MS,
-		}
-	);
-	if (!snapshot.id) throw new Error("Porter sandbox snapshot did not return an id.");
-	return snapshot.id;
-}
-
-async function terminateSandbox(name: string): Promise<void> {
-	await runPorterCommand(["sandbox", "terminate", name], { timeoutMs: EXEC_TIMEOUT_MS });
-}
-
-async function buildLoanCalculatorSnapshot(): Promise<string> {
-	const name = makeBuildSandboxName();
-	await createBuildSandbox(name);
-	try {
-		await writeHandlerIntoSandbox(name);
-		return await snapshotSandbox(name);
-	} finally {
-		await terminateSandbox(name).catch((error) => {
-			console.warn("[loan-calculator-sandbox] failed to terminate build sandbox", error);
+async function ensureLoanCalculatorRuntime(): Promise<ToolLogicRuntimeMetadata> {
+	if (!runtimePromise) {
+		runtimePromise = buildPromotedToolLogicRuntime({
+			invokePath: "/api/tools/logic-demo/invoke",
+			toolTag: LOAN_CALCULATOR_TOOL_TAG,
+			contract: loanCalculatorContract,
+			handlerSource: getLoanCalculatorHandlerSource(),
+			generationModel: "hand-authored-demo",
+			classificationReason: "Prototype sandbox demo for fixed loan-amortization logic.",
+			staticAnalysisPassedAt: new Date().toISOString(),
+			smokeTestInputs: [
+				{ principal: 100000, annualRatePercent: 6, termMonths: 360 },
+				{ principal: 25000, annualRatePercent: 0, termMonths: 60 },
+				{ principal: 420000, annualRatePercent: 4.5, termMonths: 180 },
+			],
+		});
+		runtimePromise.catch(() => {
+			runtimePromise = null;
 		});
 	}
+	return runtimePromise;
 }
 
 export async function ensureLoanCalculatorSnapshot(): Promise<string> {
-	if (!snapshotPromise) {
-		snapshotPromise = (async () => {
-			const existing = await discoverLatestSnapshotId();
-			return existing ?? buildLoanCalculatorSnapshot();
-		})();
-		snapshotPromise.catch(() => {
-			snapshotPromise = null;
-		});
-	}
-	return snapshotPromise;
-}
-
-async function terminateExistingWarmSandboxes(): Promise<void> {
-	const sandboxes = await listTaggedSandboxes("all", "warm-pool");
-	for (const sandbox of sandboxes) {
-		if (sandbox.phase === "terminated") continue;
-		await terminateSandbox(sandbox.name).catch((error) => {
-			console.warn("[loan-calculator-sandbox] failed to terminate stale warm sandbox", error);
-		});
-	}
-}
-
-async function discoverWarmSandbox(snapshotId: string): Promise<string | null> {
-	const sandboxes = await listTaggedSandboxes("running", "warm-pool");
-	const matching = sandboxes
-		.filter((sandbox) => sandbox.tags?.snapshot === snapshotId)
-		.sort((left, right) => right.name.localeCompare(left.name))[0];
-	return matching?.name ?? null;
-}
-
-function makeWarmSandboxName(snapshotId: string): string {
-	return `${WARM_SANDBOX_NAME_PREFIX}-${snapshotId.slice(0, 8)}-${Date.now().toString(36)}`;
-}
-
-async function createWarmSandbox(snapshotId: string): Promise<string> {
-	const sandboxName = makeWarmSandboxName(snapshotId);
-	await terminateExistingWarmSandboxes();
-	await runPorterCommand(
-		[
-			"sandbox",
-			"create",
-			"--from-snapshot",
-			snapshotId,
-			"--name",
-			sandboxName,
-			"--ttl",
-			WARM_SANDBOX_TTL,
-			"--cpu",
-			SANDBOX_CPU,
-			"--memory",
-			SANDBOX_MEMORY,
-			"--tag",
-			`tool=${LOAN_CALCULATOR_TOOL_TAG}`,
-			"--tag",
-			"purpose=warm-pool",
-			"--tag",
-			`snapshot=${snapshotId}`,
-			"--",
-			"sleep",
-			"infinity",
-		],
-		{ timeoutMs: BUILD_TIMEOUT_MS }
-	);
-	return sandboxName;
+	return (await ensureLoanCalculatorRuntime()).snapshotId;
 }
 
 export async function ensureWarmLoanCalculatorSandbox(): Promise<{
 	sandboxName: string;
 	snapshotId: string;
 }> {
-	if (!warmSandboxPromise) {
-		warmSandboxPromise = (async () => {
-			const snapshotId = await ensureLoanCalculatorSnapshot();
-			const existing = await discoverWarmSandbox(snapshotId);
-			const sandboxName = existing ?? (await createWarmSandbox(snapshotId));
-			return { sandboxName, snapshotId };
-		})();
-		warmSandboxPromise.catch(() => {
-			warmSandboxPromise = null;
-		});
-	}
-	return warmSandboxPromise;
-}
-
-function shouldRecreateWarmSandbox(error: unknown): boolean {
-	const message = error instanceof Error ? error.message : String(error);
-	return /no running task found|not found|failed: daemon error/i.test(message);
-}
-
-async function execLoanCalculator(
-	sandboxName: string,
-	input: LoanCalculatorInput
-): Promise<LoanCalculatorOutput> {
-	const { stdout } = await runPorterCommand(
-		["sandbox", "exec", sandboxName, "-i", "--", "node", LOAN_CALCULATOR_HANDLER_PATH],
-		{
-			input: JSON.stringify(input),
-			timeoutMs: EXEC_TIMEOUT_MS,
-		}
-	);
-	return loanCalculatorOutputSchema.parse(JSON.parse(stdout));
+	return ensureWarmToolLogicSandbox(await ensureLoanCalculatorRuntime());
 }
 
 export async function invokeLoanCalculatorInSandbox(
 	input: LoanCalculatorInput
 ): Promise<LoanCalculatorSandboxInvocation> {
-	let warmSandbox = await ensureWarmLoanCalculatorSandbox();
-
-	try {
-		const output = await execLoanCalculator(warmSandbox.sandboxName, input);
-		return { output, sandboxName: warmSandbox.sandboxName, snapshotId: warmSandbox.snapshotId };
-	} catch (error) {
-		if (!shouldRecreateWarmSandbox(error)) throw error;
-		warmSandboxPromise = null;
-		await terminateSandbox(warmSandbox.sandboxName).catch(() => undefined);
-		warmSandbox = await ensureWarmLoanCalculatorSandbox();
-		const output = await execLoanCalculator(warmSandbox.sandboxName, input);
-		return { output, sandboxName: warmSandbox.sandboxName, snapshotId: warmSandbox.snapshotId };
-	}
+	const runtime = await ensureLoanCalculatorRuntime();
+	const result = await invokeToolLogicInSandbox(runtime, input);
+	return {
+		output: result.output as LoanCalculatorOutput,
+		sandboxName: result.sandboxName,
+		snapshotId: result.snapshotId,
+	};
 }

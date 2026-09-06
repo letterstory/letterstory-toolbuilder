@@ -26,6 +26,7 @@
     "@resvg/resvg-js": "^2.6.2",
     "@supabase/supabase-js": "^2.115.0",
     "@tailwindcss/postcss": "^4.3.3",
+    "acorn": "^8.18.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^1.40.0",

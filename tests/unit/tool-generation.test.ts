@@ -6,6 +6,7 @@ const buildCompetitorContextForBrandMock = vi.hoisted(() => vi.fn());
 const saveGeneratedToolMock = vi.hoisted(() => vi.fn());
 const getGeneratedToolMock = vi.hoisted(() => vi.fn());
 const updateGeneratedToolMock = vi.hoisted(() => vi.fn());
+const prepareToolLogicMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/brand", () => ({
 	pullBrandProfile: pullBrandProfileMock,
@@ -24,6 +25,11 @@ vi.mock("@/lib/generation/store", () => ({
 	saveGeneratedTool: saveGeneratedToolMock,
 	getGeneratedTool: getGeneratedToolMock,
 	updateGeneratedTool: updateGeneratedToolMock,
+}));
+
+vi.mock("@/lib/tool-logic/generation", () => ({
+	prepareToolLogic: prepareToolLogicMock,
+	summarizeContractForPrompt: (contract: unknown) => JSON.stringify(contract),
 }));
 
 import {
@@ -104,6 +110,7 @@ describe("generateTool", () => {
 		saveGeneratedToolMock.mockReset();
 		getGeneratedToolMock.mockReset();
 		updateGeneratedToolMock.mockReset();
+		prepareToolLogicMock.mockReset();
 		global.fetch = originalFetch;
 
 		for (const [key, value] of Object.entries(originalEnv)) {
@@ -130,6 +137,10 @@ describe("generateTool", () => {
 			history: [],
 		}));
 		buildCompetitorContextForBrandMock.mockResolvedValue(null);
+		prepareToolLogicMock.mockResolvedValue({
+			status: "not_needed",
+			classification: { needsServerLogic: false, reason: "Client-side interaction is sufficient." },
+		});
 	});
 
 	it("keeps the Anthropic pipeline budget under both the target and nginx caps", () => {
@@ -202,7 +213,9 @@ describe("generateTool", () => {
 			expect.objectContaining({
 				projectName: "Untitled tool",
 				siteUrl: "https://stripe.com",
-			})
+				logic: null,
+			}),
+			expect.objectContaining({ id: expect.any(String) })
 		);
 	});
 
@@ -2048,9 +2061,14 @@ describe("generateTool — revisions (toolId set)", () => {
 		saveGeneratedToolMock.mockReset();
 		getGeneratedToolMock.mockReset();
 		updateGeneratedToolMock.mockReset();
+		prepareToolLogicMock.mockReset();
 		global.fetch = originalFetch;
 		process.env.ANTHROPIC_API_KEY = "test-key";
 		delete process.env.ANTHROPIC_MODEL;
+		prepareToolLogicMock.mockResolvedValue({
+			status: "not_needed",
+			classification: { needsServerLogic: false, reason: "Client-side interaction is sufficient." },
+		});
 
 		updateGeneratedToolMock.mockImplementation(async (id, updates) => ({
 			...updates,

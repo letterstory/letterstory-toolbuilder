@@ -1,8 +1,5 @@
-export const LOAN_CALCULATOR_HANDLER_PATH = "/handler.js";
-
 export function getLoanCalculatorHandlerSource(): string {
-	return String.raw`#!/usr/bin/env node
-function roundCurrency(value) {
+	return String.raw`function roundCurrency(value) {
 	return Math.round((value + Number.EPSILON) * 100) / 100;
 }
 
@@ -25,24 +22,25 @@ function validateInput(input) {
 	return { principal, annualRatePercent, termMonths };
 }
 
-function calculateLoanAmortization(input) {
-	const monthlyRate = input.annualRatePercent / 100 / 12;
+async function handler(input) {
+	const validated = validateInput(input);
+	const monthlyRate = validated.annualRatePercent / 100 / 12;
 	const scheduledMonthlyPayment = roundCurrency(
 		monthlyRate === 0
-			? input.principal / input.termMonths
-			: (input.principal * monthlyRate) / (1 - Math.pow(1 + monthlyRate, -input.termMonths))
+			? validated.principal / validated.termMonths
+			: (validated.principal * monthlyRate) / (1 - Math.pow(1 + monthlyRate, -validated.termMonths))
 	);
 
-	let remainingBalance = roundCurrency(input.principal);
+	let remainingBalance = roundCurrency(validated.principal);
 	let totalPaid = 0;
 	let totalInterest = 0;
 	let finalPayment = scheduledMonthlyPayment;
 	const amortizationSchedule = [];
 
-	for (let paymentNumber = 1; paymentNumber <= input.termMonths; paymentNumber += 1) {
+	for (let paymentNumber = 1; paymentNumber <= validated.termMonths; paymentNumber += 1) {
 		const interestPaid = roundCurrency(remainingBalance * monthlyRate);
 		const principalPaid =
-			paymentNumber === input.termMonths
+			paymentNumber === validated.termMonths
 				? roundCurrency(remainingBalance)
 				: roundCurrency(Math.min(remainingBalance, scheduledMonthlyPayment - interestPaid));
 		const paymentAmount = roundCurrency(interestPaid + principalPaid);
@@ -60,10 +58,10 @@ function calculateLoanAmortization(input) {
 	}
 
 	return {
-		principal: roundCurrency(input.principal),
-		annualRatePercent: input.annualRatePercent,
-		termMonths: input.termMonths,
-		monthlyRatePercent: roundCurrency(input.annualRatePercent / 12),
+		principal: roundCurrency(validated.principal),
+		annualRatePercent: validated.annualRatePercent,
+		termMonths: validated.termMonths,
+		monthlyRatePercent: roundCurrency(validated.annualRatePercent / 12),
 		scheduledMonthlyPayment,
 		finalPayment,
 		totalPaid,
@@ -72,20 +70,6 @@ function calculateLoanAmortization(input) {
 	};
 }
 
-async function main() {
-	let raw = "";
-	for await (const chunk of process.stdin) {
-		raw += chunk;
-	}
-	const input = validateInput(JSON.parse(raw || "null"));
-	const output = calculateLoanAmortization(input);
-	process.stdout.write(JSON.stringify(output));
-}
-
-main().catch((error) => {
-	const message = error instanceof Error ? error.message : String(error);
-	process.stderr.write(message + "\n");
-	process.exit(1);
-});
+module.exports = { handler };
 `;
 }

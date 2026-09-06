@@ -21,11 +21,12 @@ For CLI-specific detail, see [`cli/README.md`](./cli/README.md). This file is th
 | Tools list     | `GET /api/tools`                | `list_generated_tools`    | `npm run cli -- tools list`                                                                                 |
 | Tools get      | `GET /api/tools/{id}`           | `get_generated_tool`      | `npm run cli -- tools get <id>`                                                                             |
 | Tools generate | `POST /api/tools/generate`      | `generate_tool`           | `npm run cli -- tools generate --prompt <text> [--project-name <name>] [--site-url <url>] [--tool-id <id>]` |
+| Tool logic invoke | `POST /api/tools/{id}/logic/invoke` | — | — |
 | Tools rollback | `POST /api/tools/{id}/rollback` | `rollback_generated_tool` | `npm run cli -- tools rollback <id> --version <n>`                                                          |
 
 > If you install or link the root `toolbuilder` bin, the same commands also work as `toolbuilder ...`. This doc uses `npm run cli -- ...` because that is how the repo currently documents local usage.
 
-> Prototype-only route: `POST /api/tools/logic-demo/invoke` runs the fixed loan-calculator demo inside a Porter sandbox. It is intentionally REST-only for this spike and is not yet wired into MCP/CLI parity or `/api/tools/generate`.
+> Logic-capable tools now store sandbox metadata and expose `POST /api/tools/{id}/logic/invoke` as the per-tool server-side execution route. The original prototype route `POST /api/tools/logic-demo/invoke` remains available as the fixed loan-calculator sandbox demo.
 
 ## MCP discovery
 
@@ -1184,6 +1185,8 @@ Example response shape:
 
 Add `"toolId": "bmi-calculator"` to the request body to revise an existing tool in place. The returned `embedSnippet` is the exact paste-ready iframe + resize-listener snippet for the generated tool.
 
+When the generation-time classifier decides the prompt needs server-side logic, the response now also includes `tool.logic` metadata (invoke path, snapshot id, warm sandbox name, generated contract, validation timestamps). The generated HTML is instructed to call the stored invoke route instead of reproducing that business logic client-side. If logic generation or validation fails, generation still succeeds with a normal static/client-side tool and a warning explains the fallback.
+
 ### MCP
 
 - **Tool name:** `generate_tool`
@@ -1240,7 +1243,54 @@ Example response shape:
 - **With env override:** `TOOLBUILDER_API_URL=https://your-deployed-origin npm run cli -- tools generate --prompt "BMI calculator" --project-name "BMI Calculator" --site-url https://gymshark.com`
 - **Output note:** in addition to the JSON response on stdout, the CLI prints a labeled `Embed snippet:` block to stderr for `tools generate`.
 
-## 7. Tools rollback
+## 7. Tool logic invoke
+
+### REST
+
+- **Method + path:** `POST /api/tools/{id}/logic/invoke`
+
+```bash
+BASE_URL=http://localhost:3000
+
+curl -sS -X POST "$BASE_URL/api/tools/<tool-id>/logic/invoke" \
+  -H "Content-Type: application/json" \
+  --data '{
+    "filingStatus": "single",
+    "taxableIncome": 90000
+  }'
+```
+
+Example response shape:
+
+```json
+{
+  "status": "success",
+  "output": {
+    "filingStatus": "single",
+    "taxableIncome": 90000,
+    "totalTax": 14853,
+    "marginalRate": 0.22,
+    "effectiveRate": 0.1650333333,
+    "bracketBreakdown": [
+      {
+        "rate": 0.1,
+        "bracketMin": 0,
+        "bracketMax": 11600,
+        "incomeInBracket": 11600,
+        "taxInBracket": 1160
+      }
+    ]
+  },
+  "sandbox": {
+    "sandboxName": "generated-tool-logic-...-warm-...",
+    "snapshotId": "6205d5eb-da05-46ec-ac18-205aa5a7b45d"
+  }
+}
+```
+
+This route exists only for tools whose stored `tool.logic` metadata is present. Requests are validated against the tool's generated input contract before the warm sandbox is invoked, and the sandbox response is validated against the generated output contract before it is returned.
+
+## 8. Tools rollback
 
 ### REST
 

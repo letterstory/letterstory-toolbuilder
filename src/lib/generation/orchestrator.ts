@@ -15,8 +15,10 @@
 //   - hosting is local file-backed storage for now; Porter deployment is a
 //     separate follow-up once the generation quality/contract is proven out.
 
+import { randomUUID } from "node:crypto";
 import { envServer } from "@/lib/config/env.server";
 import { requestAnthropicText } from "@/lib/anthropic/messages";
+import { TOOL_GENERATION_TARGET_BUDGET_MS } from "@/lib/generation/budgets";
 import { buildPendingCompetitorContext } from "@/lib/brand/competitor-context";
 import { MIN_LOGO_EDGE_PX } from "@/lib/brand/logo";
 import { isBrandIngestionConfigured, pullBrandProfile, type BrandProfile } from "@/lib/brand";
@@ -37,6 +39,7 @@ import {
 	type GeneratedToolVisualCongruence,
 	type GeneratedToolRecord,
 } from "@/lib/generation/store";
+import { prepareToolLogic, summarizeContractForPrompt, type ToolLogicPromptContext } from "@/lib/tool-logic/generation";
 
 export interface ToolGenerationRequest {
 	projectName: string;
@@ -73,8 +76,7 @@ export interface ToolGenerationFailureResult {
 
 export type ToolGenerationResult = ToolGenerationSuccessResult | ToolGenerationFailureResult;
 
-export const NGINX_GENERATION_ROUTE_BUDGET_MS = 300_000;
-export const TOOL_GENERATION_TARGET_BUDGET_MS = 280_000;
+export { NGINX_GENERATION_ROUTE_BUDGET_MS, TOOL_GENERATION_TARGET_BUDGET_MS } from "@/lib/generation/budgets";
 const PRIMARY_ANTHROPIC_TIMEOUT_MS = 210_000;
 const INITIAL_RETRY_ANTHROPIC_TIMEOUT_MS = 50_000;
 const REVISION_RETRY_ANTHROPIC_TIMEOUT_MS = 70_000;
@@ -188,8 +190,19 @@ export async function generateTool(request: ToolGenerationRequest): Promise<Tool
 	}
 
 	const normalizedSiteUrl = request.siteUrl.trim();
+	const newToolId = randomUUID();
 	const brandStartedAt = Date.now();
-	const { brandProfile, brandWarning } = await resolveBrandContext(normalizedSiteUrl);
+	const [brandResult, logicPreparation] = await Promise.all([
+		resolveBrandContext(normalizedSiteUrl),
+		prepareToolLogic({
+			projectName: request.projectName.trim() || "Untitled tool",
+			prompt: request.prompt,
+			toolId: newToolId,
+			version: 1,
+			requestStartedAt: startedAt,
+		}),
+	]);
+	const { brandProfile, brandWarning } = brandResult;
 	const brandContextMs = Date.now() - brandStartedAt;
 	const brandSnapshot = toBrandSnapshot(
 		brandProfile,
@@ -207,6 +220,9 @@ export async function generateTool(request: ToolGenerationRequest): Promise<Tool
 		brandSnapshot: effectiveBrandSnapshot,
 		brandWarning,
 		requestStartedAt: startedAt,
+		toolId: newToolId,
+		logicPromptContext: logicPreparation.status === "ready" ? logicPreparation.promptContext : null,
+		additionalWarnings: logicPreparation.status === "fallback" ? [logicPreparation.warning] : [],
 	});
 	if (built.status === "error") {
 		return {
@@ -219,11 +235,15 @@ export async function generateTool(request: ToolGenerationRequest): Promise<Tool
 		};
 	}
 
-	const tool = await saveGeneratedTool({
-		...built.content,
-		projectName: request.projectName.trim() || "Untitled tool",
-		siteUrl: normalizedSiteUrl || null,
-	});
+	const tool = await saveGeneratedTool(
+		{
+			...built.content,
+			projectName: request.projectName.trim() || "Untitled tool",
+			siteUrl: normalizedSiteUrl || null,
+			logic: logicPreparation.status === "ready" ? logicPreparation.metadata : null,
+		},
+		{ id: newToolId }
+	);
 
 	return {
 		status: "success",
@@ -258,32 +278,44 @@ async function reviseTool(
 	}
 
 	const normalizedSiteUrl = request.siteUrl.trim();
-	// Re-pulling brand context on every small wording tweak would mean an
-	// extra Context.dev + Claude round trip per revision for no benefit — only
-	// re-resolve it when the customer actually points at a different site.
+	const revisionSiteUrl = normalizedSiteUrl || existing.siteUrl || "";
+	const shouldRefreshBrand = Boolean(normalizedSiteUrl && normalizedSiteUrl !== (existing.siteUrl ?? ""));
+	const brandStartedAt = Date.now();
+	const [brandResult, logicPreparation] = await Promise.all([
+		shouldRefreshBrand ? resolveBrandContext(normalizedSiteUrl) : Promise.resolve({ brandProfile: null, brandWarning: null }),
+		prepareToolLogic({
+			projectName: (request.projectName || existing.projectName).trim() || existing.projectName,
+			prompt: request.prompt,
+			toolId,
+			version: existing.version + 1,
+			requestStartedAt: startedAt,
+			existingPrompt: existing.prompt,
+			existingLogic: existing.logic ?? null,
+		}),
+	]);
 	let brandSnapshot = existing.brandSnapshot;
 	let brandWarning: string | null = null;
-	let brandContextMs = 0;
-	if (normalizedSiteUrl && normalizedSiteUrl !== (existing.siteUrl ?? "")) {
-		const brandStartedAt = Date.now();
-		const resolved = await resolveBrandContext(normalizedSiteUrl);
-		brandContextMs = Date.now() - brandStartedAt;
+	const brandContextMs = shouldRefreshBrand ? Date.now() - brandStartedAt : 0;
+	if (shouldRefreshBrand) {
 		brandSnapshot = toBrandSnapshot(
-			resolved.brandProfile,
+			brandResult.brandProfile,
 			buildPendingCompetitorContext(normalizedSiteUrl)
 		);
-		brandWarning = resolved.brandWarning;
+		brandWarning = brandResult.brandWarning;
 	}
 	brandSnapshot = applyBrandOverridesToSnapshot(brandSnapshot, request.brandOverrides);
 
 	const built = await buildToolContent({
 		projectName: request.projectName || existing.projectName,
 		prompt: request.prompt,
-		siteUrl: normalizedSiteUrl || existing.siteUrl,
+		siteUrl: revisionSiteUrl || null,
 		brandSnapshot,
 		brandWarning,
 		existingHtml: existing.html,
 		requestStartedAt: startedAt,
+		toolId,
+		logicPromptContext: logicPreparation.status === "ready" ? logicPreparation.promptContext : null,
+		additionalWarnings: logicPreparation.status === "fallback" ? [logicPreparation.warning] : [],
 	});
 	if (built.status === "error") {
 		return {
@@ -300,6 +332,7 @@ async function reviseTool(
 		...built.content,
 		projectName: (request.projectName || existing.projectName).trim() || existing.projectName,
 		siteUrl: normalizedSiteUrl || existing.siteUrl,
+		logic: logicPreparation.status === "ready" ? logicPreparation.metadata : null,
 		// Keep the previous copy if this revision's copy generation failed,
 		// rather than blanking out perfectly good existing copy.
 		copy: built.content.copy ?? existing.copy,
@@ -359,6 +392,9 @@ async function buildToolContent(opts: {
 	brandWarning: string | null;
 	existingHtml?: string;
 	requestStartedAt: number;
+	toolId: string;
+	logicPromptContext: ToolLogicPromptContext | null;
+	additionalWarnings?: string[];
 }): Promise<
 	| BuildToolContentResult
 	| {
@@ -412,6 +448,7 @@ async function buildToolContent(opts: {
 				retryMode,
 				existingHtml: opts.existingHtml,
 				timeoutMs,
+				logicPromptContext: opts.logicPromptContext,
 			});
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
@@ -620,6 +657,7 @@ async function buildToolContent(opts: {
 		}
 	}
 	const warnings = [
+		...(opts.additionalWarnings ?? []),
 		...(opts.brandWarning ? [opts.brandWarning] : []),
 		...repaired.warnings,
 		...enforced.warnings,
@@ -847,6 +885,7 @@ async function requestToolHtml(opts: {
 	maxTokens: number;
 	retryMode?: HtmlRetryMode;
 	timeoutMs: number;
+	logicPromptContext?: ToolLogicPromptContext | null;
 	/** When set, this is a revision: edit this HTML per the prompt instead of building from scratch. */
 	existingHtml?: string;
 }): Promise<string> {
@@ -857,6 +896,7 @@ async function requestToolHtml(opts: {
 	const model = envServer.ANTHROPIC_MODEL || DEFAULT_ANTHROPIC_MODEL;
 	const isRevision = Boolean(opts.existingHtml);
 	const brandPrompt = buildBrandPrompt(opts.brandSnapshot);
+	const logicPrompt = buildLogicFrontendPrompt(opts.logicPromptContext ?? null);
 
 	const instructions = [
 		"You are a senior product engineer building a small, real, functional web tool for a customer to embed on their own website as an iframe.",
@@ -878,6 +918,12 @@ async function requestToolHtml(opts: {
 		"- If an inline logo asset is provided, render that asset instead of typing a substitute wordmark. If no logo asset is provided, use plain text brand-name treatment or omit the logo area entirely — never invent an icon, mascot, monogram, sparkle, silhouette, or abstract badge, and never fall back to a different historical brand palette.",
 		"- Use the provided primary/accent colors, font family names (assume standard web-safe fallbacks after the named font), and optional inline logo asset. Do not fabricate a different brand.",
 		"- Keep the whole document self-sufficient and safe: no forms that submit to external endpoints, no fetch()/XMLHttpRequest calls to external hosts.",
+		...(logicPrompt
+			? [
+				"- This tool has approved server-side logic. Call ONLY the provided same-origin invoke endpoint for computation; do not duplicate that business logic client-side.",
+				"- Show a loading state while the request is in flight, show inline errors on non-2xx/error responses, and keep the form usable for repeated calculations.",
+			]
+			: []),
 		"- Include a small, unobtrusive 'Powered by Letterstory' text credit near the bottom.",
 		"- The branded verification header rendered above the document already displays the tool name. Inside <main>, do NOT repeat the project name as another top-level heading. Start with supporting descriptive copy instead, and only use a different heading if it adds new meaning beyond restating the tool name.",
 		"- Ramp UX rule 1 — contextualized results, never naked numbers: after any numeric calculation, show a labeled value AND one plain-language interpretation sentence. Examples: `Total Deduction: $362.50` + `100% business miles reimbursed`; `Estimated late fees: $480` + `That is roughly the cost of one missed invoice this month.` Never leave a raw number standing alone, and a formula note/disclaimer does NOT count as the interpretation sentence.",
@@ -906,6 +952,7 @@ async function requestToolHtml(opts: {
 		"",
 		"Brand context:",
 		brandPrompt,
+		...(logicPrompt ? ["", "Server-side logic contract:", logicPrompt] : []),
 		...(opts.retryMode === "invalid_html"
 			? [
 					"",
@@ -925,6 +972,7 @@ async function requestToolHtml(opts: {
 		isRevision,
 		brandPromptChars: brandPrompt.length,
 		includesInlineLogo: brandPrompt.includes("Logo data URI:"),
+		hasServerLogic: Boolean(opts.logicPromptContext),
 		retryMode: opts.retryMode ?? null,
 		userContentChars: userContent.length,
 	});
@@ -1418,6 +1466,21 @@ async function maybeRepairBrandPresentation(opts: {
 			"Brand repair failed unexpectedly; applied deterministic logo/font corrections instead.",
 		]);
 	}
+}
+
+function buildLogicFrontendPrompt(logicPromptContext: ToolLogicPromptContext | null): string | null {
+	if (!logicPromptContext) return null;
+	return [
+		`Invoke endpoint: ${logicPromptContext.invokePath}`,
+		"POST JSON to that path with Content-Type: application/json.",
+		"Request body: send the raw top-level input object itself. Do NOT wrap it in { input }, { payload }, or any other envelope.",
+		JSON.stringify(logicPromptContext.requestExample, null, 2),
+		"Success response envelope:",
+		JSON.stringify(logicPromptContext.responseEnvelopeExample, null, 2),
+		"Use the contract below when collecting form values and rendering output fields:",
+		summarizeContractForPrompt({ input: logicPromptContext.contract.input, output: logicPromptContext.contract.output }),
+		"The browser must not reimplement the business rules locally; submit the collected JSON to the invoke endpoint instead.",
+	].join("\n");
 }
 
 function buildBrandPrompt(brandSnapshot: GeneratedToolBrandSnapshot | null): string {
