@@ -169,7 +169,7 @@ describe("generateTool", () => {
 		}
 	});
 
-	it("pulls brand context and includes a snapshot when siteUrl is given", async () => {
+	it("pulls brand context without blocking generation on competitor analysis", async () => {
 		isBrandIngestionConfiguredMock.mockReturnValue(true);
 		pullBrandProfileMock.mockResolvedValue({
 			brandName: "Stripe",
@@ -177,40 +177,6 @@ describe("generateTool", () => {
 			fonts: ["Inter"],
 			typography: { headingFont: "Inter", bodyFont: "Inter" },
 			images: { logo: { canonicalDataUri: "data:image/png;base64,abc" } },
-		});
-		buildCompetitorContextForBrandMock.mockResolvedValue({
-			industry: "payments",
-			signal: "matches",
-			summary:
-				"Competitor read for payments: cool palette, sans-serif typography. Extracted target broadly matches that pattern.",
-			target: {
-				primaryColor: "#635BFF",
-				primaryColorFamily: "cool",
-				fontFamily: "Inter",
-				fontCategory: "sans-serif",
-				logoStyle: "wordmark",
-			},
-			industryNorms: {
-				sampleSize: 2,
-				primaryColorFamily: "cool",
-				fontCategory: "sans-serif",
-				logoStyle: "wordmark",
-			},
-			competitors: [
-				{
-					companyName: "Adyen",
-					domain: "adyen.com",
-					status: "analyzed",
-					brandName: "Adyen",
-					primaryColor: "#0ABF53",
-					primaryColorFamily: "cool",
-					fontFamily: "Inter",
-					fontCategory: "sans-serif",
-					logoStyle: "wordmark",
-					notes: [],
-				},
-			],
-			notes: [],
 		});
 		mockAnthropicSuccess("<!doctype html><html><body>hi</body></html>");
 
@@ -221,6 +187,7 @@ describe("generateTool", () => {
 		});
 
 		expect(pullBrandProfileMock).toHaveBeenCalledWith("https://stripe.com");
+		expect(buildCompetitorContextForBrandMock).not.toHaveBeenCalled();
 		expect(result.status).toBe("success");
 		if (result.status === "success") {
 			expect(result.tool.brandSnapshot).toMatchObject({
@@ -231,11 +198,8 @@ describe("generateTool", () => {
 				bodyFont: "Inter",
 				logoPolicy: "exact_asset",
 				logoDataUri: "data:image/png;base64,abc",
-				competitorContext: expect.objectContaining({
-					industry: "payments",
-					signal: "matches",
-				}),
 			});
+			expect(result.tool.brandSnapshot?.competitorContext ?? null).toBeNull();
 			expect(result.tool.brandFidelity).toEqual({ verdict: "pass", notes: "" });
 		}
 	});

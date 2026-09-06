@@ -18,7 +18,6 @@
 import { envServer } from "@/lib/config/env.server";
 import { requestAnthropicText } from "@/lib/anthropic/messages";
 import { isBrandIngestionConfigured, pullBrandProfile, type BrandProfile } from "@/lib/brand";
-import { buildCompetitorContextForBrand } from "@/lib/brand/competitor-context";
 import { enforceBrandPresentation } from "@/lib/generation/brand-enforcement";
 import { buildPendingVisualCongruence } from "@/lib/generation/visual-congruence";
 import {
@@ -168,10 +167,9 @@ export async function generateTool(request: ToolGenerationRequest): Promise<Tool
 
 	const normalizedSiteUrl = request.siteUrl.trim();
 	const brandStartedAt = Date.now();
-	const { brandProfile, brandWarning, competitorContext } =
-		await resolveBrandContext(normalizedSiteUrl);
+	const { brandProfile, brandWarning } = await resolveBrandContext(normalizedSiteUrl);
 	const brandContextMs = Date.now() - brandStartedAt;
-	const brandSnapshot = toBrandSnapshot(brandProfile, competitorContext);
+	const brandSnapshot = toBrandSnapshot(brandProfile);
 
 	const built = await buildToolContent({
 		projectName: request.projectName,
@@ -241,7 +239,7 @@ async function reviseTool(
 		const brandStartedAt = Date.now();
 		const resolved = await resolveBrandContext(normalizedSiteUrl);
 		brandContextMs = Date.now() - brandStartedAt;
-		brandSnapshot = toBrandSnapshot(resolved.brandProfile, resolved.competitorContext);
+		brandSnapshot = toBrandSnapshot(resolved.brandProfile);
 		brandWarning = resolved.brandWarning;
 	}
 
@@ -571,35 +569,43 @@ async function buildToolContent(opts: {
 async function resolveBrandContext(siteUrl: string): Promise<{
 	brandProfile: BrandProfile | null;
 	brandWarning: string | null;
-	competitorContext: GeneratedToolBrandSnapshot["competitorContext"];
 }> {
-	if (!siteUrl) return { brandProfile: null, brandWarning: null, competitorContext: null };
+	if (!siteUrl) return { brandProfile: null, brandWarning: null };
 
 	if (!isBrandIngestionConfigured()) {
 		return {
 			brandProfile: null,
 			brandWarning:
 				"Context.dev isn't configured, so this tool was generated without brand context.",
-			competitorContext: null,
 		};
 	}
 
+	const startedAt = Date.now();
 	try {
 		const brandProfile = await pullBrandProfile(siteUrl);
-		let competitorContext: GeneratedToolBrandSnapshot["competitorContext"] = null;
-		try {
-			competitorContext = await buildCompetitorContextForBrand(brandProfile);
-		} catch {
-			competitorContext = null;
-		}
-		return { brandProfile, brandWarning: null, competitorContext };
+		// Competitor context is dashboard-only metadata today; it is not used by
+		// the generation prompt or any synchronous repair path, so keeping those
+		// extra Anthropic + Context.dev round trips on the critical request path
+		// only burns latency budget and can push live generation toward gateway
+		// timeouts on slow competitor sites.
+		logGenerationStep("brand_context_resolved", {
+			siteUrl,
+			durationMs: Date.now() - startedAt,
+			brandName: brandProfile.brandName,
+			competitorContextMode: "skipped_for_generation_latency",
+		});
+		return { brandProfile, brandWarning: null };
 	} catch (error) {
+		logGenerationStep("brand_context_failed", {
+			siteUrl,
+			durationMs: Date.now() - startedAt,
+			error: error instanceof Error ? error.message : String(error),
+		});
 		return {
 			brandProfile: null,
 			brandWarning: `Brand ingestion failed (${
 				error instanceof Error ? error.message : String(error)
 			}); generated without brand context.`,
-			competitorContext: null,
 		};
 	}
 }
