@@ -183,6 +183,40 @@ describe("enforceBrandPresentation", () => {
 		expect(verifiedCopyBlock).toContain("border-radius: 0.75rem;");
 	});
 
+	it("forces the brand text token onto body text so repaired tools use the authoritative text color", async () => {
+		const html = [
+			"<!doctype html>",
+			"<html><head>",
+			"<style>",
+			"body { background: #FFFFFF; color: #040404; }",
+			"</style>",
+			"</head><body><main><p>Example copy</p></main></body></html>",
+		].join("");
+		const brandSnapshot = makeBrandSnapshot({
+			brandName: "Stripe",
+			colors: {
+				primary: "#635BFF",
+				secondary: "#A494FC",
+				background: "#FFFFFF",
+				text: "#000EFF",
+				accent: "#040404",
+			},
+			logoPolicy: "exact_asset",
+			logoDataUri: "data:image/png;base64,abc",
+		});
+
+		const result = await enforceBrandPresentation({
+			html,
+			projectName: "Recovery Calculator",
+			brandSnapshot,
+		});
+
+		const style = extractEnforcementStyle(result.sanitized.html);
+		expect(style).toContain("--ls-brand-color-text: #000EFF;");
+		expect(style).toContain("body {\n  color: var(--ls-brand-color-text) !important;");
+		expect(style).toContain("input, button, select, textarea {\n  color: inherit;");
+	});
+
 	it("injects CTA ordering helpers when generated markup opts into brand CTA markers", async () => {
 		const html = [
 			"<!doctype html>",
