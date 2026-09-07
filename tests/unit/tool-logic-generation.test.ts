@@ -86,6 +86,30 @@ describe("tool logic generation", () => {
 		expect(buildPromotedToolLogicRuntimeMock).not.toHaveBeenCalled();
 	});
 
+	it("falls back when server-side logic classification fails", async () => {
+		requestAnthropicTextMock.mockRejectedValueOnce(new TypeError("fetch failed"));
+
+		const result = await prepareToolLogic({
+			projectName: "Color Picker",
+			prompt: "Add a color picker with live preview.",
+			toolId: "tool-123",
+			version: 1,
+			requestStartedAt: Date.now(),
+		});
+
+		expect(result).toMatchObject({
+			status: "fallback",
+			classification: {
+				needsServerLogic: false,
+			},
+		});
+		if (result.status === "fallback") {
+			expect(result.warning).toMatch(/classification failed/i);
+			expect(result.warning).toMatch(/fetch failed/i);
+		}
+		expect(buildPromotedToolLogicRuntimeMock).not.toHaveBeenCalled();
+	});
+
 	it("prepares ready server-side logic for a tax estimator prompt", async () => {
 		requestAnthropicTextMock
 			.mockResolvedValueOnce({

@@ -193,12 +193,24 @@ export async function prepareToolLogic(opts: {
 	existingPrompt?: string;
 	existingLogic?: ToolLogicRuntimeMetadata | null;
 }): Promise<PrepareToolLogicResult> {
-	const classification = await classifyToolLogicRequirement({
-		projectName: opts.projectName,
-		prompt: opts.prompt,
-		existingPrompt: opts.existingPrompt,
-		existingHasServerLogic: Boolean(opts.existingLogic),
-	});
+	let classification;
+	try {
+		classification = await classifyToolLogicRequirement({
+			projectName: opts.projectName,
+			prompt: opts.prompt,
+			existingPrompt: opts.existingPrompt,
+			existingHasServerLogic: Boolean(opts.existingLogic),
+		});
+	} catch (error) {
+		return {
+			status: "fallback",
+			classification: {
+				needsServerLogic: false,
+				reason: "Server-side logic classification failed before generation.",
+			},
+			warning: `Server-side logic classification failed, so this tool generated without server-side logic: ${error instanceof Error ? error.message : String(error)}`,
+		};
+	}
 	if (!classification.needsServerLogic) {
 		return { status: "not_needed", classification };
 	}
