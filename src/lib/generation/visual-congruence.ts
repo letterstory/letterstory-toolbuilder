@@ -13,7 +13,7 @@ import {
 
 const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-6";
 const VISUAL_CONGRUENCE_TIMEOUT_MS = 45_000;
-const VISUAL_CONGRUENCE_REPAIR_TIMEOUT_MS = 45_000;
+const VISUAL_CONGRUENCE_REPAIR_TIMEOUT_MS = 180_000;
 const VIEWPORT = { width: 1440, height: 1280 };
 const SETTLE_DELAY_MS = 1_500;
 const VISUAL_WARNING_PREFIX = "Visual brand match";

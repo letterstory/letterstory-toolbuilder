@@ -225,6 +225,12 @@ describe("finalizeVisualCongruenceForTool", () => {
 		);
 
 		expect(requestHtml).toHaveBeenCalledTimes(1);
+		expect(requestHtml).toHaveBeenCalledWith(
+			expect.objectContaining({
+				timeoutMs: 180_000,
+				existingHtml: "<!doctype html><html><body>hi</body></html>",
+			})
+		);
 		expect(saveRepairedTool).not.toHaveBeenCalled();
 		expect(save).toHaveBeenCalledTimes(2);
 		expect(save).toHaveBeenNthCalledWith(
@@ -290,6 +296,12 @@ describe("finalizeVisualCongruenceForTool", () => {
 		);
 
 		expect(requestHtml).toHaveBeenCalledTimes(1);
+		expect(requestHtml).toHaveBeenCalledWith(
+			expect.objectContaining({
+				timeoutMs: 180_000,
+				existingHtml: "<!doctype html><html><body>hi</body></html>",
+			})
+		);
 		expect(analyze).toHaveBeenCalledTimes(2);
 		expect(save).toHaveBeenCalledTimes(1);
 		expect(analyze).toHaveBeenNthCalledWith(2, {
@@ -376,6 +388,12 @@ describe("finalizeVisualCongruenceForTool", () => {
 		);
 
 		expect(requestHtml).toHaveBeenCalledTimes(1);
+		expect(requestHtml).toHaveBeenCalledWith(
+			expect.objectContaining({
+				timeoutMs: 180_000,
+				existingHtml: "<!doctype html><html><body>hi</body></html>",
+			})
+		);
 		expect(analyze).toHaveBeenCalledTimes(2);
 		expect(save).toHaveBeenCalledTimes(1);
 		expect(saveRepairedTool).toHaveBeenCalledTimes(1);
