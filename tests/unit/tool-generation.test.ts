@@ -388,7 +388,19 @@ describe("generateTool", () => {
 			"render that asset instead of typing a substitute wordmark"
 		);
 		expect(htmlCallBody.messages?.[0]?.content).toContain(
-			"Use the supplied colors as the header, CTA, and highlight anchors. Ignore any conflicting legacy palette."
+			"Color restraint rule: most real brand sites are dominated by white, off-white, or other neutral/light surfaces with brand color used sparingly."
+		);
+		expect(htmlCallBody.messages?.[0]?.content).toContain(
+			"Header rule: do not fill the header or hero area with a solid saturated brand-color background by default."
+		);
+		expect(htmlCallBody.messages?.[0]?.content).toContain(
+			"Chrome rule: do not apply the brand's primary or accent color pervasively to structural UI chrome."
+		);
+		expect(htmlCallBody.messages?.[0]?.content).toContain(
+			"Container rule: keep card, panel, border, and shadow treatment subtle and neutral by default."
+		);
+		expect(htmlCallBody.messages?.[0]?.content).toContain(
+			"Ignore any conflicting legacy palette."
 		);
 		expect(htmlCallBody.messages?.[0]?.content).toContain(
 			"Typography usage: Use Airbnb Cereal VF for the brand name text treatment, labels, inputs, buttons, and the main product UI."

@@ -1554,7 +1554,11 @@ function buildBrandPrompt(brandSnapshot: GeneratedToolBrandSnapshot | null): str
 			? `Optional display font: ${headingFont}. Use it sparingly for large editorial-style headings only; do not use it for badges, icons, faux logos, labels, or compact tool chrome.`
 			: "Optional display font: none detected beyond the main UI font.",
 		"Fallback rule: if the named brand fonts are not actually embedded in the document, fall back to a clean system sans-serif stack unless the authoritative brand metadata clearly indicates a serif body/UI identity.",
-		"Use the supplied colors as the header, CTA, and highlight anchors. Ignore any conflicting legacy palette.",
+		"Color restraint rule: most real brand sites are dominated by white, off-white, or other neutral/light surfaces with brand color used sparingly. Default to that pattern unless the detected background color itself is clearly saturated and non-neutral, which is the main signal that the brand really uses bold color fields.",
+		"Header rule: do not fill the header or hero area with a solid saturated brand-color background by default. Prefer a white or neutral header surface and use the brand color only as a small accent such as a thin top border, compact badge, or the primary CTA, unless the detected background color itself is clearly saturated and non-neutral.",
+		"Chrome rule: do not apply the brand's primary or accent color pervasively to structural UI chrome. Input borders, field labels, helper text, dividers, and secondary text should stay neutral or gray by default. Reserve full-strength brand color for one or two focal points at most: the primary action button and, optionally, one highlight, badge, or key result emphasis.",
+		"Container rule: keep card, panel, border, and shadow treatment subtle and neutral by default. Avoid heavy saturated color-outlined containers unless the reference brand clearly uses that convention.",
+		"Ignore any conflicting legacy palette.",
 		brandSnapshot.logoPolicy === "exact_asset"
 			? "A real logo asset exists and will be injected into the header programmatically after generation. Leave space for a clean brand lockup and do not invent, redraw, trace, or type a substitute logo."
 			: `No trustworthy full-logo image is available. If you need visible branding, use a clean text-only brand-name treatment with the exact brand name "${brandSnapshot.brandName ?? "Unknown"}". Do not invent an icon, mascot, sparkle, silhouette, monogram, badge, or faux app-icon.`,
