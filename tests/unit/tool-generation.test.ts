@@ -196,7 +196,32 @@ describe("generateTool", () => {
 		expect(global.fetch).toBe(originalFetch);
 	});
 
-	it("defaults a blank project name to Untitled tool for new tools", async () => {
+	it("uses the generated HTML title when a new tool name is left blank", async () => {
+		mockAnthropicSuccess(
+			"<!doctype html><html><head><title>Google Ads Budget Calculator</title></head><body>hi</body></html>"
+		);
+
+		const result = await generateTool({
+			projectName: "   ",
+			siteUrl: "https://stripe.com",
+			prompt: "a calculator",
+		});
+
+		expect(result.status).toBe("success");
+		if (result.status === "success") {
+			expect(result.tool.projectName).toBe("Google Ads Budget Calculator");
+		}
+		expect(saveGeneratedToolMock).toHaveBeenCalledWith(
+			expect.objectContaining({
+				projectName: "Google Ads Budget Calculator",
+				siteUrl: "https://stripe.com",
+				logic: null,
+			}),
+			expect.objectContaining({ id: expect.any(String) })
+		);
+	});
+
+	it("falls back to Untitled tool when a blank-name generation returns no usable title", async () => {
 		mockAnthropicSuccess("<!doctype html><html><body>hi</body></html>");
 
 		const result = await generateTool({
@@ -212,8 +237,6 @@ describe("generateTool", () => {
 		expect(saveGeneratedToolMock).toHaveBeenCalledWith(
 			expect.objectContaining({
 				projectName: "Untitled tool",
-				siteUrl: "https://stripe.com",
-				logic: null,
 			}),
 			expect.objectContaining({ id: expect.any(String) })
 		);
@@ -2155,6 +2178,34 @@ describe("generateTool — revisions (toolId set)", () => {
 		expect(updateGeneratedToolMock).toHaveBeenCalledWith(
 			"tool-123",
 			expect.objectContaining({ html: expect.stringContaining("revised") })
+		);
+	});
+
+	it("replaces an inherited Untitled tool name on blank-name revisions when the revised HTML provides a title", async () => {
+		getGeneratedToolMock.mockResolvedValue({
+			...existingTool,
+			projectName: "Untitled tool",
+		});
+		mockAnthropicSuccess(
+			"<!doctype html><html><head><title>Stripe Fee Estimator</title></head><body>revised</body></html>"
+		);
+
+		const result = await generateTool({
+			projectName: "   ",
+			siteUrl: "",
+			prompt: "tighten the fee estimate experience",
+			toolId: "tool-123",
+		});
+
+		expect(result.status).toBe("success");
+		if (result.status === "success") {
+			expect(result.tool.projectName).toBe("Stripe Fee Estimator");
+		}
+		expect(updateGeneratedToolMock).toHaveBeenCalledWith(
+			"tool-123",
+			expect.objectContaining({
+				projectName: "Stripe Fee Estimator",
+			})
 		);
 	});
 

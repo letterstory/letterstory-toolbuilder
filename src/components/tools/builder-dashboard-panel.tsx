@@ -6,6 +6,7 @@ import {
 	ChevronDown,
 	Copy,
 	History,
+	Image,
 	Palette,
 	Pencil,
 	RefreshCw,
@@ -446,6 +447,35 @@ export function BuilderDashboardPanel({
 											})}
 										</div>
 									) : null}
+								</div>
+								<div>
+									<div className="flex items-center gap-2">
+										<Image className="size-4 text-brand-text/70" />
+										<p className="text-xs uppercase tracking-[0.16em] text-brand-text/55">Logo</p>
+										{activeTool.brandSnapshot?.logoPolicy === "exact_asset" ? (
+											<Badge
+												variant="outline"
+												className="rounded-full border-brand/10 bg-brand-light/12 text-[10px] uppercase tracking-[0.14em] text-brand-text"
+											>
+												Exact asset
+											</Badge>
+										) : null}
+									</div>
+									<div className="mt-2">
+										{activeTool.brandSnapshot?.logoDataUri ? (
+											<div className="rounded-2xl border border-brand/10 bg-brand-light/12 p-4">
+												<img
+													src={activeTool.brandSnapshot.logoDataUri}
+													alt={`${activeTool.brandSnapshot.brandName ?? "Brand"} logo`}
+													className="block max-h-14 w-auto max-w-full object-contain"
+												/>
+											</div>
+										) : (
+											<p className="text-sm text-muted-foreground">
+												No brand logo captured for this run.
+											</p>
+										)}
+									</div>
 								</div>
 								<div>
 									<div className="flex items-center gap-2">

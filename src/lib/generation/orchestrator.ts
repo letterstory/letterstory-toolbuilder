@@ -22,7 +22,13 @@ import { TOOL_GENERATION_TARGET_BUDGET_MS } from "@/lib/generation/budgets";
 import { buildPendingCompetitorContext } from "@/lib/brand/competitor-context";
 import { MIN_LOGO_EDGE_PX } from "@/lib/brand/logo";
 import { isBrandIngestionConfigured, pullBrandProfile, type BrandProfile } from "@/lib/brand";
-import { enforceBrandPresentation } from "@/lib/generation/brand-enforcement";
+import {
+	DEFAULT_TOOL_PROJECT_NAME,
+	PAGE_OUTER_HORIZONTAL_PADDING,
+	PAGE_OUTER_MAX_WIDTH,
+	enforceBrandPresentation,
+	extractProjectNameFromHtmlTitle,
+} from "@/lib/generation/brand-enforcement";
 import { buildPendingVisualCongruence } from "@/lib/generation/visual-congruence";
 import {
 	looksLikeHtmlDocument,
@@ -163,6 +169,8 @@ export function isToolGenerationConfigured(): boolean {
 
 export async function generateTool(request: ToolGenerationRequest): Promise<ToolGenerationResult> {
 	const startedAt = Date.now();
+	const requestedProjectName = request.projectName.trim();
+	const needsAutoTitle = !requestedProjectName;
 	if (!request.toolId && !request.siteUrl.trim()) {
 		return {
 			status: "error",
@@ -195,7 +203,7 @@ export async function generateTool(request: ToolGenerationRequest): Promise<Tool
 	const [brandResult, logicPreparation] = await Promise.all([
 		resolveBrandContext(normalizedSiteUrl),
 		prepareToolLogic({
-			projectName: request.projectName.trim() || "Untitled tool",
+			projectName: requestedProjectName || DEFAULT_TOOL_PROJECT_NAME,
 			prompt: request.prompt,
 			toolId: newToolId,
 			version: 1,
@@ -214,7 +222,8 @@ export async function generateTool(request: ToolGenerationRequest): Promise<Tool
 	);
 
 	const built = await buildToolContent({
-		projectName: request.projectName,
+		projectName: requestedProjectName,
+		needsAutoTitle,
 		prompt: request.prompt,
 		siteUrl: normalizedSiteUrl || null,
 		brandSnapshot: effectiveBrandSnapshot,
@@ -238,7 +247,6 @@ export async function generateTool(request: ToolGenerationRequest): Promise<Tool
 	const tool = await saveGeneratedTool(
 		{
 			...built.content,
-			projectName: request.projectName.trim() || "Untitled tool",
 			siteUrl: normalizedSiteUrl || null,
 			logic: logicPreparation.status === "ready" ? logicPreparation.metadata : null,
 		},
@@ -278,13 +286,20 @@ async function reviseTool(
 	}
 
 	const normalizedSiteUrl = request.siteUrl.trim();
+	const requestedProjectName = request.projectName.trim();
+	const existingProjectName = existing.projectName.trim();
+	const needsAutoTitle =
+		!requestedProjectName &&
+		(!existingProjectName ||
+			existingProjectName.toLowerCase() === DEFAULT_TOOL_PROJECT_NAME.toLowerCase());
+	const effectiveProjectName = requestedProjectName || (needsAutoTitle ? "" : existingProjectName);
 	const revisionSiteUrl = normalizedSiteUrl || existing.siteUrl || "";
 	const shouldRefreshBrand = Boolean(normalizedSiteUrl && normalizedSiteUrl !== (existing.siteUrl ?? ""));
 	const brandStartedAt = Date.now();
 	const [brandResult, logicPreparation] = await Promise.all([
 		shouldRefreshBrand ? resolveBrandContext(normalizedSiteUrl) : Promise.resolve({ brandProfile: null, brandWarning: null }),
 		prepareToolLogic({
-			projectName: (request.projectName || existing.projectName).trim() || existing.projectName,
+			projectName: effectiveProjectName || DEFAULT_TOOL_PROJECT_NAME,
 			prompt: request.prompt,
 			toolId,
 			version: existing.version + 1,
@@ -306,7 +321,8 @@ async function reviseTool(
 	brandSnapshot = applyBrandOverridesToSnapshot(brandSnapshot, request.brandOverrides);
 
 	const built = await buildToolContent({
-		projectName: request.projectName || existing.projectName,
+		projectName: effectiveProjectName,
+		needsAutoTitle,
 		prompt: request.prompt,
 		siteUrl: revisionSiteUrl || null,
 		brandSnapshot,
@@ -330,7 +346,6 @@ async function reviseTool(
 
 	const tool = await updateGeneratedTool(toolId, {
 		...built.content,
-		projectName: (request.projectName || existing.projectName).trim() || existing.projectName,
 		siteUrl: normalizedSiteUrl || existing.siteUrl,
 		logic: logicPreparation.status === "ready" ? logicPreparation.metadata : null,
 		// Keep the previous copy if this revision's copy generation failed,
@@ -386,6 +401,7 @@ interface BuildToolContentResult {
  */
 async function buildToolContent(opts: {
 	projectName: string;
+	needsAutoTitle: boolean;
 	prompt: string;
 	siteUrl: string | null;
 	brandSnapshot: GeneratedToolBrandSnapshot | null;
@@ -406,7 +422,7 @@ async function buildToolContent(opts: {
 	const buildStartedAt = Date.now();
 	const htmlAttempts: ToolGenerationDiagnostics["htmlAttempts"] = [];
 	logGenerationStep("build_started", {
-		projectName: opts.projectName || "Untitled tool",
+		projectName: opts.projectName || DEFAULT_TOOL_PROJECT_NAME,
 		promptChars: opts.prompt.length,
 		hasBrandSnapshot: Boolean(opts.brandSnapshot),
 		isRevision: Boolean(opts.existingHtml),
@@ -442,6 +458,7 @@ async function buildToolContent(opts: {
 		try {
 			rawHtml = await requestToolHtml({
 				projectName: opts.projectName,
+				needsAutoTitle: opts.needsAutoTitle,
 				prompt: opts.prompt,
 				brandSnapshot: opts.brandSnapshot,
 				maxTokens,
@@ -524,6 +541,11 @@ async function buildToolContent(opts: {
 		};
 	}
 	const initialSanitized = sanitized;
+	const initialResolvedProjectName = resolveProjectNameFromGeneratedHtml(
+		opts.projectName,
+		initialSanitized.html,
+		opts.needsAutoTitle
+	);
 
 	// Both of these are advisory, fail-soft enrichments — Mathew's brief
 	// explicitly calls for (a) supporting headline/copy around the embedded
@@ -542,7 +564,7 @@ async function buildToolContent(opts: {
 		[copy, brandFidelity] = await Promise.all([
 			timeGenerationStep("supporting_copy_completed", () =>
 				requestSupportingCopy({
-					projectName: opts.projectName,
+					projectName: initialResolvedProjectName,
 					prompt: opts.prompt,
 					brandSnapshot: opts.brandSnapshot,
 				})
@@ -585,16 +607,21 @@ async function buildToolContent(opts: {
 	}
 
 	const repaired = await maybeRepairBrandPresentation({
-		projectName: opts.projectName,
+		projectName: initialResolvedProjectName,
 		brandSnapshot: opts.brandSnapshot,
 		sanitized: initialSanitized,
 		requestStartedAt: opts.requestStartedAt,
 		additionalReasons: fidelityRepairReasons,
 		reservedAdvisoryBudgetMs: advisoryRan ? 0 : ADVISORY_TIMEOUT_MS,
 	});
+	const resolvedProjectName = resolveProjectNameFromGeneratedHtml(
+		opts.projectName,
+		repaired.sanitized.html,
+		opts.needsAutoTitle
+	);
 	const enforced = await enforceBrandPresentation({
 		html: repaired.sanitized.html,
-		projectName: opts.projectName,
+		projectName: resolvedProjectName,
 		brandSnapshot: opts.brandSnapshot,
 	});
 	sanitized = enforced.sanitized;
@@ -700,7 +727,7 @@ async function buildToolContent(opts: {
 	return {
 		status: "success",
 		content: {
-			projectName: opts.projectName.trim() || "Untitled tool",
+			projectName: resolvedProjectName,
 			prompt: opts.prompt,
 			siteUrl: null,
 			brandSnapshot: opts.brandSnapshot,
@@ -718,6 +745,16 @@ async function buildToolContent(opts: {
 			htmlAttempts,
 		},
 	};
+}
+
+function resolveProjectNameFromGeneratedHtml(
+	projectName: string,
+	html: string,
+	needsAutoTitle: boolean
+): string {
+	const explicitProjectName = projectName.trim();
+	if (!needsAutoTitle) return explicitProjectName || DEFAULT_TOOL_PROJECT_NAME;
+	return extractProjectNameFromHtmlTitle(html) ?? DEFAULT_TOOL_PROJECT_NAME;
 }
 
 /**
@@ -880,6 +917,7 @@ function shouldRequireExactLogoAsset(profile: BrandProfile): boolean {
 
 export async function requestToolHtml(opts: {
 	projectName: string;
+	needsAutoTitle?: boolean;
 	prompt: string;
 	brandSnapshot: GeneratedToolBrandSnapshot | null;
 	maxTokens: number;
@@ -918,6 +956,14 @@ export async function requestToolHtml(opts: {
 		"- If an inline logo asset is provided, render that asset instead of typing a substitute wordmark. If no logo asset is provided, use plain text brand-name treatment or omit the logo area entirely — never invent an icon, mascot, monogram, sparkle, silhouette, or abstract badge, and never fall back to a different historical brand palette.",
 		"- Use the provided primary/accent colors, font family names (assume standard web-safe fallbacks after the named font), and optional inline logo asset. Do not fabricate a different brand.",
 		"- Keep the whole document self-sufficient and safe: no forms that submit to external endpoints, no fetch()/XMLHttpRequest calls to external hosts.",
+		...(opts.needsAutoTitle
+			? [
+					"- No tool name was provided. Choose a concise, natural, human-sounding 3-6 word title that describes exactly what this branded tool does. Do not use generic names like 'Tool', 'Calculator', or 'Calculator App'. Put that exact title inside <title>...</title> in <head>.",
+				]
+			: [
+					"- Use the provided tool name verbatim inside <title>...</title> in <head>. Do not rename it, embellish it, or append a tagline.",
+				]),
+		`- Wrap all of your generated page content inside <body> in exactly one outer container that uses max-width: ${PAGE_OUTER_MAX_WIDTH}, margin: 0 auto, box-sizing: border-box, and horizontal padding: 0 ${PAGE_OUTER_HORIZONTAL_PADDING}. Do not add a second competing outer wrapper or extra left offset on top-level sections inside it; cards and inner sections may add internal padding only.`,
 		...(logicPrompt
 			? [
 				"- This tool has approved server-side logic. Call ONLY the provided same-origin invoke endpoint for computation; do not duplicate that business logic client-side.",
@@ -939,7 +985,9 @@ export async function requestToolHtml(opts: {
 	].join("\n");
 
 	const userContent = [
-		`Tool name: ${opts.projectName || "Untitled tool"}`,
+		opts.needsAutoTitle
+			? "Tool name: (not provided — generate it from the tool's purpose and brand per the instructions above)"
+			: `Tool name: ${opts.projectName || DEFAULT_TOOL_PROJECT_NAME}`,
 		...(isRevision
 			? [
 					"",
@@ -1432,6 +1480,7 @@ async function maybeRepairBrandPresentation(opts: {
 	try {
 		const repairedRawHtml = await requestToolHtml({
 			projectName: opts.projectName,
+			needsAutoTitle: false,
 			prompt: buildBrandRepairPrompt(opts.brandSnapshot, reasons),
 			brandSnapshot: opts.brandSnapshot,
 			maxTokens: HTML_GENERATION_MAX_TOKENS,

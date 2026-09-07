@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { enforceBrandPresentation } from "../../src/lib/generation/brand-enforcement";
+import {
+	enforceBrandPresentation,
+	extractProjectNameFromHtmlTitle,
+} from "../../src/lib/generation/brand-enforcement";
 import type { GeneratedToolBrandSnapshot } from "../../src/lib/generation/store.types";
 
 function extractEnforcementStyle(html: string): string {
@@ -64,6 +67,35 @@ function makeBrandSnapshot(
 }
 
 describe("enforceBrandPresentation", () => {
+	it("extracts a trimmed, decoded project title from generated HTML", () => {
+		expect(
+			extractProjectNameFromHtmlTitle(
+				"<!doctype html><html><head><title>  Google&nbsp;Ads &amp; Budget Planner  </title></head><body></body></html>"
+			)
+		).toBe("Google Ads & Budget Planner");
+	});
+
+	it("ignores missing, malformed, overlong, or fallback HTML titles", () => {
+		expect(
+			extractProjectNameFromHtmlTitle(
+				"<!doctype html><html><head><title>Untitled tool</title></head><body></body></html>"
+			)
+		).toBeNull();
+		expect(
+			extractProjectNameFromHtmlTitle(
+				"<!doctype html><html><head><title>This auto-generated title is intentionally much, much, much, much too long to accept safely</title></head><body></body></html>"
+			)
+		).toBeNull();
+		expect(
+			extractProjectNameFromHtmlTitle(
+				"<!doctype html><html><head><title>Broken<body></body></html>"
+			)
+		).toBeNull();
+		expect(
+			extractProjectNameFromHtmlTitle("<!doctype html><html><head></head><body></body></html>")
+		).toBeNull();
+	});
+
 	it("always emits a dedicated exact-asset lockup surface rule even when model css conflicts", async () => {
 		const html = [
 			"<!doctype html>",
@@ -179,6 +211,9 @@ describe("enforceBrandPresentation", () => {
 		expect(surfaceColor).toBe("#FFFFFF");
 		expect(titleColor).toBe("#000000");
 		expect(contrastRatio(titleColor!, surfaceColor!)).toBeGreaterThanOrEqual(4.5);
+		expect(style).toContain(".ls-brand-verified-header__inner {");
+		expect(style).toContain("width: min(100%, 72rem);");
+		expect(style).toContain("padding: 0 1.5rem;");
 		expect(verifiedCopyBlock).toContain("padding: 0.5rem 0.75rem;");
 		expect(verifiedCopyBlock).toContain("border-radius: 0.75rem;");
 	});

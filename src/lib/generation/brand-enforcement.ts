@@ -12,6 +12,10 @@ const SYSTEM_SANS_STACK =
 const SYSTEM_SERIF_STACK = '"Iowan Old Style", Georgia, Cambria, "Times New Roman", Times, serif';
 const BRAND_LOCKUP_SURFACE = "#FFFFFF";
 const MIN_LOCKUP_TEXT_CONTRAST = 4.5;
+export const DEFAULT_TOOL_PROJECT_NAME = "Untitled tool";
+export const PAGE_OUTER_MAX_WIDTH = "72rem";
+export const PAGE_OUTER_HORIZONTAL_PADDING = "1.5rem";
+const MAX_EXTRACTED_PROJECT_NAME_CHARS = 80;
 const BRAND_ENFORCEMENT_STYLE_TAG = "data-letterstory-brand-enforcement";
 const CTA_ORDER_STYLE_TAG = "data-letterstory-cta-order-style";
 const CTA_ORDER_SCRIPT_TAG = "data-letterstory-cta-order";
@@ -151,6 +155,21 @@ function extractTextContent(htmlFragment: string): string {
 
 function normalizeHeadingText(value: string): string {
 	return value.normalize("NFKC").replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+export function extractProjectNameFromHtmlTitle(html: string): string | null {
+	const titleMatch = html.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i);
+	if (!titleMatch) return null;
+
+	const candidate = extractTextContent(titleMatch[1] ?? "")
+		.normalize("NFKC")
+		.replace(/\s+/g, " ")
+		.trim();
+	if (!candidate || candidate.length > MAX_EXTRACTED_PROJECT_NAME_CHARS) return null;
+	if (normalizeHeadingText(candidate) === normalizeHeadingText(DEFAULT_TOOL_PROJECT_NAME)) {
+		return null;
+	}
+	return candidate;
 }
 
 function normalizeFontFamilyKey(family: string): string {
@@ -451,7 +470,7 @@ function buildDeterministicHeaderHtml(
 	projectName: string,
 	brandSnapshot: GeneratedToolBrandSnapshot
 ): string {
-	const safeProjectName = escapeHtml(projectName.trim() || "Untitled tool");
+	const safeProjectName = escapeHtml(projectName.trim() || DEFAULT_TOOL_PROJECT_NAME);
 	const safeBrandName = escapeHtml(brandSnapshot.brandName ?? "Brand");
 	const logoMarkup =
 		brandSnapshot.logoPolicy === "exact_asset" && brandSnapshot.logoDataUri
@@ -460,11 +479,13 @@ function buildDeterministicHeaderHtml(
 
 	return [
 		'<header class="ls-brand-verified-header">',
-		`  <div class="ls-brand-lockup ls-brand-lockup--${brandSnapshot.logoPolicy ?? "text_only"}">`,
-		`    ${logoMarkup}`,
-		"  </div>",
-		'  <div class="ls-brand-verified-copy">',
-		`    <h1>${safeProjectName}</h1>`,
+		'  <div class="ls-brand-verified-header__inner">',
+		`    <div class="ls-brand-lockup ls-brand-lockup--${brandSnapshot.logoPolicy ?? "text_only"}">`,
+		`      ${logoMarkup}`,
+		"    </div>",
+		'    <div class="ls-brand-verified-copy">',
+		`      <h1>${safeProjectName}</h1>`,
+		"    </div>",
 		"  </div>",
 		"</header>",
 	].join("\n");
@@ -603,11 +624,18 @@ function buildEnforcementCss(
 		`  font-family: ${plan.heading.stack} !important;`,
 		"}",
 		".ls-brand-verified-header {",
+		"  width: 100%;",
+		"  margin-bottom: 1.5rem;",
+		"}",
+		".ls-brand-verified-header__inner {",
+		"  box-sizing: border-box;",
+		`  width: min(100%, ${PAGE_OUTER_MAX_WIDTH});`,
+		"  margin: 0 auto;",
+		`  padding: 0 ${PAGE_OUTER_HORIZONTAL_PADDING};`,
 		"  display: flex;",
 		"  flex-wrap: wrap;",
 		"  align-items: center;",
 		"  gap: 1rem;",
-		"  margin-bottom: 1.5rem;",
 		"}",
 		".ls-brand-lockup {",
 		"  display: inline-flex;",
